@@ -1,0 +1,40 @@
+# Local working files (never commit)
+*.token
+*.jwt
+*-secret.yaml
+*-secret.json
+*.env
+*.env.local
+secrets/
+private/
+
+# JWT and credential files - there should NEVER be a real token in this repo
+*-jwt.txt
+self-host-token*.txt
+fls-token*.txt
+
+# Editor / OS clutter
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local logs (never commit)
+*.log
+logs/
+
+# Backups
+*.bak
+*.bak.*
+*-backup-*
+
+# Local notes (use docs/ for shared content)
+SCRATCH.md
+TODO-local.md
+
+# Generated kubectl dumps with secrets baked in
+*bg-cr*.yaml
+*full-namespace*.yaml
+!references/sample-*.yaml

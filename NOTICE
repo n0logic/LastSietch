@@ -1,0 +1,45 @@
+Last Sietch
+Copyright (c) 2026 n0logic
+
+LICENSING
+---------
+
+Code, scripts, and configuration in this repository are licensed under the MIT
+License; see LICENSE.
+
+Documentation (the docs/ and references/ trees) is licensed under Creative
+Commons Attribution 4.0 International (CC-BY-4.0);
+see https://creativecommons.org/licenses/by/4.0/.
+
+TRADEMARKS AND THIRD-PARTY RIGHTS
+---------------------------------
+
+Dune: Awakening and related trademarks are the property of Funcom Oslo AS and
+Legendary Entertainment. The Dune name and associated intellectual property are
+the property of the Herbert Limited Partnership and its licensees.
+
+This project is an independent community effort. It is not affiliated with,
+endorsed by, or sponsored by Funcom, Legendary Entertainment, or any Dune
+rights holder.
+
+WHAT IS NOT REDISTRIBUTED HERE
+------------------------------
+
+No proprietary Funcom code, container images, server binaries, stored
+procedures, game assets, textures, meshes, icons, or other distributable
+assets are included in this repository.
+
+Where our tooling needs game-derived data (for example item icons or meshes
+used by the player portal), this repository ships the extraction script only.
+You run it against your own licensed installation of the game, and the output
+stays on your own machine. Nothing derived from Funcom's files is committed
+here or served from this repository.
+
+Configuration keys, schema notes, and behavioural documentation in this
+repository describe observed behaviour of software we operate under licence.
+They are factual observations recorded to help other server operators, not a
+reproduction of Funcom's source material.
+
+If you are a rights holder and believe something in this repository crosses a
+line, open an issue or contact us and we will remove it promptly. We would
+rather over-correct than argue.

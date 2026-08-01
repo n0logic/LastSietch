@@ -15,6 +15,20 @@ Thanks for considering a contribution. This project tracks a moving target - Fun
 - **JWT tokens, secrets, FLS keys, or any other credentials** - the `.gitignore` blocks most filenames but please review your diff manually
 - **Redistributed Funcom assets** - container images, binaries, copyrighted text from their docs. Quote sparingly with attribution; never bundle.
 - **Player data / database dumps** - if you have a backup containing player saves, scrub it before sharing
+- **Game-derived assets** - meshes, textures, icons, or anything else extracted from the game's package files. Tooling that generates these locally from someone's own installation is welcome; its output is not.
+- **Other communities' content** - Discord logs, forum posts, or wiki text scraped from elsewhere. Link to it instead.
+
+## Deployment-specific values
+
+Nothing in this repository should contain a real hostname, IP, namespace, snowflake, or credential from anyone's actual deployment, including ours. The convention is a placeholder that documents its own shape, with an environment variable override where a script needs one:
+
+```bash
+NS="${NS:-funcom-seabass-sh-<your-hostid>-<random>}"
+```
+
+So a reader can see what the value looks like, an operator can export it, and nobody has to guess. Angle-bracket placeholders in prose and command examples, same idea.
+
+CI enforces this. Every push and pull request runs a secret scan plus two gates: one rejecting file classes that must never be committed, and one rejecting known deployment-specific identifiers. If a gate fires on something legitimate, say so in the PR rather than working around it; a check that flags correct work is a bug in the check.
 
 ## Workflow
 

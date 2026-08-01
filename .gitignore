@@ -38,3 +38,55 @@ TODO-local.md
 *bg-cr*.yaml
 *full-namespace*.yaml
 !references/sample-*.yaml
+
+# ---------------------------------------------------------------------------
+# NEVER-SHIP CLASSES
+#
+# Nothing derived from Funcom's shipped files belongs in this repository, even
+# when it is convenient. Tooling that GENERATES these locally is welcome; the
+# output of that tooling is not. See NOTICE.
+# ---------------------------------------------------------------------------
+
+# Game-derived art and assets: regenerate locally, never commit
+*.pak
+*.utoc
+*.ucas
+*.uasset
+*.umap
+*.glb
+*.gltf
+assets/extracted/
+static/glb/
+static/textures/
+static/img/dune-icons/
+**/icons-extracted/
+
+# Funcom server-side source material
+**/funcom-procs-reference/
+**/funcom-procs/
+*_all.sql
+
+# Packet captures and protocol dumps
+*.pcap
+*.pcapng
+
+# Scraped third-party community content
+**/DISCORD-INTEL-*
+**/discord-export/
+**/community-scrape/
+
+# Local operator state: yours, not ours, and never anyone else's
+mirror.sqlite
+*.sqlite
+*.sqlite3
+*.db
+telemetry.db
+support.sqlite
+
+# Local deployment config produced from the templates
+lastsietch.conf
+deploy.env
+inventory.local.*
+
+# Local-only preflight name patterns (contains real handles)
+.preflight-local

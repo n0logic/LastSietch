@@ -18,7 +18,7 @@ number-only ("Imperial Testing Station 2"); the hazard variant "(Fire/Radiation)
 is a later the web host follow-up (the export already captured the tags column).
 
   python3 build-markers-snapshot.py \
-      --export ../docs/dune-research/markers-export-2026-06-11.json \
+      --export ../our internal design notes \
       --data   ../admin-backend/data
 """
 import argparse
@@ -168,7 +168,7 @@ def rebuild_snapshot(path: Path, map_id: int, export_rows: list, name_idx: dict)
 def main() -> int:
     ap = argparse.ArgumentParser()
     here = Path(__file__).resolve().parent
-    ap.add_argument("--export", default=str(here.parent / "docs/dune-research/markers-export-2026-06-11.json"))
+    ap.add_argument("--export", default=str(here.parent / "our internal design notes"))
     ap.add_argument("--data", default=str(here.parent / "admin-backend/data"))
     ap.add_argument("--rebuild", action="store_true",
                     help="rebuild the FULL marker set from the export (drops stale/moved "

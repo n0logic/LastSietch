@@ -15,7 +15,7 @@ by PlayerId, and dispatches a disconnect to the partition holding the actor.
 
 Default mode: dry-run (prints envelope + Erlang, no kubectl). --send required
 to actually publish. This satisfies the "ship dry-run safe first" decision in
-docs/dune-research/MODERATION-AND-DRILLDOWN-DESIGN-2026-05-29.md section 2a.
+our internal design notes section 2a.
 
 Token resolution order (same as dune-service-broadcast.py):
   1. --token-file FILE (operator-staged at /etc/lastsietch/dune-command-auth-token, 0600)

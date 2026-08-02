@@ -5,7 +5,7 @@ Full-refresh of every account's flattened read models each cycle, written to the
 player_read_model table in the collector store. the web host pulls these (via the
 relay `read-models` action) into its local mirror.sqlite so portal/admin page
 loads read locally instead of crossing the internet to the game DB on each hit.
-See docs/dune-research/PHASE-1-MIRROR-CONTRACT-2026-06-05.md.
+
 
 Parity by construction: each section blob is produced by the SAME build()
 function the relay's dispatcher scripts use (dune-player-progress / -progression-

@@ -11,22 +11,22 @@
 #   4. bb-capture.sh diff pre-save post-save
 #   5. (optional, costs a recovery) bb-capture.sh pre-restore + restore + post-restore + diff
 #
-# Captures, scoped to player_id=19 (n0logic pawn) where relevant:
+# Captures, scoped to player_id=19 (a reference pawn) where relevant:
 #   - dune.base_backups (full table, only ~0 rows expected pre-save)
 #   - dune.base_backup_linked_actors (full table)
 #   - dune.items where template_id ILIKE 'BaseBackupTool%' OR stats::text ILIKE '%PlayerBaseBackup%'
-#   - dune.actors with owner_account_id = 2 (n0logic account) — to see actor list & state
+#   - dune.actors with owner_account_id = 2 (a reference account) — to see actor list & state
 #   - dune.actor_fgl_entities + fgl_entities components for owned actors
 #   - dune.buildings + building_instances totals for owned actors
 #   - dune.placeables totals for owned actors
 
 set -euo pipefail
 
-OUT_BASE="${HOME}/Source/Personal/House0fL0gic/docs/dune-research/base-backup-captures"
+OUT_BASE="${HOME}/Source/Personal/House0fL0gic/our internal design notes"
 mkdir -p "$OUT_BASE"
 
-PLAYER_ID=19          # n0logic pawn
-PLAYER_ACCOUNT=2      # n0logic account
+PLAYER_ID=19          # a reference pawn on our server; use your own
+PLAYER_ACCOUNT=2      # a reference account on our server; use your own
 
 cmd="${1:-}"
 
@@ -79,7 +79,7 @@ run_sql linked_actors "SELECT bbla.id AS backup_id, bbla.actor_id, a.class, a.ma
 # 3. All BaseBackupTool items + any item with PlayerBaseBackup in stats
 run_sql items_bb "SELECT id, inventory_id, template_id, stack_size, stats FROM dune.items WHERE template_id = 'BaseBackupTool' OR stats::text ILIKE '%PlayerBaseBackup%' ORDER BY id;"
 
-# 4. All actors owned by n0logic (id IS often what the building_id / placeables.id will match)
+# 4. All actors owned by that account (id IS often what the building_id / placeables.id will match)
 run_sql actors_owned "SELECT id, class, map, partition_id, dimension_index, properties, owner_account_id, serial FROM dune.actors WHERE owner_account_id = $PLAYER_ACCOUNT ORDER BY id;"
 
 # 5. FGL components on owned actors (chest contents, bench state, etc. live here)

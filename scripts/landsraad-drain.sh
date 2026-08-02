@@ -3,7 +3,7 @@
 # The in-game LISTEN-driven drainer (landsraad_process_task_progress, fired via
 # landsraad_notify_channel) stalled after the 2026-05-28 18:53 UTC battlegroup
 # restart, freezing per-house contribution at the sum-through-cursor value while
-# the WAL kept growing. See docs/dune-research/LANDSRAAD-CONTRIBUTION-DIAGNOSIS-2026-05-29.md.
+# the WAL kept growing
 #
 # This calls Funcom's OWN drainer proc on a timer so contributions reach the
 # ledger regardless of LISTEN health. Idempotent: the proc processes only WAL

@@ -2,7 +2,7 @@
 -- on OUR live build (2036754) before building the augment perfect-roll/swap tooling.
 --
 -- Confirms the augment jsonb shape RedBlink's repo relies on
--- (docs/dune-research/AUGMENT-PERFECT-ROLL-RE-2026-07-14.md) exists on OUR DB.
+-- (our internal design notes) exists on OUR DB.
 -- Every statement is a SELECT. No writes, no procs, no DDL. Safe to run on the
 -- change-frozen game box (still: read-only, no pod restart).
 --

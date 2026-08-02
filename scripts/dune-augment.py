@@ -4,7 +4,7 @@
 Phase 1: apply/replace augments on an EXISTING owned inventory item, with all
 StatRolls forced to 1.0 (perfect roll) at any chosen grade (1..5). This is the
 Last Sietch equivalent of RedBlink's `POST /augment-item`; mechanism + provenance
-in docs/dune-research/AUGMENT-PERFECT-ROLL-RE-2026-07-14.md.
+in our internal design notes
 
 Augments live in dune.items.stats jsonb under key `FAugmentedItemStats`:
   [[], {

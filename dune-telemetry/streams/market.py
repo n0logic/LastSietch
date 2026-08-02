@@ -5,7 +5,7 @@ Full-refresh of ALL active exchange listings each cycle into the market_listing
 table. the web host pulls these (via the relay `market-all` action) into its local
 mirror.sqlite and runs the substring search LOCALLY, so /portal/market browse
 stops crossing the internet to the game DB on each search.
-See docs/dune-research/PHASE-2-MIRROR-CONTRACT-2026-06-05.md.
+
 
 Parity by construction: the listing rows come from the SAME projection
 dune-market-control.fetch_all_listings() defines (matching the live

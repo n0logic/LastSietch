@@ -16,7 +16,7 @@ Three actions, two semantics:
                  carried pawn inventories. Writes BOTH CurrentDurability AND
                  DecayedMaxDurability up to the factory MaxDurability (wipes decay).
 
-See docs/dune-research/REPAIR-FEATURE-BUILD-CONTRACT-2026-06-29.md (Confirmed
+ (Confirmed
 durability model). Mirrors dune-storage-write.py / dune-market-sell.py.
 
 Correctness rules (non-negotiable):

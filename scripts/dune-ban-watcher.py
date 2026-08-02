@@ -16,7 +16,7 @@
 # expired). Quiet ticks emit nothing; keeps the log readable as a moderation
 # trail rather than a heartbeat.
 #
-# Design doc: docs/dune-research/MODERATION-AND-DRILLDOWN-DESIGN-2026-05-29.md
+#
 # section 2b (kick mechanism revised 2026-06-02 from RMQ -> iptables IP-drop;
 #).
 import json

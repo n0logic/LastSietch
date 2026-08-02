@@ -1,6 +1,6 @@
 {
  "journey_full_unlock_tags": {
-  "_comment": "journey_full_unlock grant tag buckets. Partition of natural Atreides completer n0logic (account 1644, 433 tags) from docs/dune-research/tag-gap-2026-06-10/tags-1644.json. EXCLUDES Faction.*.Tier* (7, align_faction/faction_rep own those) + Character.* (2). core=333 faction-neutral (always); faction.atreides=66 (gated target=Atreides, opt-in); faction.harkonnen=[] (snapshot not yet captured); exploration_poi=25 (opt-in, default off).",
+  "_comment": "journey_full_unlock grant tag buckets, partitioned from a naturally-completed Atreides character. EXCLUDES Faction.*.Tier* (align_faction and faction_rep own those) and Character.*. core = faction-neutral, always applied; faction.atreides = opt-in, gated on target faction; faction.harkonnen = empty until a snapshot is captured; exploration_poi = opt-in, default off.",
   "core": [
    "BigMoments.Base.Complete",
    "BigMoments.Base.Trigger",

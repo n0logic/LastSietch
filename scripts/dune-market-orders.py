@@ -18,7 +18,7 @@ page:
         BUY/SELL funding pattern), then relist debits it back -- net bank -= fee.
 
 Engine procs read live 2026-06-06; archived at
-docs/dune-research/funcom-procs-reference/functions/exchange/.
+our internal design notes
 
 Correctness rules (non-negotiable):
   * OWNERSHIP (STOP-SHIP): never trust the caller. The locked order's owner_id MUST

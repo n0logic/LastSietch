@@ -194,7 +194,7 @@ CREATE INDEX IF NOT EXISTS ix_transfer_events_fls ON transfer_events(fls_id);
 CREATE INDEX IF NOT EXISTS ix_transfer_events_aid ON transfer_events(account_id);
 
 -- ---- Read-model mirror (portal/admin local read layer; see
---      docs/dune-research/PHASE-1-MIRROR-CONTRACT-2026-06-05.md) ----
+--      our internal design notes) ----
 -- One row per account. Section blobs hold the EXACT relay payloads they replace
 -- so the web host read path is a drop-in. Denormalized scalars (online/lvl/
 -- intel/char_name/current_map) come from the global snapshot + roster calls.
@@ -224,7 +224,7 @@ CREATE TABLE IF NOT EXISTS sync_meta (
 );
 
 -- ---- Phase 2 mirror: storage + market (see
---      docs/dune-research/PHASE-2-MIRROR-CONTRACT-2026-06-05.md) ----
+--      our internal design notes) ----
 -- Per-account storage snapshot blob: one document feeding the container list,
 -- the per-container item drilldown (paginated locally), and the cross-container
 -- "find an item" search. Full-refresh by account_id each cycle.

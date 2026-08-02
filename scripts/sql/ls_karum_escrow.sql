@@ -1,7 +1,7 @@
 -- Karum escrow ledger. THE AUTHORITATIVE MARKER that distinguishes live player escrow in
 -- exchange inventory 610 from the ~368k market-bot orphan rows that share the exact same
 -- shape: an item row in 610 with no dune_exchange_orders row. See the Karum build contract
--- section 4 (docs/dune-research/v2-portal/KARUM-BUILD-CONTRACT-2026-07-27.md).
+-- section 4 (our internal design notes).
 --
 -- 🔴 NOBODY PURGES INVENTORY 610 WITHOUT EXCLUDING ROWS PRESENT HERE WITH state = 'held'.
 --    The obvious cleanup query for the bot's litter is the same query that selects live

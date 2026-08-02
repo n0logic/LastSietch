@@ -6,7 +6,7 @@ player_storage table. the web host pulls these (via the relay `storage-models`
 action) into its local mirror.sqlite so the portal storage pages (container
 list, per-container item drilldown, cross-container "find an item" search) read
 locally instead of crossing the internet to the game DB on each hit.
-See docs/dune-research/PHASE-2-MIRROR-CONTRACT-2026-06-05.md.
+
 
 Parity by construction: containers + search_rows come from the SAME build()
 functions the relay's dispatcher scripts use (dune-containers / -container-search),

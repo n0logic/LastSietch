@@ -37,7 +37,7 @@ CREATE INDEX IF NOT EXISTS ls_progression_grants_account_idx
 
 -- =============================================================================
 -- G11 char_xp v2 dependency — character-level XP curve + xpToLevel function.
--- See docs/dune-research/CHAR-XP-GRANT-SPEC.md and our internal notes
+-- and our internal notes
 -- memory. Transcribed from icehunter dune-admin/db.go:1518-1538 (cumulativeXPByLevel)
 -- which itself comes from Funcom's SkillXPPerLevel.json. 201 entries (L0..L200);
 -- L200 cumulative = 344,440 (the in-game cap).
@@ -376,7 +376,7 @@ ALTER FUNCTION dune.ls_intel_at_level(integer) OWNER TO dune;
 -- without permission errors. The G21 bb_clone grant uses
 -- nextval('dune.ls_fgl_entity_id_seq') once per cloned actor_fgl_entities
 -- row (i.e. per FGL slot — actors can carry multiple slots like 'Actor' and
--- 'ContainerInventory'). See docs/dune-research/ITEM-G21-BUILD-SPEC.md.
+-- 'ContainerInventory')
 -- ============================================================================
 CREATE SEQUENCE IF NOT EXISTS dune.ls_fgl_entity_id_seq
   START WITH 5000000000000000000
@@ -393,7 +393,7 @@ COMMENT ON SEQUENCE dune.ls_fgl_entity_id_seq IS
 -- G22 import_solido_to_basebackup dependency — per-class default templates for
 -- synthesizing placeable actors from Solido JSON. Each row tells G22 how to
 -- construct a fresh actor of that class without an existing source row to
--- clone. See docs/dune-research/ITEM-G22-BUILD-SPEC.md sections 4 + 5.
+-- clone sections 4 + 5.
 --
 -- Per OWNER MUST be dune so Funcom's
 -- pre-update pg_dump (run as the dune role) can dump it. A ls_* table owned
@@ -449,7 +449,7 @@ ALTER TABLE dune.ls_solido_class_defaults
   ADD COLUMN IF NOT EXISTS is_active                BOOLEAN NOT NULL DEFAULT true;
 
 COMMENT ON TABLE dune.ls_solido_class_defaults IS
-  'G22 import_solido_to_basebackup: per-class default templates for synthesizing placeable actors from Solido JSON. See docs/dune-research/ITEM-G22-BUILD-SPEC.md.';
+  'G22 import_solido_to_basebackup: per-class default templates for synthesizing placeable actors from Solido JSON';
 
 -- v1 seed. 22 rows: 2 reserved kinds (Totem + Building) + 20 placeable classes.
 -- default_components JSONB + component_name_hash are STUB placeholders for
@@ -718,7 +718,7 @@ UPDATE dune.ls_solido_class_defaults
 
 -- =============================================================================
 -- Moderation trio (Phase C, 2026-05-29): kick/ban/unban audit + ban registry.
--- See docs/dune-research/MODERATION-AND-DRILLDOWN-DESIGN-2026-05-29.md section 2b.
+-- section 2b.
 --
 -- Two tables, both OWNER dune per so
 -- Funcom's pre-update pg_dump (run as the dune role) can dump them. A ls_*-
@@ -845,7 +845,7 @@ CREATE INDEX IF NOT EXISTS player_ips_ip_idx
 
 -- =============================================================================
 -- W6 Spice-spawn toggle (VC2 P2, 2026-05-30): per-field-type append-only log of
--- is_spawning_active flips. See docs/dune-research/COMMUNITY-WINS-IMPLEMENTATION-
+-- is_spawning_active flips
 -- PATH-2026-05-30.md "W6: Spice-spawn toggle". v1 = boolean only (Decision A).
 --
 -- The toggle itself UPDATEs dune.spicefield_types.is_spawning_active; this table

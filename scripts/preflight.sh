@@ -138,7 +138,13 @@ declare -a CONTENT=(
   # reader's: our incident dates, our hosting provider, our private notes, our
   # ticket numbers. It makes a public repo read as somebody's leaked runbook.
   '(feedback|reference|project)_[a-z]+_[a-z_]{4,}:private knowledge-base reference'
-  '\[\[[A-Za-z]:wiki-style link to a private note'
+  # Wiki links to our private notes look like [[feedback_dune_thing]] or
+  # [[reference-dune-thing]]: always lowercase and always containing an
+  # underscore or hyphen. Requiring that separator keeps this off TOML
+  # array-of-tables headers such as [[allowlists]], and off bash [[ ]] tests,
+  # which contain spaces. A blanket \[\[ pattern once ate every bash test
+  # expression in a scrub and left "if; then" behind, so this one stays narrow.
+  '\[\[[a-z][a-z0-9]*[_-][a-z0-9_-]*\]\]:wiki-style link to a private note'
   'ops/maint-[0-9]{4}-[0-9]{2}:reference to an unpublished runbook'
   '(nobody was watching|a human noticed|hit us twice|bit us twice):incident narrative, generalise it'
 )

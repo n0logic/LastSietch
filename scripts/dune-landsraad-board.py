@@ -11,7 +11,7 @@ serve to everyone (the admin-backend wraps this in a 30s ttl_cache). The only
 per-player layer (a player's voting power + per-tile contribution) is served
 separately by the existing per-account landsraad-rewards path, NOT here.
 
-Data model (verified live, term 4 — see docs/dune-research/
+Data model (verified live, term 4 —
 LANDSRAAD-BOARD-SPEC-2026-06-12.md):
   dune.landsraad_decree_term  — term header (term_id, factions, start/end, test)
   dune.landsraad_tasks        — the 25 tiles (board_index 0..24, house_name,

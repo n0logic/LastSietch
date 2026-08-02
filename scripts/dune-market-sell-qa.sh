@@ -4,7 +4,7 @@
 #
 # Pre-staged test data (verified against live DB 2026-06-05):
 #   VALID-PATH seller: ctrl=569 acct=253 OFFLINE  bank=10620659
-#   ONLINE-GATE :      ctrl=3041 acct=1644 n0logic ONLINE
+#   ONLINE-GATE :      ctrl=3041 acct=1644 a reference account ONLINE
 #   item for valid+negatives: 2032950  FremenComponent2  stack=23  (owned by ctrl=569)
 #   item for over-count:      2032838  GreatHouseComponent2  stack=3  (owned by ctrl=569)
 #   item for not_owner:       203380378  ScrapMetal  (owned by acct=1644, NOT ctrl=569)
@@ -138,8 +138,8 @@ log "ctrl=${ONLINE_CTRL} status: ${ONLINE_STATUS}"
 [ "$VALID_STATUS" = "Offline" ] && pass "valid-path seller (ctrl=${VALID_CTRL}) is Offline" \
     || fail "valid-path seller is ${VALID_STATUS} -- valid-path test may fail with player_online"
 
-[ "$ONLINE_STATUS" = "Online" ] && pass "n0logic (ctrl=${ONLINE_CTRL}) is Online (player_online gate)" \
-    || log "WARNING: n0logic is ${ONLINE_STATUS}; player_online gate test may not fire as expected"
+[ "$ONLINE_STATUS" = "Online" ] && pass "a reference account (ctrl=${ONLINE_CTRL}) is Online (player_online gate)" \
+    || log "WARNING: a reference account is ${ONLINE_STATUS}; player_online gate test may not fire as expected"
 
 LIVE_STACK=$(dq "SELECT stack_size FROM dune.items WHERE id=${VALID_ITEM}::bigint;")
 log "item ${VALID_ITEM} live stack_size: ${LIVE_STACK}"
@@ -251,7 +251,7 @@ check_fee 1000000 7 80140 "QA: (8000000+50)//100+140=80140"
 header "STEP 5: Negatives (TEST 2)"
 
 neg_snapshot() {
-    # Snapshot just the counts + n0logic's bank to check for mutation after each negative
+    # Snapshot just the counts + a reference account's bank to check for mutation after each negative
     local oc sc bk
     oc=$(dq "SELECT COUNT(*)::int FROM dune.dune_exchange_orders;")
     sc=$(dq "SELECT COUNT(*)::int FROM dune.dune_exchange_sell_orders;")
@@ -271,14 +271,14 @@ assert_neg_no_mutation() {
     [ "$ok" = "1" ] && pass "neg [${label}]: no mutation"
 }
 
-# --- Negative 1: player_online (n0logic is ONLINE) ---
-# Use n0logic's own item so owned=True; only player_online fires
-# Item 203380378 (ScrapMetal) is in n0logic's container.
+# --- Negative 1: player_online (a reference account is ONLINE) ---
+# Use a reference account's own item so owned=True; only player_online fires
+# Item 203380378 (ScrapMetal) is in a reference account's container.
 log "player_online test: seller=ctrl=${ONLINE_CTRL} online_status=${ONLINE_STATUS}"
 PO_OUT=$(run_dry "$NOT_OWNED_ITEM" 1 "$ONLINE_CTRL" 1000 1)
 PO_PF=$(jpreflight "$PO_OUT")
 assert_preflight_has "player_online" "player_online" "$PO_PF"
-# n0logic owns NOT_OWNED_ITEM (it's ScrapMetal from n0logic's container)
+# a reference account owns NOT_OWNED_ITEM (it's ScrapMetal from a reference account's container)
 # so owned should be True and not_owner should NOT fire
 if echo "$PO_PF" | grep -qw "not_owner"; then
     fail "player_online: unexpectedly got not_owner too (check item ownership)"
@@ -287,7 +287,7 @@ else
 fi
 assert_neg_no_mutation "player_online"
 
-# --- Negative 2: not_owner (ctrl=569 tries to list n0logic's ScrapMetal) ---
+# --- Negative 2: not_owner (ctrl=569 tries to list a reference account's ScrapMetal) ---
 log "not_owner test: seller=ctrl=${VALID_CTRL} item=${NOT_OWNED_ITEM} (acct=1644 owns it)"
 NO_OUT=$(run_dry "$NOT_OWNED_ITEM" 1 "$VALID_CTRL" 1000 1)
 NO_PF=$(jpreflight "$NO_OUT")

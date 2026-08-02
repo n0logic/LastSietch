@@ -1,0 +1,16 @@
+[Unit]
+Description=Last Sietch Dune Telemetry Logger
+After=network.target k3s.service
+Wants=k3s.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/lastsietch-telemetry
+EnvironmentFile=/opt/lastsietch-telemetry/telemetry.env
+ExecStart=/opt/lastsietch-telemetry/run-telemetry.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+[Unit]
+Description=Last Sietch Funcom update orchestrator (one-shot window)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/dune-update-auto/dune-update-orchestrator.sh
+TimeoutStartSec=infinity

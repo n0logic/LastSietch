@@ -1,0 +1,15 @@
+[Unit]
+Description=Last Sietch Relay API
+After=network.target pve-cluster.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/lastsietch-relay
+EnvironmentFile=/opt/lastsietch-relay/.env
+ExecStart=/opt/lastsietch-relay/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8077
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Fire the Last Sietch update orchestrator before the 2026-07-23 07:00 UTC Funcom 1.4.10.4 window
+
+[Timer]
+OnCalendar=2026-07-23 06:15:00 UTC
+Persistent=false
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

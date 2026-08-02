@@ -1,0 +1,10 @@
+[Unit]
+Description=Dune game DB + config backup timer (every 6h: 02:30/08:30/14:30/20:30 UTC; 02:30 lands before the 03:00 restic sweep)
+
+[Timer]
+OnCalendar=*-*-* 02,08,14,20:30:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

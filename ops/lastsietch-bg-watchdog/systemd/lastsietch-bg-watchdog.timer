@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the Last Sietch Dune BattleGroup auto-recovery watchdog every 60s
+Documentation=file:/opt/lastsietch-bg-watchdog/README.md
+
+[Timer]
+# Start soon after boot: the failure this guards against (BattleGroup comes back stop=true)
+# happens precisely at boot, so we want detection within ~2-3 min of the host coming up.
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=lastsietch-bg-watchdog.service
+
+[Install]
+WantedBy=timers.target

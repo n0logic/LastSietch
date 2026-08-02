@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Dune game DB + config backup (pull from <game-host> to the web host)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/lastsietch-admin-tools/dune-db-backup.sh
+# Read-only against the game (pg_dump + kubectl get). Output to /opt/backups/dune.
+Nice=10
+IOSchedulingClass=idle

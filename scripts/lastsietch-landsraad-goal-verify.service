@@ -1,0 +1,7 @@
+[Unit]
+Description=Verify Landsraad weekly house goal dropped to 20000 at the term-4 rollover
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/landsraad-goal-verify-run.sh

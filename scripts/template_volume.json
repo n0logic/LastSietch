@@ -1,0 +1,10 @@
+{
+  "__meta__": {
+    "purpose": "Pak-derived per-unit volume map {template_id: volume} for the Storage MOVE volume gate (dune-storage-write.py). Deployed beside the writer on lastsietch-dune (/root/template_volume.json, 0640).",
+    "contract": "docs/dune-research/v2-portal/STORAGE-MODULE-BUILD-CONTRACT-2026-07-07.md section 5",
+    "resolution_order": "volume_override (DB, authoritative) -> 0 for currency/zero-vol -> this VMAP -> UNKNOWN (allow move, audit 'volume_unverified', never a hard block)",
+    "refresh": "Re-extract from the game paks on EVERY Funcom content update. A missing/stale entry is fail-open (UNKNOWN), so the gate never wrongly blocks the player's own item; it only stops relying on the VMAP lower bound.",
+    "note": "Keys prefixed with __ are metadata and are never matched as template ids. Populate real per-unit volumes from the pak VMAP; until then every non-override, non-currency template resolves UNKNOWN."
+  },
+  "SolarisCoin": 0
+}

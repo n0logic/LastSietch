@@ -20,9 +20,9 @@ We had to work it out to run our own community. A player asked whether we shared
 | [docs/14-known-funcom-issues.md](docs/14-known-funcom-issues.md) | Symptoms and detection for problems we have hit, so you can identify them in minutes instead of an evening |
 | [docs/15-control-plane-architecture.md](docs/15-control-plane-architecture.md) | How a web app safely drives a live game server it must never touch directly. The one idea here most worth copying |
 | [references/](references/) | Canonical item ids, community-sourced field notes |
-| [scripts/](scripts/) | `dq.sh` database access, presence guard, pre-window readiness, backups, schema ownership check, memory limits, config audit and apply, the forced-command dispatcher |
+| [scripts/](scripts/) | The whole on-host toolkit: `dq.sh` database access, the forced-command dispatcher, and the 54 action scripts it routes to (grants, bans, storage, guilds, market, bases, blueprints, telemetry feeds), plus presence guard, pre-window readiness, backups, schema ownership check, memory limits |
 | [ops/](ops/) | Battlegroup watchdog (a stopped battlegroup never recovers itself), update orchestration and hotfix watching |
-| [relay/](relay/) | The Dune-only relay, 106 routes. Reference implementation: see its README for what does and does not work standalone |
+| [relay/](relay/) | The Dune-only relay, 106 routes. The web-tier side of the control plane |
 | [dune-telemetry/](dune-telemetry/) | Presence, world events, combat, market and progression collection. Standalone and usable today |
 
 ## Tested against
@@ -47,7 +47,7 @@ versions differ from these, expect drift, and read before you run.
 This repository is being expanded from a private monorepo, in stages, with each stage scrubbed of deployment-specific values before it lands. Rough order:
 
 1. ~~**Operations.**~~ Landed: see `docs/12` through `docs/14`, `scripts/`, and `ops/`.
-2. **Player portal.** A player-facing web portal: character and inventory views, CHOAM market browse and sell, storage management, coordinate-accurate Deep Desert and Hagga maps from your own database, guild directory, Landsraad board, and a 3D base blueprint viewer. This is the piece nothing else in the ecosystem currently offers. The roughly 54 action scripts that the relay and dispatcher route to land with it.
+2. **Player portal.** A player-facing web portal: character and inventory views, CHOAM market browse and sell, storage management, coordinate-accurate Deep Desert and Hagga maps from your own database, guild directory, Landsraad board, and a 3D base blueprint viewer. This is the piece nothing else in the ecosystem currently offers. The control plane it drives is already here; what is missing is the front end.
 3. ~~**Telemetry.**~~ Landed: see `dune-telemetry/`. **Discord** support bot still to come.
 
 No dates. This is volunteer work done around running an actual server, and a half-working portal helps nobody.

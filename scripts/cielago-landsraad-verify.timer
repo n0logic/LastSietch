@@ -1,0 +1,11 @@
+[Unit]
+Description=One-shot: post Landsraad goal verdict after the 2026-06-09 rollover
+
+[Timer]
+# Fire 10 min after the lastsietch-dune local check, ~75 min after the ~04:55 UTC rollover.
+OnCalendar=2026-06-09 06:10:00 UTC
+Persistent=true
+RemainAfterElapse=false
+
+[Install]
+WantedBy=timers.target

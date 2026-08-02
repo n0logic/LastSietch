@@ -1,0 +1,8 @@
+[Unit]
+Description=Last Sietch Landsraad WAL drain stopgap (native LISTEN drainer stalled 2026-05-28)
+Documentation=file:///root/landsraad-drain.sh
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/landsraad-drain.sh

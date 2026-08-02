@@ -103,19 +103,21 @@ the vocabulary.
 
 | | |
 |---|---|
-| `relay/` | The Dune-only relay, 106 routes. **Reference implementation** |
-| `scripts/dune-relay-dispatch.sh` | The forced-command dispatcher. **Reference implementation** |
-| `dune-telemetry/` | Standalone. Reads the game database directly, read-only. Usable today |
-| `scripts/dq.sh` | The database access wrapper everything else uses. Usable today |
+| `relay/` | The Dune-only relay, 106 routes |
+| `scripts/dune-relay-dispatch.sh` | The forced-command dispatcher |
+| `scripts/dune-*.{sh,py}` | The action scripts the dispatcher routes to, all 54 of them |
+| `scripts/dq.sh` | The database access wrapper the action scripts use |
+| `dune-telemetry/` | Reads the game database directly, read-only, independent of all the above |
 
-**Read this before trying to run the relay or dispatcher.** They route to
-around 54 individual action scripts that have not been published yet: those
-land with the player portal, since that is what most of them serve. What is
-here now is the shape, the auth model, the forced-command setup, and the
-allowlist pattern, which is the part worth copying. Treat them as a worked
-example to build your own against, not as a drop-in service.
+The chain is complete: every layer from the API key down to psql is here.
 
-Telemetry has no such dependency and runs on its own.
+What is **not** here is the web front end that sits on top. That is the player
+portal, and it lands separately. You can drive this control plane from your own
+interface, or from curl, in the meantime.
+
+A caution worth repeating from `docs/13`: many of these action scripts write to
+a live game database. Several are gated on the target player being offline for
+good reasons. Read a script before you wire it to a button.
 
 ## Setting up the forced command
 

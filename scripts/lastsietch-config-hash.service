@@ -1,0 +1,7 @@
+[Unit]
+Description=Config-drift hash watch — sha256 the pinned pod's INI/cvar files vs baseline
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/dune-config-hash.py

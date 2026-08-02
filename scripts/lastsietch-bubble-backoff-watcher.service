@@ -1,0 +1,10 @@
+[Unit]
+Description=Last Sietch Dune bubble-map backoff reaper — delete sg-cb-* pods stuck in CrashLoopBackOff so the operator recreates them with fresh backoff
+Documentation=file:///opt/lastsietch-bubble-backoff-watcher/watcher.sh
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lastsietch-bubble-backoff-watcher/watcher.sh
+User=root

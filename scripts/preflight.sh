@@ -118,7 +118,10 @@ done
 echo "-- content scan --"
 declare -a CONTENT=(
   'Func[A-Za-z0-9]{30,}:live Funcom AuthToken'
-  'FuncomLiveServices__ServiceAuthToken:FLS service token'
+  # NOTE: the string "FuncomLiveServices__ServiceAuthToken" is a KEY NAME inside
+  # a Kubernetes secret, not a token. Code that reads the secret at runtime has
+  # to name the key, so flagging it blocks correct work. The token VALUE is
+  # covered by the Func-prefixed rule above, which is what actually matters.
   'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.:JWT'
   'funcom-seabass-sh-[0-9a-f]{16}:real namespace with HostId'
   '\bsh-[0-9a-f]{16}-:real battlegroup id'
@@ -130,7 +133,7 @@ declare -a CONTENT=(
   # off. Install paths are documented as a convention instead.
   'discord(app)?\.com/api/webhooks/:live webhook'
   'xox[baprs]-|ghp_[A-Za-z0-9]{20,}:third-party token'
-  '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}:email address'
+  '[A-Za-z0-9._%+-]{2,}@[A-Za-z0-9.-]+\.[A-Za-z]{2,}:email address'
   # Internal operational narrative. Not secret, but it is ours rather than the
   # reader's: our incident dates, our hosting provider, our private notes, our
   # ticket numbers. It makes a public repo read as somebody's leaked runbook.

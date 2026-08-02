@@ -1,0 +1,261 @@
+-- dune.ls_keystone_catalog backfill: req_level + spice_cost columns
+-- and all 205 rows (5 tracks) with sp_bonus derived per the icehunter
+-- keystoneSPBonus rule (_SkillPoint_Super=+5, _SkillPoint_Major=+3,
+-- _SkillPoint=+1, else 0). Generated from keystones.go by
+-- scripts/build-keystone-catalog-sql.py. Do not hand-edit.
+--
+-- Idempotent + replay-safe. OWNER dune (custom ls_* table ownership rule:
+-- a table owned by postgres aborts Funcom's pre-update pg_dump).
+--
+-- Apply read/write via the dq.sh equivalent, e.g.:
+--   sudo kubectl exec -i -n <ns> <db-pod> -- \
+--     env PGPASSWORD=<pw> psql -h localhost -p 15432 -U postgres -d dune \
+--     -v ON_ERROR_STOP=1 -f dune-keystone-catalog-backfill-2026-05-29.sql
+-- Verify (read-only): \d dune.ls_keystone_catalog and the validation
+-- SELECTs at the foot of this file.
+
+BEGIN;
+
+ALTER TABLE dune.ls_keystone_catalog
+  ADD COLUMN IF NOT EXISTS req_level  smallint,
+  ADD COLUMN IF NOT EXISTS spice_cost integer;
+
+ALTER TABLE dune.ls_keystone_catalog OWNER TO dune;
+
+INSERT INTO dune.ls_keystone_catalog (keystone_id, track, keystone_name, sp_bonus, req_level, spice_cost) VALUES
+  (1,'Combat','DA_CombatKeystone_SkillPoint_Major',3,1,2),
+  (2,'Combat','DA_CombatKeystone_SkillPoint',1,4,2),
+  (3,'Combat','DA_CombatKeystone_SkillPoint_Major',3,8,2),
+  (4,'Combat','DA_CombatKeystone_SkillPoint',1,11,5),
+  (5,'Combat','DA_CombatKeystone_SkillPoint',1,14,5),
+  (6,'Combat','DA_CombatKeystone_SkillPoint_Major',3,18,5),
+  (7,'Combat','DA_CombatKeystone_SkillPoint',1,21,5),
+  (8,'Combat','DA_CombatKeystone_SkillPoint',1,24,10),
+  (9,'Combat','DA_CombatKeystone_SkillPoint_Major',3,28,10),
+  (10,'Combat','DA_CombatKeystone_SkillPoint',1,31,10),
+  (11,'Combat','DA_CombatKeystone_SkillPoint',1,34,10),
+  (12,'Combat','DA_CombatKeystone_SkillPoint_Major',3,38,15),
+  (13,'Combat','DA_CombatKeystone_SkillPoint',1,41,15),
+  (14,'Combat','DA_CombatKeystone_SkillPoint',1,44,15),
+  (15,'Combat','DA_CombatKeystone_SkillPoint_Major',3,48,15),
+  (16,'Combat','DA_CombatKeystone_SkillPoint',1,51,20),
+  (17,'Combat','DA_CombatKeystone_SkillPoint',1,54,20),
+  (18,'Combat','DA_CombatKeystone_SkillPoint_Major',3,58,20),
+  (19,'Combat','DA_CombatKeystone_SkillPoint',1,61,20),
+  (20,'Combat','DA_CombatKeystone_SkillPoint',1,64,25),
+  (21,'Combat','DA_CombatKeystone_SkillPoint_Major',3,68,25),
+  (22,'Combat','DA_CombatKeystone_SkillPoint',1,71,25),
+  (23,'Combat','DA_CombatKeystone_SkillPoint',1,74,25),
+  (24,'Combat','DA_CombatKeystone_SkillPoint_Major',3,79,30),
+  (25,'Combat','DA_CombatKeystone_SkillPoint',1,82,30),
+  (26,'Combat','DA_CombatKeystone_SkillPoint',1,85,30),
+  (27,'Combat','DA_CombatKeystone_SkillPoint_Major',3,89,35),
+  (28,'Combat','DA_CombatKeystone_SkillPoint',1,93,35),
+  (29,'Combat','DA_CombatKeystone_SkillPoint',1,97,35),
+  (30,'Combat','DA_CombatKeystone_SkillPoint_Super',5,100,40),
+  (31,'Combat','DA_CombatKeystone_MaxHealth_Major',0,6,2),
+  (32,'Combat','DA_CombatKeystone_MaxHealth',0,26,10),
+  (33,'Combat','DA_CombatKeystone_MaxHealth',0,56,20),
+  (34,'Combat','DA_CombatKeystone_MaxHealth_Super',0,77,30),
+  (35,'Combat','DA_CombatKeystone_MaxHealth',0,91,35),
+  (36,'Combat','DA_CombatKeystone_MaxStamina',0,2,2),
+  (37,'Combat','DA_CombatKeystone_MaxStamina_Major',0,16,5),
+  (38,'Combat','DA_CombatKeystone_MaxStamina',0,36,15),
+  (39,'Combat','DA_CombatKeystone_MaxStamina',0,66,25),
+  (40,'Combat','DA_CombatKeystone_MaxStamina_Major',0,95,35),
+  (41,'Combat','DA_CombatKeystone_Hat',0,75,30),
+  (42,'Crafting','DA_CraftingKeystone_ArmorAugment_Major',0,10,2),
+  (43,'Crafting','DA_CraftingKeystone_ArmorAugment_Major',0,42,15),
+  (44,'Crafting','DA_CraftingKeystone_MeleeAugment_Major',0,3,2),
+  (45,'Crafting','DA_CraftingKeystone_MeleeAugment_Major',0,30,10),
+  (46,'Crafting','DA_CraftingKeystone_MeleeAugment_Major',0,88,35),
+  (47,'Crafting','DA_CraftingKeystone_RangedAugment_Major',0,1,0),
+  (48,'Crafting','DA_CraftingKeystone_RangedAugment_Major',0,31,10),
+  (49,'Crafting','DA_CraftingKeystone_RangedAugment_Major',0,87,35),
+  (50,'Crafting','DA_CraftingKeystone_ConsumableBatchCrafting',0,8,2),
+  (51,'Crafting','DA_CraftingKeystone_CraftingJackpot_Major',0,20,5),
+  (52,'Crafting','DA_CraftingKeystone_CraftingJackpot',0,33,15),
+  (53,'Crafting','DA_CraftingKeystone_CraftingJackpot',0,55,20),
+  (54,'Crafting','DA_CraftingKeystone_CraftingJackpot_Major',0,78,30),
+  (55,'Crafting','DA_CraftingKeystone_CraftingJackpot_Major',0,96,35),
+  (56,'Crafting','DA_CraftingKeystone_CraftingSpeedIncrease',0,18,5),
+  (57,'Crafting','DA_CraftingKeystone_CraftingSpeedIncrease',0,93,35),
+  (58,'Crafting','DA_CraftingKeystone_GhostData_Major',0,100,40),
+  (59,'Crafting','DA_CraftingKeystone_AugmentCraftingCostDecrease',0,25,10),
+  (60,'Crafting','DA_CraftingKeystone_CraftingSpeedIncrease',0,38,15),
+  (61,'Crafting','DA_CraftingKeystone_AugmentCraftingCostDecrease',0,59,20),
+  (62,'Crafting','DA_CraftingKeystone_CraftingSpeedIncrease',0,72,25),
+  (63,'Crafting','DA_CraftingKeystone_AugmentCraftingCostDecrease',0,90,35),
+  (64,'Crafting','DA_CraftingKeystone_RecyclingJackpot',0,16,5),
+  (65,'Crafting','DA_CraftingKeystone_RecyclingJackpot',0,35,15),
+  (66,'Crafting','DA_CraftingKeystone_RecyclingJackpot',0,69,25),
+  (67,'Crafting','DA_CraftingKeystone_RecyclingYield',0,14,5),
+  (68,'Crafting','DA_CraftingKeystone_RecyclingYield',0,40,15),
+  (69,'Crafting','DA_CraftingKeystone_RecyclingYield',0,80,30),
+  (70,'Crafting','DA_CraftingKeystone_RefiningYield_1',0,12,5),
+  (71,'Crafting','DA_CraftingKeystone_RefiningYield_2',0,22,10),
+  (72,'Crafting','DA_CraftingKeystone_RefiningYield_3',0,45,20),
+  (73,'Crafting','DA_CraftingKeystone_RefiningYield_4',0,63,25),
+  (74,'Crafting','DA_CraftingKeystone_RefiningYield_5',0,85,30),
+  (75,'Crafting','DA_CraftingKeystone_MaxDurabilityLossReduction',0,5,2),
+  (76,'Crafting','DA_CraftingKeystone_MaxDurabilityLossReduction',0,28,10),
+  (77,'Crafting','DA_CraftingKeystone_MaxDurabilityLossReduction',0,48,20),
+  (78,'Crafting','DA_CraftingKeystone_MaxDurabilityLossReduction_Major',0,66,25),
+  (79,'Crafting','DA_CraftingKeystone_MaxDurabilityLossReduction',0,83,30),
+  (80,'Crafting','DA_CraftingKeystone_SchematicsOnRecycling_Major',0,61,25),
+  (81,'Crafting','DA_CraftingKeystone_Hat',0,75,30),
+  (82,'Crafting','DA_CraftingKeystone_FragmentUpgrade_Major',0,52,20),
+  (83,'Exploration','DA_ExplorationKeystone_CrashedShipBonusLoot',0,10,2),
+  (84,'Exploration','DA_ExplorationKeystone_ClimbingStamina',0,42,15),
+  (85,'Exploration','DA_ExplorationKeystone_VehicleHeatDissipation',0,23,10),
+  (86,'Exploration','DA_ExplorationKeystone_VehicleHeatDissipation',0,62,25),
+  (87,'Exploration','DA_ExplorationKeystone_VehicleHeatDissipation',0,95,35),
+  (88,'Exploration','DA_ExplorationKeystone_FogOfWarRadius',0,38,15),
+  (89,'Exploration','DA_ExplorationKeystone_WormThreatReduction',0,74,25),
+  (90,'Exploration','DA_ExplorationKeystone_WormThreatReduction',0,98,35),
+  (91,'Exploration','DA_ExplorationKeystone_LootPoolAlterations_Major',0,40,15),
+  (92,'Exploration','DA_ExplorationKeystone_PlayerInventorySlots_Major',0,1,2),
+  (93,'Exploration','DA_ExplorationKeystone_PlayerInventorySlots_Major',0,25,10),
+  (94,'Exploration','DA_ExplorationKeystone_PlayerInventorySlots_Major',0,50,20),
+  (95,'Exploration','DA_ExplorationKeystone_PlayerInventorySlots_Major',0,77,30),
+  (96,'Exploration','DA_ExplorationKeystone_PlayerInventorySlots_Major',0,100,40),
+  (97,'Exploration','DA_ExplorationKeystone_VehicleRecoeryCostReduction',0,18,5),
+  (98,'Exploration','DA_ExplorationKeystone_VehicleRecoeryCostReduction',0,52,20),
+  (99,'Exploration','DA_ExplorationKeystone_VehicleSandstormDamageReduction',0,8,2),
+  (100,'Exploration','DA_ExplorationKeystone_VehicleSandstormDamageReduction',0,45,15),
+  (101,'Exploration','DA_ExplorationKeystone_VehicleSandstormDamageReduction',0,80,30),
+  (102,'Exploration','DA_ExplorationKeystone_ScanningRange',0,17,5),
+  (103,'Exploration','DA_ExplorationKeystone_ScanningRange_Major',0,71,25),
+  (104,'Exploration','DA_ExplorationKeystone_SurveyTimeDecrease_Major',0,13,5),
+  (105,'Exploration','DA_ExplorationKeystone_SuspensorDrain',0,28,10),
+  (106,'Exploration','DA_ExplorationKeystone_SuspensorDrain_Major',0,93,35),
+  (107,'Exploration','DA_ExplorationKeystone_VehicleBoostHeatCostReduction',0,3,2),
+  (108,'Exploration','DA_ExplorationKeystone_VehicleBoostHeatCostReduction',0,15,5),
+  (109,'Exploration','DA_ExplorationKeystone_VehicleBoostHeatCostReduction',0,30,10),
+  (110,'Exploration','DA_ExplorationKeystone_VehicleBoostHeatCostReduction',0,59,20),
+  (111,'Exploration','DA_ExplorationKeystone_VehicleBoostHeatCostReduction',0,90,35),
+  (112,'Exploration','DA_ExplorationKeystone_VehicleDamageResistance',0,33,10),
+  (113,'Exploration','DA_ExplorationKeystone_VehicleDamageResistance',0,88,35),
+  (114,'Exploration','DA_ExplorationKeystone_VehicleFuelEfficiency_Major',0,6,2),
+  (115,'Exploration','DA_ExplorationKeystone_VehicleFuelEfficiency_Major',0,35,15),
+  (116,'Exploration','DA_ExplorationKeystone_VehicleFuelEfficiency_Major',0,55,20),
+  (117,'Exploration','DA_ExplorationKeystone_VehicleFuelEfficiency_Major',0,65,25),
+  (118,'Exploration','DA_ExplorationKeystone_VehicleFuelEfficiency_Major',0,85,30),
+  (119,'Exploration','DA_ExplorationKeystone_VehicleHeatDissipation',0,48,20),
+  (120,'Exploration','DA_ExplorationKeystone_VehicleHeatDissipation',0,68,25),
+  (121,'Exploration','DA_ExplorationKeystone_VehicleHeatDissipation',0,83,30),
+  (122,'Exploration','DA_ExplorationKeystone_VehicleSpeedBonus_Major',0,20,5),
+  (123,'Exploration','DA_ExplorationKeystone_Hat',0,75,30),
+  (124,'Gathering','DA_GatheringKeystone_BonusBlood',0,3,2),
+  (125,'Gathering','DA_GatheringKeystone_BonusWater',0,2,2),
+  (126,'Gathering','DA_GatheringKeystone_PickupYield',0,15,5),
+  (127,'Gathering','DA_GatheringKeystone_PickupYield',0,55,20),
+  (128,'Gathering','DA_GatheringKeystone_ScrapObjectsYield_Major',0,1,2),
+  (129,'Gathering','DA_GatheringKeystone_ScrapObjectsYield',0,35,15),
+  (130,'Gathering','DA_GatheringKeystone_ByProductSalvage',0,7,2),
+  (131,'Gathering','DA_GatheringKeystone_ByProductSalvage',0,17,5),
+  (132,'Gathering','DA_GatheringKeystone_ByProductSalvage',0,23,10),
+  (133,'Gathering','DA_GatheringKeystone_ByProductSalvage',0,28,10),
+  (134,'Gathering','DA_GatheringKeystone_ByProductSalvage',0,38,15),
+  (135,'Gathering','DA_GatheringKeystone_ByProductSalvage',0,43,15),
+  (136,'Gathering','DA_GatheringKeystone_ByProductSalvage',0,48,20),
+  (137,'Gathering','DA_GatheringKeystone_ByProductSalvage',0,53,20),
+  (138,'Gathering','DA_GatheringKeystone_ByProductSalvage',0,68,25),
+  (139,'Gathering','DA_GatheringKeystone_ByProductSalvage',0,83,35),
+  (140,'Gathering','DA_GatheringKeystone_CompactorRange',0,13,5),
+  (141,'Gathering','DA_GatheringKeystone_CompactorRange',0,33,15),
+  (142,'Gathering','DA_GatheringKeystone_CompactorRange',0,63,25),
+  (143,'Gathering','DA_GatheringKeystone_CompactorRange',0,78,30),
+  (144,'Gathering','DA_GatheringKeystone_CompactorRange_Major',0,74,30),
+  (145,'Gathering','DA_GatheringKeystone_CompactorThreat',0,8,5),
+  (146,'Gathering','DA_GatheringKeystone_CompactorThreat',0,25,10),
+  (147,'Gathering','DA_GatheringKeystone_CompactorThreat',0,65,25),
+  (148,'Gathering','DA_GatheringKeystone_CompactorThreat',0,86,35),
+  (149,'Gathering','DA_GatheringKeystone_CompactorThreat',0,96,35),
+  (150,'Gathering','DA_GatheringKeystone_NewCorpseType_Major',0,58,25),
+  (151,'Gathering','DA_GatheringKeystone_ToolPowerCostReduction_Major',0,5,2),
+  (152,'Gathering','DA_GatheringKeystone_ToolPowerCostReduction',0,45,20),
+  (153,'Gathering','DA_GatheringKeystone_ToolPowerCostReduction_Major',0,93,35),
+  (154,'Gathering','DA_GatheringKeystone_YieldJackpot_Major',0,10,5),
+  (155,'Gathering','DA_GatheringKeystone_YieldJackpot_Major',0,20,10),
+  (156,'Gathering','DA_GatheringKeystone_YieldJackpot_Major',0,30,10),
+  (157,'Gathering','DA_GatheringKeystone_YieldJackpot_Major',0,40,15),
+  (158,'Gathering','DA_GatheringKeystone_YieldJackpot_Major',0,50,20),
+  (159,'Gathering','DA_GatheringKeystone_YieldJackpot_Major',0,61,25),
+  (160,'Gathering','DA_GatheringKeystone_YieldJackpot_Major',0,71,30),
+  (161,'Gathering','DA_GatheringKeystone_YieldJackpot_Major',0,81,30),
+  (162,'Gathering','DA_GatheringKeystone_YieldJackpot_Major',0,90,35),
+  (163,'Gathering','DA_GatheringKeystone_YieldJackpot_Major',0,100,40),
+  (164,'Gathering','DA_GatheringKeystone_Hat',0,75,30),
+  (165,'Sabotage','DA_SabotageKeystone_LandsraadBribeCost',0,29,10),
+  (166,'Sabotage','DA_SabotageKeystone_LandsraadBribeCost',0,58,20),
+  (167,'Sabotage','DA_SabotageKeystone_LandsraadBribeCost',0,78,30),
+  (168,'Sabotage','DA_SabotageKeystone_LandsraadBribeCost',0,95,35),
+  (169,'Sabotage','DA_SabotageKeystone_LandsraadContribution',0,19,5),
+  (170,'Sabotage','DA_SabotageKeystone_LandsraadContribution_Major',0,43,15),
+  (171,'Sabotage','DA_SabotageKeystone_LandsraadContribution',0,53,20),
+  (172,'Sabotage','DA_SabotageKeystone_LandsraadContribution',0,72,25),
+  (173,'Sabotage','DA_SabotageKeystone_LandsraadContribution',0,88,35),
+  (174,'Sabotage','DA_SabotageKeystone_LandsraadBribeCost_Major',0,17,5),
+  (175,'Sabotage','DA_SabotageKeystone_ExtraLootOnCorpses2_Major',0,40,15),
+  (176,'Sabotage','DA_SabotageKeystone_HouseCreditsBonus_Major',0,60,25),
+  (177,'Sabotage','DA_SabotageKeystone_HeadshotDamage_Major',0,1,2),
+  (178,'Sabotage','DA_SabotageKeystone_HeadshotDamage_Major',0,27,10),
+  (179,'Sabotage','DA_SabotageKeystone_HeadshotDamage_Major',0,50,20),
+  (180,'Sabotage','DA_SabotageKeystone_HeadshotDamage_Major',0,74,30),
+  (181,'Sabotage','DA_SabotageKeystone_HeadshotDamage_Major',0,100,40),
+  (182,'Sabotage','DA_SabotageKeystone_ExplosiveBarrels',0,8,2),
+  (183,'Sabotage','DA_SabotageKeystone_HouseCreditsBonus_Major',0,3,2),
+  (184,'Sabotage','DA_SabotageKeystone_HouseCreditsBonus',0,22,10),
+  (185,'Sabotage','DA_SabotageKeystone_HouseCreditsBonus',0,45,15),
+  (186,'Sabotage','DA_SabotageKeystone_HouseCreditsBonus_Major',0,85,30),
+  (187,'Sabotage','DA_SabotageKeystone_ScanningRangeResistance',0,12,5),
+  (188,'Sabotage','DA_SabotageKeystone_ScanningRangeResistance',0,32,10),
+  (189,'Sabotage','DA_SabotageKeystone_ScanningRangeResistance',0,55,20),
+  (190,'Sabotage','DA_SabotageKeystone_ScanningRangeResistance',0,69,25),
+  (191,'Sabotage','DA_SabotageKeystone_ScanningRangeResistance',0,98,35),
+  (192,'Sabotage','DA_SabotageKeystone_RecognitionReduction',0,15,5),
+  (193,'Sabotage','DA_SabotageKeystone_RecognitionReduction_Major',0,65,25),
+  (194,'Sabotage','DA_SabotageKeystone_AggroRangeReduction',0,5,2),
+  (195,'Sabotage','DA_SabotageKeystone_AggroRangeReduction',0,93,35),
+  (196,'Sabotage','DA_SabotageKeystone_ReducedScannedTime',0,24,10),
+  (197,'Sabotage','DA_SabotageKeystone_ReducedScannedTime',0,35,15),
+  (198,'Sabotage','DA_SabotageKeystone_ReducedScannedTime',0,48,20),
+  (199,'Sabotage','DA_SabotageKeystone_ReducedScannedTime',0,63,25),
+  (200,'Sabotage','DA_SabotageKeystone_ReducedScannedTime',0,81,30),
+  (201,'Sabotage','DA_SabotageKeystone_HeadshotDamage_Major',0,10,5),
+  (202,'Sabotage','DA_SabotageKeystone_HouseCreditsBonus_Major',0,37,15),
+  (203,'Sabotage','DA_SabotageKeystone_LandsraadBribeCost_Major',0,90,35),
+  (204,'Sabotage','DA_SabotageKeystone_IncreasedTrapTimer',0,2,2),
+  (205,'Sabotage','DA_SabotageKeystone_Hat',0,75,30)
+ON CONFLICT (keystone_id) DO UPDATE SET
+  track         = EXCLUDED.track,
+  keystone_name = EXCLUDED.keystone_name,
+  sp_bonus      = EXCLUDED.sp_bonus,
+  req_level     = EXCLUDED.req_level,
+  spice_cost    = EXCLUDED.spice_cost;
+
+-- Validation gates (must all pass before COMMIT is trusted):
+--   total rows = 205
+--   Combat sp_bonus sum = 54
+--   no NULL req_level / spice_cost
+DO $$
+DECLARE v_total int; v_combat int; v_nulls int;
+BEGIN
+  SELECT count(*) INTO v_total FROM dune.ls_keystone_catalog;
+  SELECT COALESCE(SUM(sp_bonus),0) INTO v_combat
+    FROM dune.ls_keystone_catalog WHERE track = 'Combat';
+  SELECT count(*) INTO v_nulls FROM dune.ls_keystone_catalog
+    WHERE req_level IS NULL OR spice_cost IS NULL;
+  IF v_total <> 205 THEN
+    RAISE EXCEPTION 'keystone catalog row count = %, expected 205', v_total;
+  END IF;
+  IF v_combat <> 54 THEN
+    RAISE EXCEPTION 'Combat sp_bonus sum = %, expected 54', v_combat;
+  END IF;
+  IF v_nulls <> 0 THEN
+    RAISE EXCEPTION '% rows have NULL req_level/spice_cost', v_nulls;
+  END IF;
+END $$;
+
+COMMIT;

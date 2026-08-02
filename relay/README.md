@@ -6,18 +6,17 @@ through here; nothing above it holds a key to the game box.
 Read [docs/15-control-plane-architecture.md](../docs/15-control-plane-architecture.md)
 first for why this exists at all.
 
-## Status: reference implementation, not a drop-in service
+## Status
 
-This relay routes to roughly 54 individual action scripts on the game host,
-and **those have not been published yet**. They land with the player portal,
-which is what most of them serve.
+The action scripts this relay routes to are now published too, in `scripts/`,
+so the whole chain works: relay to SSH forced command to dispatcher allowlist
+to action script to `dq.sh` to psql.
 
-So right now this is a worked example: the auth model, the route surface, the
-error handling, and the boundary between "web tier" and "game host". Most
-endpoints will return an error against a host that lacks the action scripts.
-That is expected, and it is why this is labelled the way it is.
+What is not here yet is the web front end that calls it. Drive it from your own
+interface or from curl until the player portal lands.
 
-`dune-telemetry/` has no such dependency and works today.
+Several routes write to a live game database. Read `docs/13-safe-database-writes.md`
+before wiring any of them to a button.
 
 ## What is here
 

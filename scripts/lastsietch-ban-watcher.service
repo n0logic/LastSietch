@@ -1,0 +1,8 @@
+[Unit]
+Description=Last Sietch Dune ban-watcher (re-kick online banned players, expire stale bans)
+Documentation=file:///root/dune-ban-watcher.py
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/dune-ban-watcher.py

@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic config-drift hash watch on the pinned game pod
+
+[Timer]
+OnCalendar=hourly
+# If the box was down at the fire time, run on next boot.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

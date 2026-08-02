@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Last Sietch Dune player IP harvester every 2 minutes
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=120s
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=Dune pak content snapshot — daily change-detect + capture
+After=network-online.target lastsietch-relay.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lastsietch-admin-tools/dune-pak-snapshot.sh daily
+EnvironmentFile=-/etc/lastsietch/pak-snapshot.env
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=1800
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target

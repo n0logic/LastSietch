@@ -1,0 +1,7 @@
+[Unit]
+Description=Post Landsraad goal verification verdict to the Cielago audit channel
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/cielago/landsraad-verify-notify.sh

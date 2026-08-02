@@ -1,0 +1,8 @@
+[Unit]
+Description=Last Sietch Dune player IP harvester (scrape game-pod LogNet -> lsadmin.player_ips)
+Documentation=file:///root/dune-ip-detect.py
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/dune-ip-detect.py --quiet

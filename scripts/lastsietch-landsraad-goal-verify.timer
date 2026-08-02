@@ -1,0 +1,13 @@
+[Unit]
+Description=One-shot: verify Landsraad goal after the 2026-06-09 term rollover
+
+[Timer]
+# Term 4 rolls ~2026-06-09 04:55 UTC; check ~65 min later for a safe margin.
+OnCalendar=2026-06-09 06:00:00 UTC
+# If the box is down at the fire time, run on next boot.
+Persistent=true
+# Self-disarm after it fires once.
+RemainAfterElapse=false
+
+[Install]
+WantedBy=timers.target

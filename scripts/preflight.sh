@@ -78,14 +78,17 @@ DENY=(
   # out of scope
   'volumio' 'jtc-bot/' 'navidrome/' 'scratchpad/'
 )
+# One grep per pattern over the whole path list, not one per (pattern, file).
+# The nested form spawned ~20k processes and took 90s at 294 files, which is
+# how a mandatory gate becomes an optional one.
+PATHS_BLOB="$(printf '%s\n' "${FILES[@]}")"
 hits=0
 for pat in "${DENY[@]}"; do
-    for f in "${FILES[@]}"; do
-        if printf '%s' "$f" | grep -qiE "$pat"; then
-            note "$f  (matched /$pat/)"
-            hits=$((hits + 1))
-        fi
-    done
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        note "$f  (matched /$pat/)"
+        hits=$((hits + 1))
+    done < <(printf '%s' "$PATHS_BLOB" | grep -iE -- "$pat" || true)
 done
 [ "$hits" -eq 0 ] && ok "no denied paths (${#DENY[@]} patterns applied)"
 
@@ -177,25 +180,44 @@ if [ -f "$repo_local_names" ]; then
         CONTENT+=("$line")
     done < "$repo_local_names"
 fi
-c_hits=0
-for entry in "${CONTENT[@]}"; do
-    pat="${entry%%:*}"; label="${entry#*:}"
-    for f in "${FILES[@]}"; do
-        # This file DEFINES the patterns, so it matches them by construction.
-        # Excluded from the content scan only; the path and binary gates above
-        # still cover it. Announced below rather than skipped silently, since
-        # an unannounced exclusion is a place to hide something.
-        case "$f" in */preflight.sh|preflight.sh) continue ;; esac
-        p="$ROOT/$f"
-        [ -f "$p" ] || continue
-        grep -Iq . "$p" 2>/dev/null || continue      # skip binaries
-        if grep -qEi "$pat" "$p" 2>/dev/null; then
-            n=$(grep -cEi "$pat" "$p" 2>/dev/null)
-            note "$label in $f ($n occurrence(s))"
-            c_hits=$((c_hits + 1))
-        fi
-    done
+# Build the scannable set ONCE: text files, excluding this script.
+#
+# This file DEFINES the patterns, so it matches them by construction. It is
+# excluded from the content scan only; the path and binary gates above still
+# cover it. Announced below rather than skipped silently, since an unannounced
+# exclusion is a place to hide something.
+CANDIDATES=()
+for f in "${FILES[@]}"; do
+    case "$f" in */preflight.sh|preflight.sh) continue ;; esac
+    p="$ROOT/$f"
+    [ -f "$p" ] && [ -s "$p" ] && CANDIDATES+=("$p")
 done
+# grep -Il lists the text files among them in ONE invocation, instead of one
+# spawn per file to ask "is this text".
+SCAN=()
+if [ "${#CANDIDATES[@]}" -gt 0 ]; then
+    while IFS= read -r p; do
+        [ -n "$p" ] && SCAN+=("$p")
+    done < <(grep -Il . "${CANDIDATES[@]}" 2>/dev/null || true)
+fi
+
+# One grep per pattern across every file at once, rather than per (pattern,
+# file). grep -c over multiple files reports "path:count" per file, which is
+# exactly the per-file count this wants.
+c_hits=0
+if [ "${#SCAN[@]}" -gt 0 ]; then
+    prefix_len=$(( ${#ROOT} + 1 ))
+    for entry in "${CONTENT[@]}"; do
+        pat="${entry%%:*}"; label="${entry#*:}"
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            n="${line##*:}"; p="${line%:*}"
+            [ "$n" = "0" ] && continue
+            note "$label in ${p:$prefix_len} ($n occurrence(s))"
+            c_hits=$((c_hits + 1))
+        done < <(grep -cEi -- "$pat" "${SCAN[@]}" 2>/dev/null | grep -v ':0$' || true)
+    done
+fi
 [ "$c_hits" -eq 0 ] && ok "no flagged content (${#CONTENT[@]} patterns applied)"
 echo "     (scripts/preflight.sh itself is excluded from the content scan:"
 echo "      it defines these patterns. Review it by eye when it changes.)"

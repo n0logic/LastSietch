@@ -1,0 +1,47 @@
+[project]
+name = "cielago"
+version = "0.1.0"
+description = "Last Sietch Discord administration bot"
+requires-python = ">=3.12"
+dependencies = [
+    "discord.py>=2.4.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.4.0",
+    "structlog>=24.1.0",
+    "httpx>=0.27.0",
+    "better-profanity>=0.7.0",
+]
+
+[project.optional-dependencies]
+# Local bge-small embeddings for the assistant's semantic dedup. Optional so the
+# core bot stays light; without it the assistant falls back to a hashing embedder.
+# Install on the web host with: uv sync --extra embeddings
+embeddings = [
+    "onnxruntime>=1.18.0",
+    "tokenizers>=0.20.0",
+    "numpy>=1.26.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cielago"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["src/tests"]

@@ -1,0 +1,84 @@
+{
+  "_comment": "Last Sietch server layout. Channels render as '<emoji><separator><name>' to match the Last Sietch Discord style. Edit freely; /channel-template is idempotent (skips anything that already exists). Text names are lowercased/hyphenated by Discord; voice names keep their case. Set a category 'private': true to hide it from @everyone (admins still see it). Set a channel 'readonly': true so @everyone can read but not post (admins/Cielago still post via Administrator).",
+  "separator": "｜",
+  "categories": [
+    {
+      "name": "GATE",
+      "private": false,
+      "channels": [
+        {"emoji": "📜", "name": "rules", "type": "text", "readonly": true, "topic": "Read first. The way of the sietch."},
+        {"emoji": "👋", "name": "intro", "type": "text", "topic": "Tell us who you are before the gate opens."}
+      ]
+    },
+    {
+      "name": "INFORMATION",
+      "private": false,
+      "channels": [
+        {"emoji": "📢", "name": "announcements", "type": "text", "readonly": true, "topic": "Server news and maintenance windows."},
+        {"emoji": "🟢", "name": "server-status", "type": "text", "readonly": true, "topic": "Live status of the Last Sietch game servers."},
+        {"emoji": "🧭", "name": "start-here", "type": "text", "readonly": true, "topic": "How to connect and get going."},
+        {"emoji": "💡", "name": "help-and-feedback", "type": "text", "topic": "Bugs, ideas, and feedback for lastsietch.com (the portal/companion app), Cielago, and the servers. Found something broken? Tell us here."}
+      ]
+    },
+    {
+      "name": "COMMUNITY",
+      "private": false,
+      "channels": [
+        {"emoji": "💬", "name": "general", "type": "text", "topic": "General chatter for the sietch."},
+        {"emoji": "🎲", "name": "off-topic", "type": "text", "topic": "Everything that isn't the desert."},
+        {"emoji": "📸", "name": "screenshots", "type": "text", "topic": "Show the sands what you've built."},
+        {"emoji": "🎬", "name": "clips", "type": "text", "topic": "Clips and highlights."},
+        {"emoji": "🔞", "name": "nsfw", "type": "text", "nsfw": true, "topic": "Age-restricted. 18+ only. Keep all NSFW content here; must be legal."}
+      ]
+    },
+    {
+      "name": "VOICE",
+      "private": false,
+      "channels": [
+        {"emoji": "➕", "name": "Join to Create", "type": "voice"},
+        {"emoji": "🔊", "name": "Lounge", "type": "voice"},
+        {"emoji": "🎮", "name": "Gaming", "type": "voice"},
+        {"emoji": "💤", "name": "AFK", "type": "voice"}
+      ]
+    },
+    {
+      "name": "DUNE: AWAKENING",
+      "private": false,
+      "channels": [
+        {"emoji": "🏜️", "name": "dune-general", "type": "text", "topic": "Dune: Awakening on Last Sietch."},
+        {"emoji": "❓", "name": "dune-help", "type": "text", "topic": "Questions, tips, and troubleshooting."},
+        {"emoji": "💰", "name": "dune-trade", "type": "text", "topic": "CHOAM exchange and player trade."},
+        {"emoji": "🤝", "name": "dune-lfg", "type": "text", "topic": "Looking for group / squad up."},
+        {"emoji": "🪱", "name": "deep-desert", "type": "text", "topic": "Deep Desert runs, spice, and the worm."},
+        {"emoji": "📋", "name": "dune-server-info", "type": "text", "topic": "Ruleset, rates, and server features."},
+        {"emoji": "🔊", "name": "Hagga Basin", "type": "voice"},
+        {"emoji": "🪱", "name": "Deep Desert", "type": "voice"}
+      ]
+    },
+    {
+      "name": "CONAN EXILES",
+      "private": false,
+      "channels": [
+        {"emoji": "🗡️", "name": "conan-general", "type": "text", "topic": "Conan Exiles server chat."},
+        {"emoji": "🔊", "name": "Conan", "type": "voice"}
+      ]
+    },
+    {
+      "name": "ENSHROUDED",
+      "private": false,
+      "channels": [
+        {"emoji": "🌲", "name": "enshrouded-general", "type": "text", "topic": "Enshrouded server chat."},
+        {"emoji": "🔊", "name": "Enshrouded", "type": "voice"}
+      ]
+    },
+    {
+      "name": "ADMIN",
+      "private": true,
+      "channels": [
+        {"emoji": "🛡️", "name": "mod-ops", "type": "text", "topic": "Staff coordination."},
+        {"emoji": "📓", "name": "cielago-audit", "type": "text", "topic": "Cielago bot audit log."},
+        {"emoji": "⚙️", "name": "admin-commands", "type": "text", "topic": "Run Cielago admin commands here."}
+      ]
+    }
+  ]
+}

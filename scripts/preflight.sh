@@ -100,6 +100,12 @@ bin_hits=0
 for f in "${FILES[@]}"; do
     p="$ROOT/$f"
     [ -f "$p" ] || continue
+    [ -s "$p" ] || continue                          # empty file: not a binary.
+                                                     # grep -I reports no match
+                                                     # on a 0-byte file, which
+                                                     # read as "binary" and
+                                                     # flagged every empty
+                                                     # __init__.py.
     grep -Iq . "$p" 2>/dev/null && continue          # text, fine
     if printf '%s' "$f" | grep -qE '\.(png|svg|ico|woff2?)$' \
        && printf '%s' "$f" | grep -qE '^(docs/img/|\.github/|static/(icons|fonts)/)'; then

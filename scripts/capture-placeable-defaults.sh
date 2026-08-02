@@ -2,7 +2,7 @@
 # capture-placeable-defaults.sh — read defaults from a LIVE placeable and emit a
 # SQL UPSERT for dune.ls_solido_class_defaults.
 #
-# Used during G22 Phase 2b empirical capture (see docs/dune-research/
+# Used during G22 Phase 2b empirical capture (
 # ITEM-G22-BUILD-SPEC.md §11). After placing an instance of a v1 seed class
 # in-game with the normal construction tool, run this script against the new
 # actor_id to extract default_components, default_health, container metadata

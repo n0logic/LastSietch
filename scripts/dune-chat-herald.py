@@ -5,7 +5,7 @@ Last Sietch / Last Sietch in-game chat herald ("Cielago").
 Publishes a native TextChat message into the Dune mq-game chat exchanges via
 `kubectl exec ... rabbitmqctl eval` (broker-internal publish, no client auth -
 same path as dune-service-broadcast.py). Uses the captured chat envelope format
-(see docs/dune-research/CHAT-HERALD-FORMAT-2026-05-28.md): the message shows from
+: the message shows from
 a spoofed sender name via m_bUseSpoofedUserName + m_SpoofedUserNameFrom.
 
 Modes:

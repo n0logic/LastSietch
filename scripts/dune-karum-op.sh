@@ -6,7 +6,7 @@
 # the forced-command dispatcher (a 'karum-op' action reading --op-b64-stdin), reached over
 # the relay SSH key. Runs as root and does its own `sudo kubectl exec` into the Dune DB pod.
 #
-# Contract: docs/dune-research/v2-portal/KARUM-BUILD-CONTRACT-2026-07-27.md
+#
 #
 # ── THE ONE THING TO UNDERSTAND ────────────────────────────────────────────────
 # There is EXACTLY ONE TAKE in this system: the seller, at listing time, offline-gated.

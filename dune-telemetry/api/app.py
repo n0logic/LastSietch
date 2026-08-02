@@ -500,7 +500,7 @@ def storage_models(account_id: int = Query(None)):
     items_by_container + search_rows) plus the 'storage' sync_meta row for the
     freshness guard. Reads player_storage in telemetry.db (full-refreshed by the
     collector each cycle); the game DB is NOT touched on this path.
-    See docs/dune-research/PHASE-2-MIRROR-CONTRACT-2026-06-05.md."""
+   """
     conn = _connect()
     try:
         where, params = "", []
@@ -528,7 +528,7 @@ def market_listings_all():
     """The full active CHOAM exchange listing set for the web host local-mirror
     sync (Phase 2). The mirror runs the substring search LOCALLY over these. Reads
     market_listing in telemetry.db (full-refreshed by the collector); the game DB
-    is NOT touched. See docs/dune-research/PHASE-2-MIRROR-CONTRACT-2026-06-05.md."""
+    is NOT touched"""
     conn = _connect()
     try:
         rows = conn.execute(

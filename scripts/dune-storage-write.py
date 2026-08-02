@@ -27,7 +27,7 @@ side, player_virtual_currency_balances currency_id 0) and SolarisCoin item stack
         way backpack coins can be deposited. Omitted => the historic owned_inv_sql set,
         so a sweep never silently starts emptying a player's pockets.
 
-See docs/dune-research/STORAGE-MANAGER-BUILD-CONTRACT-2026-06-06.md (Phase 1, incl. the
+ (Phase 1, incl. the
 SUPERVISOR ADDENDUM: WITHDRAW cap = 100,000; bank inv30 max_item_count varies and may be
 -1/0; position_index is sparse). Mirrors dune-market-sell.py / dune-market-orders.py.
 

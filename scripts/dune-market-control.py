@@ -165,7 +165,7 @@ def fetch_all_listings(qjson):
     into a BUY, and feed the writer's revision-drift guard).
     Same projection as action_listings_search's listing rows so the local search
     reproduces the live payload. `qjson(sql, fallback)` is the injected runner.
-    See docs/dune-research/PHASE-2-MIRROR-CONTRACT-2026-06-05.md."""
+   """
     sql = (
         "SELECT COALESCE(json_agg(json_build_object("
         "  'order_id', o.id, 'revision', o.revision,"

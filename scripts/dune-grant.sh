@@ -2048,7 +2048,7 @@ EOF
 # requires_offline (the panel sweeper applies it at logoff).
 #
 # Node buckets live in tags-data.json under journey_node_completion_nodes,
-# snapshotted from the n0logic natural completer (1278 completed nodes):
+# snapshotted from a naturally-completed character (1278 completed nodes):
 #   .core              — 1150 nodes: DA_MQ_* / DA_SQ_* / DA_Dunipedia_* /
 #                        DA_DLC_LostHarvest / NPE. Default-written.
 #   .faction.atreides  — 65 DA_FQ_ClimbTheRanks.* nodes (the completer's
@@ -2259,7 +2259,7 @@ SQL
   # (COALESCE-guard idempotency: a replay or an already-enabled character writes
   # nothing). WRITE 2 replaces PersistenceData with the 3-GE literal; it is gated
   # on the same is_new + still-not-enabled predicate so the two writes move
-  # together. The component array index is 1 for both (mirrors n0logic's shape
+  # together. The component array index is 1 for both (mirrors that character's shape
   # [0,{...SystemStatus...}] / [1,{...PersistenceData...}]; jsonb_set's path
   # element '1' addresses the object slot of that [index,{object}] pair).
   GRANT_BODY=$(cat <<'EOF'
@@ -2318,7 +2318,7 @@ EOF
 # Caps from icehunter parity Action #2: xp <= 44182 per track, level <= 100.
 #
 # Actor fix: writes to player_controller_id (not pawn). Empirically the in-game
-# spec data exists at the controller (verified 2026-05-23 on n0logic's
+# spec data exists at the controller (verified 2026-05-23 on a reference character's
 # Exploration track at actor 17 controller, not actor 19 pawn). Old G8 wrote
 # to pawn — same bug class as old G7 faction_rep.
 #
@@ -2626,7 +2626,7 @@ EOF
 # FLevelComponent[1] in dune.fgl_entities (DuneCharacter slot of the pawn).
 #
 # v1 (2026-05-23 PM) wrote ONLY TotalXPEarned and relied on Funcom's load path
-# to recompute derived fields. Empirical test on n0logic (grant_id=10, +600
+# to recompute derived fields. Empirical test on a reference account (grant_id=10, +600
 # XP, L26->L27) proved: NO wipe (UnspentSkillPoints preserved at 24 ✓) but
 # also NO SP credit (Funcom's pod doesn't auto-grant SP for externally-added
 # XP). HUD showed L27 but Skills UI still showed 24 unspent.
@@ -2822,7 +2822,7 @@ EOF
 # Presets are HARDCODED — never accept node lists or tag lists from the API
 # (privilege-escalation-via-payload prevention).
 #
-# Verified pattern: applied to n0logic 2026-05-23, surfaced as Landsraad
+# Verified pattern: applied to a reference account 2026-05-23, surfaced as Landsraad
 # unlocked + Hunting Skorda revealed in-game. See.
 #
 # Faction.Name resolution via the hardcoded faction_id map (same as G7 v2).
@@ -3889,7 +3889,7 @@ EOF
 
 # G21b — bb_clone. ONLINE-SAFE deep-clone of a base subgraph anchored on a
 # source totem actor. The 16-step procedure (see
-# docs/dune-research/ITEM-G21-BUILD-SPEC.md) duplicates every dune.actors row
+# our internal design notes) duplicates every dune.actors row
 # in the source set, every linked dune.fgl_entities + actor_fgl_entities row,
 # every dune.buildings + building_instances + placeables + inventories + items
 # row, and rewrites every internal !!act#<id> reference inside the actors'
@@ -4513,7 +4513,7 @@ EOF
 # (byte/piece caps, building_type charset, numeric coords); DB write structure
 # mirrors G21 deep-clone (id maps + multi-step gated INSERTs) except every
 # actor is freshly minted from a registry default rather than copied from a
-# source row. See docs/dune-research/ITEM-G22-BUILD-SPEC.md for the 18-step
+# source row for the 18-step
 # procedure and the empirical findings (F1-F6) backing the design.
 #
 # Required detail: recipient_account_id, blueprint_data (Solido JSON object),

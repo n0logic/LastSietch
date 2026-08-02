@@ -197,7 +197,7 @@ def build(account_id, qjson):
     """Shared builder: return the containers payload for one account, using an
     injected `qjson(sql, fallback)` runner. The collector (psycopg2) and main()
     (dq.sh) both call this so the relay path and the mirror are byte-identical.
-    See docs/dune-research/PHASE-2-MIRROR-CONTRACT-2026-06-05.md."""
+   """
     sql = SQL_TEMPLATE.format(account_id=int(account_id))
     containers = qjson(sql, "[]") or []
     return {"available": True, "account_id": str(account_id),

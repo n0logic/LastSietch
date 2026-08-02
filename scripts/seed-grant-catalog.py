@@ -28,7 +28,7 @@ CATALOG_VERSION = "1.0.0-draft"
 # (admin-backend/data/dune-grant-catalog.json, v1.9.0 -> v1.10.0) is the
 # authoritative consumer; these entries seed the workstation draft so the
 # enumerator output is in sync with the new grant ids/inputs (input shapes
-# per docs/dune-research/ICEHUNTER-V05X-PARITY-BUILD-SPEC.md §G23-G25b + §Faction).
+# §G23-G25b + §Faction).
 #
 # set_starter_class is intentionally included here for completeness — the
 # admin UI keeps it disabled (spec §G25b lines 1006-1029), but the backend

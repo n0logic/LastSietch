@@ -128,7 +128,7 @@ SELECT COUNT(*)::int AS n
 # to ITEMS_SQL so the mirror can paginate locally and reproduce the live pages
 # byte-for-byte. Restricted to the same storage whitelist as the container list,
 # so only list-visible (clickable) containers get buckets.
-# See docs/dune-research/PHASE-2-MIRROR-CONTRACT-2026-06-05.md.
+#
 ALL_ITEMS_SQL = """
 SET search_path TO dune, public;
 SELECT coalesce(json_agg(json_build_object(

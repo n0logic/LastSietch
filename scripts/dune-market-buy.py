@@ -10,7 +10,7 @@ funded from the buyer's CHOAM bank Solari and delivered to their in-game Complet
 tab (exchange storage, dst_inventory_id=NULL), so it is safe whether the player is
 online or offline -- it never touches live RAM-backed inventory. No offline gate.
 
-See docs/dune-research/MARKET-BUY-BUILD-CONTRACT-2026-06-05.md.
+
 
 Modes:
   --order-id N --revision N --buyer-ctrl N --count N [--max-orders N] [--dry-run]

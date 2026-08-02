@@ -4,7 +4,7 @@
 # ONLY by the forced-command dispatcher /root/dune-relay-dispatch.sh via the
 # `spice-types` (read) and `spice-toggle <b64>` (write) tokens.
 #
-# See docs/dune-research/COMMUNITY-WINS-IMPLEMENTATION-PATH-2026-05-30.md
+#
 # "W6: Spice-spawn toggle". v1 = boolean only (Decision A): flips
 # dune.spicefield_types.is_spawning_active per field type and records the flip
 # in lsadmin.spicefield_toggle_log.

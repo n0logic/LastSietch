@@ -601,7 +601,7 @@ case "$action" in
     ;;
   # =============================================================================
   # Moderation trio dispatcher contract (Phase C 2026-05-29).
-  # Design doc: docs/dune-research/MODERATION-AND-DRILLDOWN-DESIGN-2026-05-29.md
+  #
   #
   # Shared interface for admin-backend (dev-2):
   #   kick           <account_id>          numeric, validated here

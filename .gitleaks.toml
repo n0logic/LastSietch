@@ -1,0 +1,35 @@
+# gitleaks configuration for Last Sietch.
+#
+# Keep this file small and every entry justified. An allowlist is where a
+# secret scanner goes to die: each line here is a place we have promised
+# ourselves not to look, so it needs a reason a reader can check.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+Game progression tag names, not credentials.
+
+scripts/tags-data.json is a machine-generated list of Funcom's own gameplay
+tag identifiers, used to decide which tags a grant applies. Many are shaped
+like "Skills.Key.Trooper2" or "BigMoments.Base.Complete". The literal word
+"Key" plus the entropy of a CamelCase identifier trips the generic-api-key
+rule, twelve times.
+
+This file cannot contain a credential: it is a flat array of game tag strings
+regenerated from a character's own tag set. It is still scanned by
+scripts/preflight.sh for our own deployment-specific patterns.
+"""
+paths = ['''scripts/tags-data\.json''']
+
+[[allowlists]]
+description = """
+Kubernetes secret KEY NAMES, not secret values.
+
+Code that reads a secret out of the cluster at runtime has to name the key it
+wants, for example FuncomLiveServices__ServiceAuthToken. The name is not
+sensitive; the value never appears in this repository, and reading it at call
+time is exactly why nothing here has to store it.
+"""
+regexes = ['''FuncomLiveServices__[A-Za-z]+''']

@@ -100,7 +100,7 @@ EOF
 }
 
 revoke_emergency() {
-  log "revoke-emergency: see docs/dune-research/RELAY-KEY-REVOKE.md"
+  log "revoke-emergency:"
   cat <<'EOF'
 
 Run on lastsietch-dune (via operator@wsl2 free-shell key):

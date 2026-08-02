@@ -5,7 +5,7 @@ Deployed to the game host:/root/dune-karum-audit.py (mode 0755). Reached by the
 dispatcher's 'karum-audit' action, so the web host can run it nightly over the relay and
 an admin can run it on demand from the panel. Emits ONE json object on stdout.
 
-Contract: docs/dune-research/v2-portal/KARUM-BUILD-CONTRACT-2026-07-27.md section 11.2
+ section 11.2
 
 ── WHY THIS EXISTS, AND IT IS TWO JOBS ────────────────────────────────────────
 JOB ONE: it is the canary for an offline-gate regression, and that gate is the single

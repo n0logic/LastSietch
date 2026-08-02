@@ -114,7 +114,7 @@ def build(account_id, qjson):
     """Shared builder: per-(container, template_id) item rollup for one account,
     via an injected `qjson(sql, fallback)` runner (collector psycopg2 + main()
     dq.sh share the SQL so the relay path and mirror match).
-    See docs/dune-research/PHASE-2-MIRROR-CONTRACT-2026-06-05.md."""
+   """
     sql = SQL_TEMPLATE.format(account_id=int(account_id))
     rows = qjson(sql, "[]") or []
     return {"available": True, "account_id": str(account_id),

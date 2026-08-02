@@ -12,7 +12,7 @@ from a persisted base container. The engine proc dune_exchange_add_sell_order do
 ALL of the heavy lifting -- fee debit, order insert, AND the escrow move (splitting
 the stack). We only fund the wallet from bank and call the proc, in ONE txn.
 
-See docs/dune-research/MARKET-SELL-BUILD-CONTRACT-2026-06-05.md.
+
 
 Modes:
   --seller-ctrl N --item-id N --count N --price N --duration-days {1,3,7,14}

@@ -123,9 +123,21 @@ declare -a CONTENT=(
   'funcom-seabass-sh-[0-9a-f]{16}:real namespace with HostId'
   '\bsh-[0-9a-f]{16}-:real battlegroup id'
   '(^|[^0-9])1[0-9]{17,18}([^0-9]|$):Discord snowflake'
-  '/opt/(hol-admin|hol-relay|cielago):untemplated deployment path'
+  # An install prefix like /opt/something is NOT a disclosure: it is a
+  # directory name, it reveals nothing about anyone's infrastructure, and the
+  # scripts here already carry it correctly as ${VAR:-/opt/default}. Flagging
+  # it fired on properly templated code, which is how a gate gets switched
+  # off. Install paths are documented as a convention instead.
   'discord(app)?\.com/api/webhooks/:live webhook'
   'xox[baprs]-|ghp_[A-Za-z0-9]{20,}:third-party token'
+  '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}:email address'
+  # Internal operational narrative. Not secret, but it is ours rather than the
+  # reader's: our incident dates, our hosting provider, our private notes, our
+  # ticket numbers. It makes a public repo read as somebody's leaked runbook.
+  '(feedback|reference|project)_[a-z]+_[a-z_]{4,}:private knowledge-base reference'
+  '\[\[[A-Za-z]:wiki-style link to a private note'
+  'ops/maint-[0-9]{4}-[0-9]{2}:reference to an unpublished runbook'
+  '(nobody was watching|a human noticed|hit us twice|bit us twice):incident narrative, generalise it'
 )
 
 # Deployment specifics cannot be listed here. This file is PUBLIC, so an IP

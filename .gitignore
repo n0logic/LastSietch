@@ -90,3 +90,7 @@ inventory.local.*
 
 # Local-only preflight name patterns (contains real handles)
 .preflight-local
+
+# Python build artefacts
+__pycache__/
+*.pyc

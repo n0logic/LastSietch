@@ -1,0 +1,11 @@
+[Unit]
+Description=Last Sietch Dune BattleGroup auto-recovery watchdog (un-stops the BG after a power reboot)
+Documentation=file:/opt/lastsietch-bg-watchdog/README.md
+After=k3s.service
+Wants=k3s.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lastsietch-bg-watchdog/watchdog.sh
+# Never let a hung kubectl wedge the timer.
+TimeoutStartSec=90

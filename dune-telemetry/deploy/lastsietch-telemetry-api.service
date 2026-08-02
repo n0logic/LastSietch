@@ -1,0 +1,15 @@
+[Unit]
+Description=Last Sietch Dune Telemetry Read API
+After=network.target lastsietch-telemetry.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/lastsietch-telemetry
+EnvironmentFile=/opt/lastsietch-telemetry/telemetry.env
+ExecStart=/opt/lastsietch-telemetry/venv/bin/uvicorn api.app:app --host 127.0.0.1 --port 8078
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

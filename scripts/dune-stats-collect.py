@@ -148,17 +148,6 @@ def _resolve_player_controllers(controller_ids):
     return {str(r[0]): (r[1] or "").strip() for r in rows}
 
 
-def _resolve_actor_owners(actor_ids):
-    """actor id (PlayerController) -> character_name via actors.owner_account_id."""
-    ids = sorted({str(a) for a in actor_ids if a is not None})
-    if not ids:
-        return {}
-    rows = psql(f"SELECT id, owner_account_id FROM dune.actors WHERE id IN ({','.join(ids)});")
-    actor_to_account = {str(r[0]): str(r[1]) for r in rows if r[1]}
-    names = resolve_names(actor_to_account.values())
-    return {aid: names.get(acc, f"acct {acc}") for aid, acc in actor_to_account.items()}
-
-
 # ---- sections (return structured data, NOT formatted strings) -------------
 
 def section_new_players(interval_sql):
@@ -255,103 +244,6 @@ def section_origins(con, window_start):
         (window_start,),
     ).fetchall()
     return [{"country": country, "count": cnt} for country, cnt in rows]
-
-
-def section_construction(con, window_start):
-    out = {"total_subfiefs": 0, "great": 0, "lesser": 0, "pieces_total": 0,
-           "biggest": [], "pacts": [], "renames": []}
-
-    counts = psql(
-        "SELECT actor_type, count(*) FROM dune.permission_actor "
-        "WHERE actor_type IN (3,4) GROUP BY actor_type;"
-    )
-    for r in counts:
-        if r[0] == "3":
-            out["great"] = int(r[1])
-        elif r[0] == "4":
-            out["lesser"] = int(r[1])
-    out["total_subfiefs"] = out["great"] + out["lesser"]
-    out["pieces_total"] = int(psql("SELECT count(*) FROM dune.building_instances;")[0][0])
-
-    biggest = psql(
-        "WITH base_pieces AS ("
-        "  SELECT afe.actor_id AS totem_id, count(*) AS pieces"
-        "  FROM dune.building_instances bi"
-        "  JOIN dune.actor_fgl_entities afe ON afe.entity_id = bi.owner_entity_id AND afe.slot_name = 'Actor'"
-        "  GROUP BY afe.actor_id),"
-        "totem_owner AS ("
-        "  SELECT par.permission_actor_id AS totem_id, ps.character_name AS owner"
-        "  FROM dune.permission_actor_rank par"
-        "  JOIN dune.actors pc ON pc.id = par.player_id"
-        "  JOIN dune.player_state ps ON ps.account_id = pc.owner_account_id"
-        "  WHERE par.rank = 1)"
-        " SELECT bp.totem_id, coalesce(nullif(pa.actor_name,''), '') AS base_name,"
-        "        coalesce(to2.owner,'') AS owner, bp.pieces"
-        " FROM base_pieces bp"
-        " LEFT JOIN dune.permission_actor pa ON pa.actor_id = bp.totem_id"
-        " LEFT JOIN totem_owner to2 ON to2.totem_id = bp.totem_id"
-        " ORDER BY bp.pieces DESC LIMIT 3;"
-    )
-    for r in biggest:
-        base_name, owner, pieces = r[1].strip(), r[2].strip(), int(r[3])
-        if base_name and not base_name.startswith("##"):
-            label = base_name
-        elif owner:
-            label = f"{owner}'s base"
-        else:
-            label = "an unclaimed base"
-        out["biggest"].append({"label": label, "pieces": pieces})
-
-    # Pacts struck — combat_events event_type 97.
-    pact_rows = con.execute(
-        "SELECT raw FROM combat_events WHERE event_type = 97 AND occurred_epoch >= ? ORDER BY id",
-        (window_start,),
-    ).fetchall()
-    seen_pairs = set()
-    pact_pairs = []
-    for (raw,) in pact_rows:
-        try:
-            d = json.loads(raw)
-        except Exception:
-            continue
-        if d.get("m_PermissionActorType") not in ("Totem", "TotemSmall"):
-            continue
-        if d.get("m_NewPermissionRank") == "NoAccess":
-            continue
-        inst = _act_int(d.get("m_InstigatorId"))
-        tgt = _act_int(d.get("m_TargetId"))
-        if inst is None or tgt is None:
-            continue
-        key = (inst, tgt)
-        if key in seen_pairs:
-            continue
-        seen_pairs.add(key)
-        pact_pairs.append((inst, tgt))
-    if pact_pairs:
-        actor_names = _resolve_actor_owners({a for pair in pact_pairs for a in pair})
-        for inst, tgt in pact_pairs[:3]:
-            out["pacts"].append({
-                "host": actor_names.get(str(inst), f"acct {inst}"),
-                "guest": actor_names.get(str(tgt), f"acct {tgt}"),
-            })
-
-    # Renames — combat_events event_type 98.
-    rename_rows = con.execute(
-        "SELECT raw FROM combat_events WHERE event_type = 98 AND occurred_epoch >= ? ORDER BY id",
-        (window_start,),
-    ).fetchall()
-    for (raw,) in rename_rows:
-        try:
-            d = json.loads(raw)
-        except Exception:
-            continue
-        if d.get("m_PermissionActorType") not in ("Totem", "TotemSmall"):
-            continue
-        nm = (d.get("m_NewName") or "").strip()
-        if nm and not nm.startswith("##") and nm not in out["renames"]:
-            out["renames"].append(nm)
-    out["renames"] = out["renames"][:2]
-    return out
 
 
 def section_raids(con, window_start):
@@ -828,11 +720,9 @@ def collect(period):
 
     if period == "weekly":
         out["pilot"] = safe(section_pilot, con, iso_week, default=[]) if con else []
-        out["construction"] = safe(section_construction, con, window_start, default=None) if con else None
         out["origins"] = safe(section_origins, con, window_start, default=[]) if con else []
     else:
         out["pilot"] = None
-        out["construction"] = None
         out["origins"] = None
 
     if con:

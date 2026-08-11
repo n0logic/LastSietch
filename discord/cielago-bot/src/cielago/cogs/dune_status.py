@@ -111,17 +111,6 @@ def _qty(n: int, singular: str, plural: str) -> str:
     return f"**{n}** {singular if n == 1 else plural}"
 
 
-# Default sub-fief console placeable names leak through the biggest-base label
-# when a holding was never christened; render those as a generic holding.
-_CONSOLE_LABELS = {"Sub-Fief Console", "Advanced Sub-Fief Console"}
-
-
-def _clean_base_label(label: str) -> str:
-    if label in _CONSOLE_LABELS or label.endswith("Console"):
-        return "an unnamed holding"
-    return label
-
-
 def _clip(text: str) -> str:
     return text[:1024] if len(text) > 1024 else text
 
@@ -346,30 +335,6 @@ def _f_server_health(d: dict) -> str:
     return "All servers running smoothly."
 
 
-def _f_construction(d: dict) -> str:
-    parts = [
-        f"**{d.get('total_subfiefs', 0)} sub-fiefs** anchor the basin — "
-        f"**{d.get('great', 0)}** great holdings, **{d.get('lesser', 0)}** lesser camps · "
-        f"**{d.get('pieces_total', 0):,} build pieces** placed across Hagga."
-    ]
-    biggest = d.get("biggest", [])
-    if biggest:
-        parts.append("*Biggest bases:*")
-        for i, b in enumerate(biggest, 1):
-            parts.append(f"{i}. {_clean_base_label(b['label'])} — **{b['pieces']}** pieces")
-    pacts = d.get("pacts", [])
-    if pacts:
-        parts.append("*Pacts struck this week:*")
-        for p in pacts:
-            parts.append(f"• {_name(p['host'])} welcomed {_name(p['guest'])} into their sub-fief")
-    renames = d.get("renames", [])
-    if renames:
-        parts.append("*Newly christened:*")
-        for nm in renames:
-            parts.append(f'• a base renamed to "{nm}"')
-    return _clip("\n".join(parts))
-
-
 def _f_origins(rows: list) -> str:
     if not rows:
         return "No connection data yet."
@@ -476,8 +441,6 @@ def build_embed(data: dict) -> discord.Embed:
     add("Server Health", _f_server_health(data.get("server_health") or {}), inline=True)
 
     if period == "weekly":
-        if data.get("construction"):
-            add("🏗️ Sietch Construction", _f_construction(data["construction"]))
         add("📜 Desert Almanac", _f_almanac(data.get("almanac") or {}))
         add("Origins", _f_origins(data.get("origins") or []))
 

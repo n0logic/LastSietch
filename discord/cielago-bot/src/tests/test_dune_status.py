@@ -1,9 +1,7 @@
 from cielago.cogs.dune_status import (
     DEATH_VARIANTS,
-    _clean_base_label,
     _et_hour_range,
     _f_almanac,
-    _f_construction,
     _f_moderation,
     _f_most_active,
     _f_raids,
@@ -56,7 +54,6 @@ SAMPLE_DAILY = {
     "spice": {"fields": [], "active_now_total": 72, "spawning_count": 8, "field_count": 8},
     "moderation": {"kicks": 0, "bans": 0, "unbans": 0, "active_bans": 0},
     "pilot": None,
-    "construction": None,
     "origins": None,
 }
 
@@ -161,16 +158,11 @@ def test_build_embed_weekly_sections():
     weekly["pilot"] = [
         {"name": "EtaPlayer", "km": 145.0, "vehicle_raw": "BP_LightOrnithopter_Choam_C"}
     ]
-    weekly["construction"] = {
-        "total_subfiefs": 25, "great": 16, "lesser": 9, "pieces_total": 11531,
-        "biggest": [{"label": "n0logic's base", "pieces": 900}], "pacts": [], "renames": [],
-    }
     weekly["origins"] = [{"country": "United States", "count": 25}]
     embed = build_embed(weekly)
     names = [f.name for f in embed.fields]
     assert embed.title == "🏜️ Sietch Weekly Report"
     assert "🪶 Pilot of the Week" in names
-    assert "🏗️ Sietch Construction" in names
     assert "Origins" in names
 
 
@@ -203,24 +195,6 @@ def test_raids_buggy_pluralization():
     many = {"events": [], "self_demos": 0, "storm_orni": 2, "storm_buggy": 3}
     _, value = _f_raids(many)
     assert "2 ornithopters," in value and "3 buggies " in value
-
-
-# ---- leak fix: console-name biggest-base label ----------------------------
-
-def test_clean_base_label_console():
-    assert _clean_base_label("Advanced Sub-Fief Console") == "an unnamed holding"
-    assert _clean_base_label("Sub-Fief Console") == "an unnamed holding"
-    assert _clean_base_label("n0logic's base") == "n0logic's base"
-
-
-def test_construction_hides_console_label():
-    out = _f_construction({
-        "total_subfiefs": 1, "great": 1, "lesser": 0, "pieces_total": 100,
-        "biggest": [{"label": "Advanced Sub-Fief Console", "pieces": 900}],
-        "pacts": [], "renames": [],
-    })
-    assert "an unnamed holding" in out
-    assert "Console" not in out
 
 
 # ---- Desert Almanac renderer ----------------------------------------------

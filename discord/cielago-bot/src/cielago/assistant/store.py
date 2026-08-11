@@ -64,7 +64,14 @@ CREATE TABLE IF NOT EXISTS tickets (
     auto INTEGER NOT NULL DEFAULT 0,
     embedding BLOB,
     embed_backend TEXT,
-    embed_dim INTEGER
+    embed_dim INTEGER,
+    -- Structured intake (the /report modal). NULL on every ticket the passive
+    -- watcher files, because a message in chat carries none of it. That NULL is
+    -- meaningful: it says "nobody asked", not "the player declined to answer".
+    ingame_name TEXT,
+    surface TEXT,      -- portal | game | both | NULL
+    server TEXT,       -- sietch/server or map, free text, normalised on intake
+    reported_via TEXT  -- watcher | report_modal
 );
 CREATE INDEX IF NOT EXISTS ix_tickets_status ON tickets(status);
 
@@ -115,6 +122,33 @@ CREATE TABLE IF NOT EXISTS qa_cache (
     hits INTEGER NOT NULL DEFAULT 0
 );
 
+-- Watcher LEADS. The passive channel watcher used to file a ticket straight
+-- from whatever a player typed in chat; those tickets carry no in-game name, no
+-- surface, no server, and a keyword classifier's guess at severity. They were
+-- also announced with a public quote-reply, which turned a stray "this is
+-- broken" into a bot interruption mid-conversation.
+--
+-- A lead is the same detection, demoted: recorded, reacted to, reviewable, but
+-- NOT a ticket and NOT posted to mod-ops individually. A mod promotes the ones
+-- that matter, which is the only step that mints a real ticket. Structured
+-- reports come through /report instead.
+CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at INTEGER NOT NULL,
+    author_id INTEGER NOT NULL,
+    author_name TEXT NOT NULL,
+    guild_id INTEGER,
+    channel_id INTEGER,
+    message_id INTEGER,
+    category TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'new',
+    promoted_ticket_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_leads_status ON leads(status);
+
 CREATE TABLE IF NOT EXISTS audit (
     ts INTEGER NOT NULL,
     actor TEXT,
@@ -123,6 +157,35 @@ CREATE TABLE IF NOT EXISTS audit (
     detail_json TEXT
 );
 """
+
+
+LEAD_NEW = "new"
+LEAD_PROMOTED = "promoted"
+LEAD_DISMISSED = "dismissed"
+OPEN_LEAD_STATES = (LEAD_NEW,)
+
+
+@dataclass
+class Lead:
+    """A watcher detection that has NOT been turned into a ticket."""
+    id: int
+    created_at: int
+    author_id: int
+    author_name: str
+    category: str
+    severity: str
+    title: str
+    body: str = ""
+    status: str = LEAD_NEW
+    guild_id: int | None = None
+    channel_id: int | None = None
+    message_id: int | None = None
+    promoted_ticket_id: int | None = None
+
+    def jump_url(self) -> str | None:
+        if not (self.guild_id and self.channel_id and self.message_id):
+            return None
+        return f"https://discord.com/channels/{self.guild_id}/{self.channel_id}/{self.message_id}"
 
 
 @dataclass
@@ -147,6 +210,12 @@ class Ticket:
     kb_entry_id: int | None = None
     mod_message_id: int | None = None
     auto: bool = False
+    # Structured intake; None means the ticket came from the passive watcher and
+    # nobody was ever asked. Do not render None as "not applicable".
+    ingame_name: str | None = None
+    surface: str | None = None
+    server: str | None = None
+    reported_via: str | None = None
 
     def jump_url(self) -> str | None:
         if not (self.guild_id and self.channel_id and self.message_id):
@@ -176,6 +245,37 @@ class FeatureRequest:
         return f"https://discord.com/channels/{self.guild_id}/{self.channel_id}/{self.message_id}"
 
 
+# Columns added after the table first shipped. SQLite has no
+# ADD COLUMN IF NOT EXISTS, and CREATE TABLE IF NOT EXISTS silently does nothing
+# to an existing table, so a live support.sqlite would keep the old shape and
+# every read of a new field would raise. Additive only, never destructive.
+_LATE_COLUMNS = {
+    "tickets": {
+        "ingame_name": "TEXT",
+        "surface": "TEXT",
+        "server": "TEXT",
+        "reported_via": "TEXT",
+    },
+}
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    for table, cols in _LATE_COLUMNS.items():
+        have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in cols.items():
+            if name not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                log.info("assistant.store_migrated", table=table, column=name)
+
+
+def _col(r: sqlite3.Row, name: str):
+    """Row value or None when the column predates this build."""
+    try:
+        return r[name]
+    except (IndexError, KeyError):
+        return None
+
+
 def _ticket_from_row(r: sqlite3.Row) -> Ticket:
     return Ticket(
         id=r["id"], created_at=r["created_at"], author_id=r["author_id"],
@@ -185,6 +285,18 @@ def _ticket_from_row(r: sqlite3.Row) -> Ticket:
         claimed_by_name=r["claimed_by_name"], dedup_count=r["dedup_count"],
         dedup_into=r["dedup_into"], resolution=r["resolution"], kb_entry_id=r["kb_entry_id"],
         mod_message_id=r["mod_message_id"], auto=bool(r["auto"]),
+        ingame_name=_col(r, "ingame_name"), surface=_col(r, "surface"),
+        server=_col(r, "server"), reported_via=_col(r, "reported_via"),
+    )
+
+
+def _lead_from_row(r: sqlite3.Row) -> Lead:
+    return Lead(
+        id=r["id"], created_at=r["created_at"], author_id=r["author_id"],
+        author_name=r["author_name"], category=r["category"], severity=r["severity"],
+        title=r["title"], body=r["body"], status=r["status"], guild_id=r["guild_id"],
+        channel_id=r["channel_id"], message_id=r["message_id"],
+        promoted_ticket_id=r["promoted_ticket_id"],
     )
 
 
@@ -214,6 +326,7 @@ class SupportStore:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(_SCHEMA)
+        _add_missing_columns(conn)
         conn.commit()
         self._conn = conn
         log.info("assistant.store_ready", path=self.path)
@@ -241,11 +354,13 @@ class SupportStore:
                 """INSERT INTO tickets
                    (created_at, author_id, author_name, guild_id, channel_id, message_id,
                     category, severity, title, body, status, dedup_count, auto,
-                    embedding, embed_backend, embed_dim)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    embedding, embed_backend, embed_dim,
+                    ingame_name, surface, server, reported_via)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (t.created_at, t.author_id, t.author_name, t.guild_id, t.channel_id,
                  t.message_id, t.category, t.severity, t.title, t.body, t.status,
-                 t.dedup_count, int(t.auto), blob, backend, dim),
+                 t.dedup_count, int(t.auto), blob, backend, dim,
+                 t.ingame_name, t.surface, t.server, t.reported_via),
             )
             self.conn.commit()
             t.id = int(cur.lastrowid)
@@ -279,6 +394,50 @@ class SupportStore:
         ).fetchall()
         return [_ticket_from_row(r) for r in rows]
 
+    # --- leads ---
+
+    def add_lead(self, ld: "Lead") -> "Lead":
+        with self._lock:
+            cur = self.conn.execute(
+                """INSERT INTO leads
+                   (created_at, author_id, author_name, guild_id, channel_id,
+                    message_id, category, severity, title, body, status)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (ld.created_at, ld.author_id, ld.author_name, ld.guild_id,
+                 ld.channel_id, ld.message_id, ld.category, ld.severity,
+                 ld.title, ld.body, ld.status),
+            )
+            self.conn.commit()
+            ld.id = int(cur.lastrowid)
+        return ld
+
+    def get_lead(self, lead_id: int) -> "Lead | None":
+        r = self.conn.execute("SELECT * FROM leads WHERE id=?", (lead_id,)).fetchone()
+        return _lead_from_row(r) if r else None
+
+    def list_leads(self, statuses: tuple[str, ...] = OPEN_LEAD_STATES,
+                   limit: int = 25) -> list["Lead"]:
+        ph = ",".join("?" * len(statuses))
+        rows = self.conn.execute(
+            f"SELECT * FROM leads WHERE status IN ({ph}) ORDER BY id DESC LIMIT ?",
+            (*statuses, limit),
+        ).fetchall()
+        return [_lead_from_row(r) for r in rows]
+
+    def update_lead(self, lead_id: int, **fields) -> None:
+        if not fields:
+            return
+        cols = ", ".join(f"{k}=?" for k in fields)
+        with self._lock:
+            self.conn.execute(f"UPDATE leads SET {cols} WHERE id=?",
+                              (*fields.values(), lead_id))
+            self.conn.commit()
+
+    def lead_message_ids(self) -> set[int]:
+        rows = self.conn.execute(
+            "SELECT message_id FROM leads WHERE message_id IS NOT NULL").fetchall()
+        return {r["message_id"] for r in rows}
+
     def tracked_message_ids(self) -> set[int]:
         rows = self.conn.execute(
             "SELECT message_id FROM tickets WHERE message_id IS NOT NULL"
@@ -289,7 +448,7 @@ class SupportStore:
         """Source message ids already turned into a ticket OR a feature request —
         the de-dup guard for on_message and the daily sweep."""
         ids: set[int] = set()
-        for table in ("tickets", "feature_requests"):
+        for table in ("tickets", "feature_requests", "leads"):
             rows = self.conn.execute(
                 f"SELECT message_id FROM {table} WHERE message_id IS NOT NULL"
             ).fetchall()

@@ -596,6 +596,11 @@ BEGIN
       JOIN dune.inventories inv ON inv.id = c.inv_id
      ORDER BY c.pri ASC, c.inv_id ASC
   LOOP
+    -- Lock this candidate inventory before we judge it: the free-slot probe in 4b is the
+    -- same unserialised read-then-write as the move path, so two concurrent withdrawals
+    -- landing in one box would otherwise pick the same position_index. Candidates are
+    -- visited in a fixed order (pri, inv_id), so the lock order is consistent.
+    PERFORM 1 FROM dune.inventories WHERE id = v_cand.inv_id FOR UPDATE;
     -- 4a. can we merge into a stack already sitting here?
     SELECT id, stack_size INTO v_coin_id, v_coin_stack
       FROM dune.items
@@ -886,8 +891,13 @@ BEGIN
   IF v_dst_map = 'DeepDesert' THEN RAISE EXCEPTION 'dst_on_deep_desert'; END IF;
   IF v_src_inv = {dst_inv} THEN RAISE EXCEPTION 'move_failed (same inventory)'; END IF;
   -- 5. resolve dest caps + current usage (used_vol counts UNKNOWN-volume rows as 0: lower bound)
+  -- FOR UPDATE locks the DESTINATION inventory row for the rest of the txn. Without it
+  -- two concurrent moves into the same box both read the same "first empty" slot in step 6
+  -- and both write it, leaving two items sharing one position_index: the portal grid then
+  -- renders one and hides the other, and the client drops the loser on load. Observed
+  -- 2026-08-03 on container 93842 (slots 0 and 1 doubled) after four back-to-back moves.
   SELECT max_item_count, max_item_volume INTO v_dst_mic, v_dst_miv
-    FROM dune.inventories WHERE id = {dst_inv};
+    FROM dune.inventories WHERE id = {dst_inv} FOR UPDATE;
   SELECT COUNT(*), COALESCE(SUM(COALESCE(volume_override, 0) * stack_size), 0)
     INTO v_used_slots, v_used_vol
     FROM dune.items WHERE inventory_id = {dst_inv};

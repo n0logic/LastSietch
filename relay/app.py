@@ -1839,6 +1839,124 @@ def _dune_repair_action(action: str, request_body: dict):
     }
 
 
+AUGMENT_ID_RE = re.compile(r"^T\d_Augment_[A-Za-z0-9_]{1,48}$")
+AUGMENT_IDEM_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+@app.post("/dune/augment/apply", dependencies=[Depends(verify_key)])
+async def dune_augment_apply(request: Request):
+    """Per-item augment REROLL / SWAP write path. Replaces the item's whole
+    FAugmentedItemStats block from `augments` (the FULL resulting list, in slot
+    order) and redraws rolls only for the slots named in `reroll_only`; every
+    other slot keeps its exact current rolls AND grade. OFFLINE-only (item stats
+    are RAM-backed while online; the writer hard-gates).
+
+    Body = {owner_ctrl:int, item_id:int, augments:[str], grade?:int,
+    roll_mode?:"random"|"perfect", consume?:bool, preserve_grades?:bool,
+    reroll_only?:[str], idempotency_key?:str}.
+
+    🔴 owner_ctrl is resolved SERVER-SIDE by the admin-backend from the session.
+    It is never accepted from a browser: the writer trusts it completely to
+    resolve the pawn, ownership and the offline gate, so it IS the auth boundary.
+    The writer re-verifies offline + item ownership + augment ownership, and on a
+    swap consumes the incoming augment in the SAME transaction as the write.
+
+    `idempotency_key` is honoured in-transaction: a retry of an already-applied
+    intent replays the prior outcome and consumes NOTHING. Send one for anything
+    player-initiated -- a dropped response plus a retry would otherwise destroy a
+    second augment, of which only ~297 exist server-wide.
+
+    Kill-switch: the writer refuses with augment_disabled unless
+    LASTSIETCH_AUGMENT_ENABLED=1. The writer's JSON (incl. ok:false error tokens) is
+    surfaced verbatim."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "request body must be JSON")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "request body must be a JSON object")
+
+    def _pos_int(name):
+        val = body.get(name)
+        if isinstance(val, bool) or not isinstance(val, int) or val <= 0:
+            raise HTTPException(400, f"{name} must be a positive integer")
+        return val
+
+    def _aug_list(name, required):
+        raw = body.get(name)
+        if raw is None:
+            if required:
+                raise HTTPException(400, f"{name} is required")
+            return None
+        if not isinstance(raw, list) or not raw or len(raw) > 3:
+            raise HTTPException(400, f"{name} must be a 1-3 element array")
+        out = []
+        for a in raw:
+            if not isinstance(a, str) or not AUGMENT_ID_RE.match(a):
+                raise HTTPException(400, f"{name} entries must look like T6_Augment_Name")
+            out.append(a)
+        return out
+
+    fields = {
+        "owner_ctrl": _pos_int("owner_ctrl"),
+        "item_id": _pos_int("item_id"),
+        "augments": _aug_list("augments", True),
+    }
+
+    grade = body.get("grade")
+    if grade is not None:
+        if isinstance(grade, bool) or not isinstance(grade, int) or not 1 <= grade <= 5:
+            raise HTTPException(400, "grade must be an integer 1..5")
+        fields["grade"] = grade
+
+    roll_mode = body.get("roll_mode")
+    if roll_mode is not None:
+        if roll_mode not in ("random", "perfect"):
+            raise HTTPException(400, "roll_mode must be 'random' or 'perfect'")
+        fields["roll_mode"] = roll_mode
+
+    for flag in ("consume", "preserve_grades"):
+        val = body.get(flag)
+        if val is not None:
+            if not isinstance(val, bool):
+                raise HTTPException(400, f"{flag} must be a boolean")
+            fields[flag] = val
+
+    reroll_only = _aug_list("reroll_only", False)
+    if reroll_only is not None:
+        fields["reroll_only"] = reroll_only
+
+    idem = body.get("idempotency_key")
+    if idem is not None:
+        if not isinstance(idem, str) or not AUGMENT_IDEM_RE.match(idem):
+            raise HTTPException(400, "idempotency_key must be 8-64 chars of letters, digits, _ or -")
+        fields["idempotency_key"] = idem
+
+    payload = json.dumps(fields, separators=(",", ":"), sort_keys=True)
+    arg = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+    if not DUNE_GRANT_B64_RE.match(arg):
+        raise HTTPException(500, "failed to encode augment-op payload")
+
+    out, err, code = _dune_ssh_stdin("augment-op", arg, timeout=45)
+    out = (out or "").strip()
+    err = (err or "").strip()
+    if out:
+        try:
+            parsed = json.loads(out)
+            if isinstance(parsed, dict):
+                parsed.setdefault("exit_code", code)
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    return {
+        "ok": False,
+        "error": "writer_no_output",
+        "exit_code": code,
+        "message": (err or out or "augment-op produced no output")[:1000],
+        "stderr": err[:2000],
+    }
+
+
 @app.post("/dune/repair/box", dependencies=[Depends(verify_key)])
 async def dune_repair_box(request: Request):
     """Vanilla repair of every durable item in ONE owned container (tops CurrentDurability

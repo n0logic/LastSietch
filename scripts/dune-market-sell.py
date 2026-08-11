@@ -22,6 +22,15 @@ Modes:
                           max_orders?, expected_template?, dry_run?}
 
 Correctness rules (non-negotiable):
+  * SOURCE-GATE (STOP-SHIP, added 2026-08-03): container- and vehicle-sourced
+    listings are refused unless /etc/lastsietch/market-sell-container-enabled exists.
+    The offline gate below covers the SELLER, but a base container is held in its
+    partition server's memory for as long as that PARTITION is up, which the
+    seller's session has nothing to do with. Listing moves the item into escrow, so
+    a later container save re-materialises it in the box while the escrow copy still
+    backs a live order. Bank-sourced listings are unaffected: inv_type 30 re-hydrates
+    from the DB at login. Enforced in BOTH preflight() and do_live() -- preflight
+    alone would only cover --dry-run.
   * OFFLINE-GATE (STOP-SHIP): the source item lives in a base container whose
     inventory is RAM-backed while the player is online (clobbered on save-tick).
     Refuse unless the seller's encrypted_player_state.online_status='Offline' AND
@@ -65,6 +74,7 @@ HARD CONSTRAINTS (mirror dune-market-buy.py / dune-grant.sh):
 import argparse
 import base64
 import json
+import os
 import re
 import subprocess
 import sys
@@ -86,8 +96,24 @@ DB_PORT = "15432"
 DB_USER = "postgres"
 DB_NAME = "dune"
 
+# Container-sourced listing kill-switch. PRESENCE of the file = ENABLED, matching
+# /etc/lastsietch/reward-enabled and /etc/lastsietch/augment-enabled; `rm` is the kill-switch
+# and absence is the safe default. A FLAG FILE rather than an env var on purpose: the
+# dispatcher is invoked as `ssh host market-sell`, a non-interactive non-login shell
+# that inherits no profile, so an exported variable would never reach this process
+# (the trap that made LASTSIETCH_AUGMENT_ENABLED a no-op until 2026-08-02).
+#
+# Dark since 2026-08-03: listing MOVES the item into the exchange escrow via the
+# engine proc, and a base container or spawned vehicle is held in its partition
+# server's memory for as long as that partition is up -- independent of whether the
+# SELLER is offline. If that partition later saves over the container, the box gets
+# the item back while the escrow copy still backs a live order: one item, two places.
+# The CHOAM bank is exempt because it re-hydrates from the DB at login.
+CONTAINER_SOURCE_FLAG = "/etc/lastsietch/market-sell-container-enabled"
+
 # Clean error tokens the relay/portal switch on. Order matters: most-specific first.
 ERROR_TOKENS = (
+    "container_source_disabled",
     "player_online",
     "item_not_found",
     "not_owner",
@@ -269,6 +295,11 @@ def read_plan(seller, item_id):
         "  'stack', (SELECT stack_size FROM it),\n"
         "  'quality', (SELECT quality_level FROM it),\n"
         "  'owned', EXISTS(SELECT 1 FROM owned o JOIN it ON o.inv_id = it.inventory_id),\n"
+        f"  'src_is_bank', EXISTS(SELECT 1 FROM dune.inventories inv\n"
+        f"      JOIN dune.encrypted_player_state eps ON eps.player_pawn_id = inv.actor_id\n"
+        f"      WHERE inv.id = (SELECT inventory_id FROM it)\n"
+        f"        AND inv.inventory_type = 30\n"
+        f"        AND eps.player_controller_id = {seller}),\n"
         f"  'online_status', (SELECT online_status FROM dune.encrypted_player_state\n"
         f"      WHERE player_controller_id = {seller} LIMIT 1),\n"
         f"  'in_grace', (SELECT (reconnect_grace_period_end IS NOT NULL\n"
@@ -310,6 +341,11 @@ def preflight(plan, count, expected_template, fee=None):
         return ["item_not_found"]
     if expected_template is not None and plan.get("template_id") != expected_template:
         errs.append("item_not_found")  # identity mismatch / swapped item
+    # Source gate BEFORE the offline gate: seller-offline is the check we now know is
+    # not sufficient for a container, so refusing on source first gives the player the
+    # accurate reason instead of "log out and try again", which would not have helped.
+    if not plan.get("src_is_bank") and not os.path.exists(CONTAINER_SOURCE_FLAG):
+        errs.append("container_source_disabled")
     if plan.get("online_status") != "Offline" or plan.get("in_grace"):
         errs.append("player_online")
     if not plan.get("owned"):
@@ -506,6 +542,15 @@ def do_dry_run(seller, item_id, count, price, days, max_orders, expected_templat
 
 def do_live(seller, item_id, count, price, days, max_orders, expected_template):
     ns, pod = resolve_db_pod()
+    # SOURCE GATE (live path). preflight() only runs under --dry-run, and the write's
+    # own DO block gates ownership + offline but knows nothing about which chain the
+    # item came from, so the refusal has to happen here or a container listing would
+    # sail straight through. One extra read before a write that moves an item into
+    # escrow is a cheap price for not duplicating it.
+    if not os.path.exists(CONTAINER_SOURCE_FLAG):
+        plan = read_plan(seller, item_id)
+        if plan.get("found") and not plan.get("src_is_bank"):
+            fail("container_source_disabled", 1)
     sql = build_write_sql(seller, item_id, count, price, days, max_orders,
                           expected_template)
     # Keep the inner psql timeout BELOW the relay's ssh abandon so a slow write

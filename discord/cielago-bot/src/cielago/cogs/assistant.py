@@ -24,8 +24,8 @@ Config (cielago.config.settings):
 """
 
 from __future__ import annotations
-import os
 
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from datetime import time as dtime
@@ -48,9 +48,10 @@ from cielago.assistant.classify import (
     summarize_title,
 )
 from cielago.assistant.dedup import best_match
+from cielago.assistant import intake
 from cielago.assistant.embeddings import load_embedder
 from cielago.assistant.migrate import migrate_tracker_json
-from cielago.assistant.store import FeatureRequest, SupportStore, Ticket
+from cielago.assistant.store import FeatureRequest, Lead, SupportStore, Ticket
 from cielago.audit import audit
 from cielago.config import settings
 from cielago.permissions import is_admin
@@ -88,6 +89,7 @@ _DESC_LIMIT = 1000
 # ignored. Same failure shape as the welcome-pack offline gate -- the system behaves
 # correctly and looks broken -- and it is why three separate players re-reported
 # BUG-011 (2026-07-24) instead of trusting that the first report had landed.
+LEAD_EMOJI = "\U0001F441"         # 👁 noticed, NOT filed (watcher lead)
 ACK_EMOJI = "\U0001F4DD"          # 📝 filed
 ACK_DUP_EMOJI = "\U0001F517"      # 🔗 merged into an existing report
 ACK_TEXT = {
@@ -160,6 +162,13 @@ def build_ticket_embed(t: Ticket) -> discord.Embed:
     embed.add_field(name="Reporter", value=t.author_name, inline=True)
     embed.add_field(name="Severity", value=t.severity.title(), inline=True)
     embed.add_field(name="Status", value=STATUS_LABEL.get(t.status, t.status), inline=True)
+    # Structured intake from /report. Only present on modal-filed tickets, and
+    # the whole reason those fields are collected is to save a mod the round
+    # trip -- storing them and not showing them here would waste the ask.
+    context = intake.summarise_for_mods(t.ingame_name or "", t.surface or "",
+                                        t.server or "")
+    if context:
+        embed.add_field(name="Reported", value=context, inline=False)
     if t.claimed_by_name:
         embed.add_field(name="Claimed by", value=t.claimed_by_name, inline=True)
     if t.dedup_count > 1:
@@ -380,12 +389,50 @@ class Assistant(commands.Cog):
             return
 
         title = summarize_title(content)
+        severity = classify_severity(content, category)
+        # DEFAULT PATH: record a lead, react, say nothing. The watcher is a
+        # keyword classifier; what it produces is a hint that someone MIGHT have
+        # hit something, not a report worth a mod's queue slot. Structured
+        # reports come from /report, which asks for the things a mod actually
+        # needs. Set CIELAGO_ASSISTANT_WATCHER_FILES_TICKETS=true for the old
+        # behaviour.
+        if not settings.cielago_assistant_watcher_files_tickets:
+            await self._handle_lead(message, category, severity, title, content,
+                                    live=live)
+            return
+
         vec = self.embedder.embed([content])[0]
         if category == CAT_FEATURE:
             await self._handle_feature(message, title, content, vec, live=live)
         else:
-            severity = classify_severity(content, category)
             await self._handle_ticket(message, category, severity, title, content, vec, live=live)
+
+    async def _handle_lead(self, message, category, severity, title, body,
+                           live: bool = True) -> None:
+        """Record the detection and mark the message. NOTHING is posted to
+        mod-ops and NOTHING is said in the channel.
+
+        The reaction is the entire player-facing surface, and it is deliberately
+        not an acknowledgement: it means "a bot noticed this", not "this is
+        filed". Telling them it was filed when a mod still has to promote it
+        would be the same lie the old quote-reply told, just quieter.
+        """
+        ld = Lead(
+            id=0, created_at=int(time.time()), author_id=message.author.id,
+            author_name=message.author.display_name, category=category,
+            severity=severity, title=title, body=body[:4000],
+            guild_id=message.guild.id, channel_id=message.channel.id,
+            message_id=message.id,
+        )
+        self.store.add_lead(ld)
+        self.store.record_audit(str(message.author), "lead-open", str(ld.id),
+                                category=category, severity=severity)
+        if live:
+            try:
+                await message.add_reaction(LEAD_EMOJI)
+            except discord.DiscordException as exc:
+                log.warning("assistant.lead_reaction_failed", lead=ld.id, error=str(exc))
+        log.info("assistant.lead_open", lead=ld.id, category=category, severity=severity)
 
     async def _handle_ticket(self, message, category, severity, title, body, vec,
                              live: bool = True) -> None:
@@ -687,6 +734,83 @@ class Assistant(commands.Cog):
         await interaction.response.send_message(
             "**Open tickets:**\n" + "\n".join(lines)[:1900], ephemeral=True
         )
+
+    # --- leads: the watcher's detections, awaiting a human call ---
+
+    lead = app_commands.Group(
+        name="lead",
+        description="Watcher detections that are not tickets yet",
+        parent=assistant,
+    )
+
+    @lead.command(name="list", description="Recent watcher detections awaiting review")
+    async def lead_list(self, interaction: discord.Interaction) -> None:
+        if not await self._guard(interaction):
+            return
+        items = self.store.list_leads()
+        if not items:
+            await interaction.response.send_message(
+                "No pending leads. The watcher has not flagged anything new.",
+                ephemeral=True)
+            return
+        lines = []
+        for ld in items:
+            url = ld.jump_url()
+            link = f" [jump]({url})" if url else ""
+            lines.append(f"`L{ld.id}` [{ld.category}] {ld.title} — {ld.author_name}{link}")
+        await interaction.response.send_message(
+            "**Leads awaiting review** (`/assistant lead promote <id>` to open a ticket):\n"
+            + "\n".join(lines)[:1900], ephemeral=True)
+
+    @lead.command(name="promote", description="Turn a lead into a real ticket")
+    @app_commands.describe(lead_id="Lead number (the L in the list)")
+    async def lead_promote(self, interaction: discord.Interaction, lead_id: int) -> None:
+        if not await self._guard(interaction):
+            return
+        ld = self.store.get_lead(lead_id)
+        if ld is None:
+            await interaction.response.send_message(f"No lead L{lead_id}.", ephemeral=True)
+            return
+        if ld.status != S.LEAD_NEW:
+            await interaction.response.send_message(
+                f"L{lead_id} is already {ld.status}"
+                + (f" (ticket #{ld.promoted_ticket_id})." if ld.promoted_ticket_id else "."),
+                ephemeral=True)
+            return
+
+        # The promoted ticket is embedded so it dedups against everything else;
+        # a lead carries no vector because it is not in the dedup pool.
+        vec = self.embedder.embed([ld.body or ld.title])[0] if self.embedder else None
+        t = Ticket(
+            id=0, created_at=int(time.time()), author_id=ld.author_id,
+            author_name=ld.author_name, category=ld.category, severity=ld.severity,
+            title=ld.title, body=ld.body, guild_id=ld.guild_id,
+            channel_id=ld.channel_id, message_id=ld.message_id, auto=True,
+            reported_via="lead_promoted",
+        )
+        self.store.add_ticket(t, embedding=vec,
+                              backend=self.embedder.backend if self.embedder else None)
+        self.store.update_lead(ld.id, status=S.LEAD_PROMOTED, promoted_ticket_id=t.id)
+        self.store.record_audit(str(interaction.user), "lead-promote", str(ld.id),
+                                ticket=t.id)
+        await self._post_ticket(t)
+        await interaction.response.send_message(
+            f"L{lead_id} promoted to ticket **#{t.id}** and posted to mod-ops.",
+            ephemeral=True)
+        log.info("assistant.lead_promoted", lead=ld.id, ticket=t.id)
+
+    @lead.command(name="dismiss", description="Drop a lead without opening a ticket")
+    @app_commands.describe(lead_id="Lead number")
+    async def lead_dismiss(self, interaction: discord.Interaction, lead_id: int) -> None:
+        if not await self._guard(interaction):
+            return
+        ld = self.store.get_lead(lead_id)
+        if ld is None:
+            await interaction.response.send_message(f"No lead L{lead_id}.", ephemeral=True)
+            return
+        self.store.update_lead(lead_id, status=S.LEAD_DISMISSED)
+        self.store.record_audit(str(interaction.user), "lead-dismiss", str(lead_id))
+        await interaction.response.send_message(f"L{lead_id} dismissed.", ephemeral=True)
 
     @ticket.command(name="show", description="Show one ticket")
     @app_commands.describe(ticket_id="Ticket number")

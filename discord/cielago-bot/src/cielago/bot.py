@@ -32,6 +32,9 @@ class Cielago(commands.Bot):
         await self.load_extension("cielago.cogs.market_alerts")
         await self.load_extension("cielago.cogs.onboarding")
         await self.load_extension("cielago.cogs.assistant")
+        # AFTER assistant: Reports reads that cog's store and _post_ticket so both
+        # intake paths share one queue, one id space and one dedup pass.
+        await self.load_extension("cielago.cogs.report")
         await self.load_extension("cielago.cogs.voice")
         guild = discord.Object(id=settings.last_sietch_guild_id)
         self.tree.copy_global_to(guild=guild)

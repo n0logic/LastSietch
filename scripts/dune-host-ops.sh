@@ -32,12 +32,23 @@ load=$(awk '{print $1}' /proc/loadavg)
 read cpu user nice system idle iowait irq softirq steal _ < /proc/stat
 total1=$((user+nice+system+idle+iowait+irq+softirq+steal))
 idle1=$((idle+iowait))
+# Scheduler churn, sampled across the same 1s window as cpu_pct (added 2026-08-04:
+# context-switch rate was measured at 30-60x this box's own since-boot average while
+# CPU sat idle, which is the signature we need a time series for).
+ctxt1=$(awk '/^ctxt /{print $2}' /proc/stat); ctxt1=${ctxt1:-0}
+intr1=$(awk '/^intr /{print $2}' /proc/stat); intr1=${intr1:-0}
 sleep 1
 read cpu user nice system idle iowait irq softirq steal _ < /proc/stat
 total2=$((user+nice+system+idle+iowait+irq+softirq+steal))
 idle2=$((idle+iowait))
+ctxt2=$(awk '/^ctxt /{print $2}' /proc/stat); ctxt2=${ctxt2:-0}
+intr2=$(awk '/^intr /{print $2}' /proc/stat); intr2=${intr2:-0}
 total_diff=$((total2-total1)); idle_diff=$((idle2-idle1))
 cpu_pct=$(awk -v t=$total_diff -v i=$idle_diff 'BEGIN { if (t>0) printf "%.1f", 100.0*(t-i)/t; else print "0.0" }')
+ctxt_per_sec=$((ctxt2-ctxt1))
+intr_per_sec=$((intr2-intr1))
+procs_running=$(awk '/^procs_running/{print $2}' /proc/stat); procs_running=${procs_running:-0}
+procs_blocked=$(awk '/^procs_blocked/{print $2}' /proc/stat); procs_blocked=${procs_blocked:-0}
 
 cpu_count=$(grep -c '^processor' /proc/cpuinfo)
 
@@ -58,10 +69,11 @@ bg=$(bg_json)
 players=$(players_json)
 
 # Compose host JSON
-host=$(printf '{"cpu_pct":%s,"cpu_count":%s,"load":%s,"uptime_secs":%s,"mem_used_bytes":%s,"mem_total_bytes":%s,"mem_pct":%s,"disk_used_bytes":%s,"disk_total_bytes":%s,"disk_pct":%s,"hostname":"%s"}' \
+host=$(printf '{"cpu_pct":%s,"cpu_count":%s,"load":%s,"uptime_secs":%s,"mem_used_bytes":%s,"mem_total_bytes":%s,"mem_pct":%s,"disk_used_bytes":%s,"disk_total_bytes":%s,"disk_pct":%s,"ctxt_per_sec":%s,"intr_per_sec":%s,"procs_running":%s,"procs_blocked":%s,"hostname":"%s"}' \
   "$cpu_pct" "$cpu_count" "$load" "$uptime_secs" \
   "$((mem_used_kb*1024))" "$((mem_total_kb*1024))" "$mem_pct" \
   "$disk_used" "$disk_total" "$disk_pct" \
+  "$ctxt_per_sec" "$intr_per_sec" "$procs_running" "$procs_blocked" \
   "$(hostname)")
 
 # Pod counts

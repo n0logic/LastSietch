@@ -73,6 +73,19 @@ class Settings(BaseSettings):
     cielago_assistant_ack_channel_ids: str = Field(
         alias="CIELAGO_ASSISTANT_ACK_CHANNEL_IDS", default=""
     )
+    # WATCHER MODE. False (default) = the passive channel watcher records a LEAD
+    # and reacts, but does NOT open a ticket and does NOT reply in channel. A mod
+    # promotes the ones worth acting on. True = the old behaviour, where every
+    # detection became a ticket in mod-ops.
+    #
+    # Why the default flipped (2026-08-04): the watcher is a keyword classifier,
+    # so its tickets carry no in-game name, no surface, no server and a guessed
+    # severity, and its quote-reply interrupted conversations in channels meant
+    # for players talking to each other. Structured reports now arrive via
+    # /report. Detection is still valuable, it just should not mint tickets.
+    cielago_assistant_watcher_files_tickets: bool = Field(
+        alias="CIELAGO_ASSISTANT_WATCHER_FILES_TICKETS", default=False
+    )
     # Pinged on Escalate-to-owner (the owner's user id); falls back to admin ids.
     cielago_assistant_owner_id: int | None = Field(
         alias="CIELAGO_ASSISTANT_OWNER_ID", default=None

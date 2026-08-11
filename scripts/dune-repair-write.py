@@ -11,10 +11,11 @@ Three actions, two semantics:
                  CurrentDurability up to the row's current DecayedMaxDurability.
   * gear       : VANILLA repair of the player's CARRIED inventories (backpack inv 0,
                  worn armor inv 1, hotbar/weapons inv 15) on the pawn.
-  * everything : REFURBISH (factory). All accessible storage (own + clan/shared, any
-                 map incl. Deep Desert) + all vehicles/storage-modules + bank + the
-                 carried pawn inventories. Writes BOTH CurrentDurability AND
-                 DecayedMaxDurability up to the factory MaxDurability (wipes decay).
+  * everything : REFURBISH (factory). PAWN-SIDE ONLY as of 2026-08-03: the carried
+                 inventories (backpack inv 0, worn inv 1, hotbar inv 15) + the CHOAM
+                 bank (inv 30). Writes BOTH CurrentDurability AND DecayedMaxDurability
+                 up to the factory MaxDurability (wipes decay). Base containers and
+                 vehicles were REMOVED from this action -- see target_inv_cte().
 
  (Confirmed
 durability model). Mirrors dune-storage-write.py / dune-market-sell.py.
@@ -395,6 +396,17 @@ def carried_inv_sql(owner):
     )
 
 
+def bank_inv_sql(owner):
+    """The owner's CHOAM bank (inventory_type 30) on their own pawn. Split out of
+    owned_inv_sql so 'everything' can reach the bank without reaching base containers."""
+    return (
+        "    SELECT inv.id AS inv_id\n"
+        "      FROM dune.inventories inv\n"
+        "      JOIN dune.encrypted_player_state eps ON eps.player_pawn_id = inv.actor_id\n"
+        f"      WHERE inv.inventory_type = 30 AND eps.player_controller_id = {owner}"
+    )
+
+
 def target_inv_cte(action, owner, inv_id):
     """SQL fragment producing an `inv_id` column = the target inventory set for the
     action (box/gear/everything -- item inventories). The 'vehicle' action does NOT use
@@ -407,10 +419,15 @@ def target_inv_cte(action, owner, inv_id):
         )
     if action == "gear":
         return carried_inv_sql(owner)
-    # everything: owned storage/bank/cargo UNION the carried pawn inventories
+    # everything: PAWN-SIDE ONLY -- carried inventories (backpack/worn/hotbar) + the
+    # CHOAM bank. Base containers and vehicles were removed from this action's reach on
+    # 2026-08-03 (owner's call): a container's contents are held in the server's RAM for
+    # as long as the base is loaded, which has nothing to do with the OWNER being offline,
+    # so a refurbish written there is invisible in-game and is lost whenever the server
+    # next saves that container. The pawn and its bank re-hydrate from the DB at login,
+    # which is why those two are the only surfaces where an offline write reliably lands.
     return (
-        "    SELECT inv_id FROM (" + owned_inv_sql(owner) + "    ) o\n"
-        "    UNION\n" + carried_inv_sql(owner)
+        carried_inv_sql(owner) + "\n    UNION\n" + bank_inv_sql(owner)
     )
 
 

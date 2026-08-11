@@ -279,6 +279,11 @@ def build_cheat_script_inner(fls_id, script_name):
 
 # Any exec that is destructive, server-wide-disruptive, or a known crash hook.
 # Matched case-insensitively against the whole exec string. --i-mean-it overrides.
+# `heartbeats` is a DIRECT exchange. Every pod binds its queue on this key AND on
+# its own server id, so this default fans out to the whole fleet in one publish.
+# Override with --routing-key <server_id> to hit exactly one pod.
+DEFAULT_ROUTING_KEY = "notifications"
+
 SERVEREXEC_DENY = (
     "destroy", "resetprogression", "cleanplayerinventory", "crash",
     "forceservercrash", "quit", "exit", "shutdown", "restart",
@@ -326,7 +331,8 @@ def build_envelope_b64(inner, token):
         json.dumps(outer, separators=(",", ":")).encode()).decode()
 
 
-def build_erlang_expr(payload_b64, message_id_prefix, message_id=None):
+def build_erlang_expr(payload_b64, message_id_prefix, message_id=None,
+                      routing_key=DEFAULT_ROUTING_KEY):
     """Verbatim port of adain's Erlang expression. Properties record matches
     P_basic positional layout: content_type, content_encoding, headers,
     delivery_mode, priority, correlation_id, reply_to, expiration, message_id,
@@ -335,7 +341,17 @@ def build_erlang_expr(payload_b64, message_id_prefix, message_id=None):
     message_id: pass an explicit MsgId to make the published id knowable to the
     caller. The default computes it inside Erlang, which means the publisher
     never learns the value it sent -- fine for broadcasts, useless as a
-    correlation key for a delivery trace."""
+    correlation key for a delivery trace.
+
+    routing_key: `heartbeats` is a DIRECT exchange and every game pod binds its
+    own queue `queue.server.<ServerId>` TWICE -- once on <<"notifications">>
+    (which is why the default reaches the whole fleet in one message) and once
+    on its own <ServerId>. So passing a single server id here delivers to
+    exactly ONE pod. Verified 2026-08-04: 62 bindings over 31 pods, 2 each.
+    Get the ids from:
+      SELECT server_id, connected_players FROM dune.farm_state WHERE alive;
+    Use this for anything you want to canary on one partition before the fleet
+    (e.g. `Log LogChat Verbose`), and prefer a partition with 0 players."""
     if message_id:
         msg_id_expr = 'MsgId = <<"%s">>,' % message_id
     else:
@@ -351,9 +367,9 @@ P = {{list_to_atom("P_basic"), <<"Content">>, undefined, [], undefined,
      undefined, undefined, undefined, undefined, MsgId, undefined,
      undefined, <<"fls">>, <<"fls_backend">>, undefined}},
 Content = rabbit_basic:build_content(P, Outer),
-{{ok, Msg}} = rabbit_basic:message(XName, <<"notifications">>, Content),
+{{ok, Msg}} = rabbit_basic:message(XName, <<"{routing_key}">>, Content),
 Result = rabbit_queue_type:publish_at_most_once(X, Msg),
-io:format("publish=~p exchange=heartbeats routing=notifications app_id=fls_backend user_id=fls~n", [Result]).
+io:format("publish=~p exchange=heartbeats routing={routing_key} app_id=fls_backend user_id=fls~n", [Result]).
 """
 
 
@@ -398,6 +414,11 @@ def redact_token(envelope_str, token):
 def build_parser():
     p = argparse.ArgumentParser(
         description="Publish a Dune ServiceBroadcast via mq-game (heartbeats exchange).")
+    p.add_argument("--routing-key", default=DEFAULT_ROUTING_KEY,
+                   help="AMQP routing key on the heartbeats exchange. Default "
+                        "'notifications' reaches EVERY game pod. Pass a single "
+                        "dune.farm_state.server_id to target exactly ONE pod "
+                        "(each pod binds its own id as well as 'notifications').")
     p.add_argument("--namespace", help="Override auto-detected funcom-seabass-* namespace")
     p.add_argument("--mq-pod", help="Override auto-detected mq-game pod name")
     p.add_argument("--token-file", help="Read DUNE_COMMAND_AUTH_TOKEN from this file")
@@ -583,15 +604,26 @@ def main(argv=None):
     if explicit_msg_id and not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", explicit_msg_id):
         fail("--message-id must match [A-Za-z0-9._-]{1,120} "
              "(it is interpolated into an Erlang binary literal)")
+    routing_key = args.routing_key.strip()
+    if not re.fullmatch(r"[A-Za-z0-9._+/=-]{1,128}", routing_key):
+        fail("--routing-key must match [A-Za-z0-9._+/=-]{1,128} "
+             "(it is interpolated into an Erlang binary literal)")
     payload_b64 = build_envelope_b64(inner, token)
-    erlang_expr = build_erlang_expr(payload_b64, msg_id_prefix, explicit_msg_id)
+    erlang_expr = build_erlang_expr(payload_b64, msg_id_prefix, explicit_msg_id,
+                                    routing_key=routing_key)
     if explicit_msg_id:
         summary["message_id"] = explicit_msg_id
+    summary["routing_key"] = routing_key
+    summary["fleet_wide"] = (routing_key == DEFAULT_ROUTING_KEY)
 
     # --- preview ---
     print("namespace:   %s" % ns)
     print("mq pod:      %s" % pod)
     print("mode:        %s" % args.mode)
+    print("routing key: %s%s" % (routing_key,
+                                 "  (FLEET-WIDE: every game pod)"
+                                 if routing_key == DEFAULT_ROUTING_KEY
+                                 else "  (single pod)"))
     print("operator:    %s" % args.operator)
     print("token:       %d-char token (redacted)" % len(token))
     print("inner JSON:")

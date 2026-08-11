@@ -1287,6 +1287,38 @@ case "$action" in
     printf '%s' "$payload" | base64 -d | /root/dune-repair-write.py --stdin-json
     exit $?
     ;;
+  augment-op)
+    # Portal per-item augment REROLL / SWAP write path. Base64-encoded JSON job on
+    # stdin (same safe alphabet as storage-move -- no whitespace / ';' / '$' /
+    # backtick, so shell injection is impossible). Decoded JSON is piped to the
+    # augment writer's --stdin-json mode; the writer re-validates {owner_ctrl,
+    # item_id, augments[], grade, roll_mode, consume, preserve_grades, reroll_only?,
+    # idempotency_key} and runs the single OFFLINE-GATED stats write. The decoded
+    # payload never crosses a shell -- base64 -> stdin -> the python script.
+    #
+    # owner_ctrl is resolved SERVER-SIDE by the admin-backend from the session before
+    # it reaches here and is the ENTIRE auth boundary for this feature: the writer
+    # trusts it to resolve the pawn, ownership and the offline gate. Nothing
+    # downstream re-derives it from anything else. The writer still re-verifies
+    # offline + item ownership + augment ownership (owned_inv_sql) as defense in
+    # depth, and consumes a swapped-in augment in the SAME transaction as the write.
+    #
+    # A swap DESTROYS a rare item, so idempotency_key is honoured in-transaction:
+    # a retry of an already-applied intent replays the prior outcome rather than
+    # consuming a second augment. Kill-switch: the writer refuses with
+    # augment_disabled unless LASTSIETCH_AUGMENT_ENABLED=1. NEVER restarts game pods/BGD/k3s
+    # (psql into the running DB only). Source-IP allowlist is unchanged.
+    [ -z "$arg" ] || { echo "rejected: augment-op takes no args" >&2; exit 1; }
+    [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    payload=$(cat)
+    payload="${payload//[[:space:]]/}"
+    if [[ ! "$payload" =~ ^[A-Za-z0-9+/=]+$ ]]; then
+      echo "rejected: invalid augment-op payload" >&2
+      exit 2
+    fi
+    printf '%s' "$payload" | base64 -d | /root/dune-augment.py --stdin-json
+    exit $?
+    ;;
   reward-op)
     # Login-rewards WRITE path (V2). Base64-encoded JSON job on stdin (same safe
     # alphabet as gift-op/item-transfer-op -- no whitespace / ';' / '$' / backtick,

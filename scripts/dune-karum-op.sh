@@ -68,10 +68,12 @@
 #   * Listing state. Karum's own state lives in admin.db per the custom-table-ownership
 #     rule; only settlement crosses into dune.*, and only with a ledger row.
 #
-# LASTSIETCH_KARUM_ENABLED (env, default "0" = OFF/DARK): while off every action is code-complete
-# but refuses, returning {"status":"deferred"} WITHOUT opening a DB txn. Never a fake
-# success. Un-dark only after QA plus a two-account owner self-test, and mirror the flag
-# default into the repo the SAME session or the next deploy silently reverts it.
+# THE GATE (default DARK): while off every action is code-complete but refuses, returning
+# {"status":"deferred"} WITHOUT opening a DB txn. Never a fake success. Un-dark only after
+# QA plus a two-account owner self-test.
+# Switch it with the FLAG FILE /etc/lastsietch/karum-enabled (touch = live, rm = kill-switch).
+# LASTSIETCH_KARUM_ENABLED still works when this script is run BY HAND, but it cannot reach the
+# dispatcher path -- see the note at the assignment below before changing either.
 #
 # HARD CONSTRAINTS (same as dune-gift-op.sh / dune-item-transfer-op.sh):
 #   * NEVER restart/reboot any game pod, the BGD, or k3s. Only opens a psql session into
@@ -83,10 +85,15 @@
 set -euo pipefail
 
 # --- caps / tunables ---------------------------------------------------------
-LASTSIETCH_KARUM_ENABLED="${LASTSIETCH_KARUM_ENABLED:-1}"                    # 0 = dark/refuse; 1 = live
-# UN-DARKED 2026-07-28 (owner-authorized) for the two-account owner self-test the header
-# above requires. Default mirrored into the repo the SAME session, per that same note --
-# leaving it at 0 here would have had the next deploy silently re-dark the venue.
+LASTSIETCH_KARUM_ENABLED="${LASTSIETCH_KARUM_ENABLED:-0}"                    # 0 = dark/refuse; 1 = live
+[[ -f /etc/lastsietch/karum-enabled ]] && LASTSIETCH_KARUM_ENABLED=1         # go-live flag file (rm to kill-switch)
+# 🔴 THE FLAG FILE IS THE ONLY WORKING SWITCH, not the env var. The dispatcher runs this
+# as `printf ... | /root/dune-karum-op.sh` under a non-interactive non-login ssh shell
+# that inherits NO profile, so nothing anyone exports ever reaches this line. Between
+# 2026-07-28 and 2026-08-03 the default was flipped to :-1 to un-dark for the owner
+# self-test, which worked for exactly that reason -- and left the venue fail-OPEN, so an
+# unset var meant LIVE rather than refuse, on a settlement path whose BUY leg has never
+# executed. Same trap that made LASTSIETCH_AUGMENT_ENABLED a no-op for weeks; same fix.
 KARUM_MAX_LISTINGS_PER_DAY="${KARUM_MAX_LISTINGS_PER_DAY:-20}" # per seller / 24h
 KARUM_MAX_PAIR_PER_DAY="${KARUM_MAX_PAIR_PER_DAY:-5}"          # per buyer->seller / 24h
 # Per-listing ceiling. RAISED 1,000,000 -> 900,000,000 on 2026-07-27 (owner call), because

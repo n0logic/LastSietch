@@ -103,9 +103,37 @@ When healthy, `kubectl get pods` shows two Survival_1 pods, one ending `-pod-1` 
 
 ## Safe tradeposts on a PvP partition
 
-Enabling PvP on the partition makes the **whole world** hostile except where the game's built-in security zones apply. Funcom's tradeposts (the NPC exchange hubs) carry their own security zone, so they stay safe automatically on a PvP partition - you do not configure that, and you should not need to.
+Enabling PvP on the partition makes the **whole world** hostile except where the game's built-in security zones apply. Funcom's tradeposts (the NPC exchange hubs), sietches, and social hubs carry their own security zone, so they stay safe automatically on a PvP partition - you do not configure that, and you should not need to. Keep the security-zone system **enabled** (this is the default); disabling it removes the tradepost/hub safety everywhere, which is the opposite of the goal:
 
-What has **no supported server-side mechanism** is a safe *player* base on a PvP partition: if the partition is PvP, player structures on it are attackable. If you want safe player bases, keep them on the PvE partition. Treat "full-PvP world with safe player bases" as unsupported until Funcom ships a per-structure override; the `SecurityZones.UsePvPOverrideTable` cvar exists but is unverified and is not part of this guide.
+```ini
+[/Script/DuneSandbox.SecurityZonesSubsystem]
+m_bAreSecurityZonesEnabled=True
+```
+
+### Re-typing zones with the PvP override table (advanced)
+
+Funcom ships a second security-zone data table, `DT_SecurityZones_PvPOverride`, for a PvP variant of a map. It is reachable two ways: the `SecurityZones.UsePvPOverrideTable` cvar, or - the path self-host operators actually use - swapping the data table directly:
+
+```ini
+[/Script/DuneSandbox.DataTablesSubsystem]
+m_SecurityZonesDataTable=/Game/Dune/Systems/SecurityZones/DT_SecurityZones_PvPOverride.DT_SecurityZones_PvPOverride
+```
+
+What the override table actually does (confirmed by extracting the shipped rows): it re-types the general `Security` zone from PvE to PvP, while leaving the `Town` and `SocialHub` rows untouched - so the NPC tradeposts (which are `SocialHub`) **stay safe**. It does not blanket the whole map hostile, contrary to a common claim. Three things to know before using it:
+
+1. **It must be set on the client too.** The same block has to exist in the player's `%LocalAppData%\DuneSandbox\Saved\Config\WindowsClient\Game.ini`, or the override does not take effect for that player. A tradepost that is safe for one player and hostile for another is almost always this: one client has the override, the other does not.
+2. **A bad asset path crash-loops the server.** The data-table subsystem hard-faults (SIGSEGV, exit 139) when it is pointed at a missing or misspelled table asset. Copy the path exactly, and change one thing at a time so a crash loop is unambiguous.
+3. **The override table omits some stock zone types** (the shipped copy is missing `Story`, `Teleport`, and `TownNoClimb`). A placed volume that references a missing row has undefined fallback - most likely the default `NullSec` (full PvP) - so areas relying on those types can silently turn hostile. Bench-check them before relying on the override on a live map.
+
+For a plain "PvP world, built-in tradeposts stay safe" split you do **not** need the override table at all - partition opt-in plus the stock (enabled) security zones is enough. Reach for the override only when you want the general `Security` areas to be PvP as well.
+
+### Safe *player bases* on a PvP partition
+
+First, a caveat worth testing before you assume you have a problem: base *raiding* in Dune is largely Deep-Desert content. Multiple reports hold that Hagga Basin structures are not player-damageable regardless of PvP flags. So a PvP Hagga partition may already leave bases intact - a controlled raid test (two players, a throwaway structure) settles it before you touch any config.
+
+If raiding does apply and you want structures protected, the security-zone system will **not** help - the shipped zone rows carry only player-vs-player and NPC damage multipliers, no building/structure column, so no zone change protects or endangers a base. The relevant lever is the console variable **`dw.MitigateAllDamageToBuildables`** (Funcom's own help: "if we should mitigate all damage to buildables"). Being a scalar cvar it can be scoped to a single pod via that pod's `-ini:engine:[ConsoleVariables]:` arg. Two things to bench first: it mitigates *all* damage sources (so it will also blunt sandworm, sandstorm, and NPC damage, not just raiding), and you must confirm demolish/pickup still works. Treat it as untested until you have proven it on a throwaway partition.
+
+The older approach - copying the shield-mitigation idiom onto `m_DefaultBuildingDamageMitigation` / `m_DefaultPlaceableDamageMitigation` - also exists but is worse: it is a comma-heavy struct that cannot be scoped to one pod (only the shared config), and the damage-type list has 17 entries, so mitigating only the obvious few leaves several open vectors.
 
 ## Cost
 

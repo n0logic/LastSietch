@@ -6,7 +6,7 @@ Thanks for considering a contribution. This project tracks a moving target - Fun
 
 - **Bug reports** for any step in `docs/01-install.md` that doesn't work on a fresh Debian 12 host
 - **Patches** for new Funcom map IDs that get added in future updates (especially anything that breaks our partition ID assumptions)
-- **Alternative distro guides** - currently only Debian 12 is covered, but Ubuntu Server / Rocky / Alpine could be added under `docs/`
+- **Alternative distro guides** - Debian 12 is the reference install and Debian 13 has package-level compatibility notes in `docs/01-install.md`, but Ubuntu Server / Rocky / Alpine could be added under `docs/`. A confirmed full deploy on Debian 13 would also be a welcome report
 - **Audit script improvements** in `scripts/`
 - **Translation or clarity edits** to existing docs
 

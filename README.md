@@ -14,7 +14,7 @@ We had to work it out to run our own community. A player asked whether we shared
 
 | | |
 |---|---|
-| [docs/](docs/) 01 to 11 | Fresh install on Debian 12, canonical config, dual Deep Desert, server browser visibility, display names, memory tuning, troubleshooting, update procedure, BGD admin UI access, welcome package design |
+| [docs/](docs/) 01 to 11 | Fresh install on Debian 12 (with Debian 13 compatibility notes), canonical config, dual Deep Desert, server browser visibility, display names, memory tuning, troubleshooting, update procedure, BGD admin UI access, welcome package design |
 | [docs/12-operations.md](docs/12-operations.md) | Keeping a server alive: the tools, the `pg_dump` trap, restart rules, free maintenance windows, backups, and the failures that are quiet |
 | [docs/13-safe-database-writes.md](docs/13-safe-database-writes.md) | Read before writing to the game database. Giving is safe, taking is not, and why |
 | [docs/14-known-funcom-issues.md](docs/14-known-funcom-issues.md) | Symptoms and detection for problems we have hit, so you can identify them in minutes instead of an evening |

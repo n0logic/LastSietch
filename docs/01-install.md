@@ -10,6 +10,22 @@ This walks through deploying a Dune: Awakening self-hosted server on a bare-meta
 - A public IP, with UDP `7777-7810` and TCP `31982` reachable from the internet
 - A self-host token already minted at <https://account.duneawakening.com/> (one-time, from your Funcom account)
 
+## Debian 13 (trixie) notes
+
+The guide targets Debian 12 because that is what the reference server runs. Debian 13 was checked on 2026-08-12 (archive queries plus a trixie container dry-run of Step 2). Result: the host-side dependencies all install and run, with two differences to know about.
+
+| Check | Result on Debian 13 |
+|---|---|
+| `steamcmd` (i386, non-free) | PASS. Same package version as bookworm (`0~20180105-5`), installs under i386 multiarch, and the binary runs (Steam API loads, exits 0) |
+| `lib32gcc-s1`, `bc` | PASS. In the trixie archive (`14.2.0-19`, `1.07.1-4`) |
+| `software-properties-common` | GONE from trixie. Nothing in this guide ever used it; Step 2 no longer installs it |
+| Enabling `non-free` | CHANGED. The default APT sources are deb822 format now: edit `Components:` in `/etc/apt/sources.list.d/debian.sources` instead of `/etc/apt/sources.list` (see Step 2) |
+| Python tooling (bot, telemetry) | PASS. trixie ships Python 3.13; `discord.py`, `structlog`, `psycopg2-binary` all install with 3.13 wheels |
+| k3s | Expected to work, untested here. SUSE's validated-OS matrix lists neither Debian 12 nor 13, so 13 is no worse supported than 12; k3s bundles its own iptables and the trixie 6.12 kernel is fine |
+| Full bootstrap + live server | NOT yet run on a 13 host. The server itself runs inside k3s containers, so host-OS coupling is limited to the rows above |
+
+If you deploy on Debian 13, please report back (an issue is fine either way, working or broken).
+
 ## Step 1 - Create the `dune` user
 
 The Funcom bootstrap expects a `dune` user with passwordless sudo.
@@ -25,10 +41,18 @@ sudo chmod 440 /etc/sudoers.d/dune
 
 The bootstrap downloads the server payload via Steam's anonymous CDN. You need `steamcmd` on the host.
 
+`steamcmd` lives in the `non-free` component, so make sure `non-free` is enabled in your APT sources first. On Debian 12 that is the `non-free` entry in `/etc/apt/sources.list`; on Debian 13 the default sources are deb822 format:
+
+```bash
+# Debian 13 only - Debian 12 uses /etc/apt/sources.list
+sudo sed -i 's/^Components: main.*/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
+```
+
+Then:
+
 ```bash
 sudo dpkg --add-architecture i386
 sudo apt update
-sudo apt install -y software-properties-common
 echo steam steam/question select "I AGREE" | sudo debconf-set-selections
 echo steam steam/license note '' | sudo debconf-set-selections
 sudo apt install -y steamcmd lib32gcc-s1 bc

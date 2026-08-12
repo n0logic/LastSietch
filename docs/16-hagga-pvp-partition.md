@@ -18,7 +18,9 @@ A pod reads `[/Script/DuneSandbox.PvpPveSettings]` from `UserSettings/UserGame.i
 - `m_bShouldForceEnablePvpOnAllPartitions=False` keeps the default (PvE) for every partition NOT explicitly listed.
 - `+m_PvpEnabledPartitions=<id>` opts a single partition into PvP.
 
-So the PvE Hagga (the default `id: 1`) and the new PvP Hagga (`id: 32` below) read the same file; only the listed one turns hostile. There is no cross-pod coordination and the PvP flag is not part of the ServerState payload sent to FLS - each pod enforces locally and the client trusts it.
+So the PvE Hagga (the default `id: 1`) and the new PvP Hagga (`id: 32` below) read the same file; only the listed one enables PvP. There is no cross-pod coordination and the PvP flag is not part of the ServerState payload sent to FLS - each pod enforces locally and the client trusts it.
+
+Know what the flag actually buys you before you plan around it: it arms PvP **inside the map's NullSec-typed areas** (the shipwreck / War of Assassins zones), it does not turn the whole world hostile. The open desert stays PvE. See [What the PvP opt-in actually covers](#what-the-pvp-opt-in-actually-covers) below, live-verified 2026-08-11.
 
 ## Partition ID selection
 
@@ -99,11 +101,19 @@ sudo kubectl get igwbg -n $NS $BG -o jsonpath='{.spec.database.template.spec.dep
 sudo -u dune /home/dune/.dune/bin/battlegroup start
 ```
 
-When healthy, `kubectl get pods` shows two Survival_1 pods, one ending `-pod-1` (PvE) and one ending `-pod-32` (PvP). Travel into each from the in-game picker and confirm the compass turns red only on the PvP instance.
+When healthy, `kubectl get pods` shows two Survival_1 pods, one ending `-pod-1` (PvE) and one ending `-pod-32` (PvP). Travel into each from the in-game picker and confirm PvP arms at a shipwreck area on the PvP instance only. Do not test in the open desert: it stays PvE on both instances (see the next section), so a no-damage result there tells you nothing about whether the flag took.
 
-## Safe tradeposts on a PvP partition
+## What the PvP opt-in actually covers
 
-Enabling PvP on the partition makes the **whole world** hostile except where the game's built-in security zones apply. Funcom's tradeposts (the NPC exchange hubs), sietches, and social hubs carry their own security zone, so they stay safe automatically on a PvP partition - you do not configure that, and you should not need to. Keep the security-zone system **enabled** (this is the default); disabling it removes the tradepost/hub safety everywhere, which is the opposite of the goal:
+An earlier version of this guide claimed the opt-in makes the whole world hostile outside the security zones. **Live observation disproved that** (2026-08-11, two opted-in partitions with stock zone config, no per-pod overrides left to explain a split). What you actually get is traditional zone-gated PvP:
+
+| Area | Zone type | Behavior on an opted-in partition |
+|---|---|---|
+| Shipwreck / War of Assassins areas | NullSec | PvP enabled |
+| Tradeposts, sietches, social hubs | Town / SocialHub | Safe, always |
+| Open desert and everything else | Security | **Stays PvE** |
+
+So the opt-in arms PvP only inside the map's NullSec-typed volumes. Tradepost and hub safety needs no configuration. Keep the security-zone system **enabled** (this is the default); disabling it removes the tradepost/hub safety without making anything else behave the way you want:
 
 ```ini
 [/Script/DuneSandbox.SecurityZonesSubsystem]
@@ -112,7 +122,9 @@ m_bAreSecurityZonesEnabled=True
 
 ### Re-typing zones with the PvP override table (advanced)
 
-Funcom ships a second security-zone data table, `DT_SecurityZones_PvPOverride`, for a PvP variant of a map. It is reachable two ways: the `SecurityZones.UsePvPOverrideTable` cvar, or - the path self-host operators actually use - swapping the data table directly:
+If zone-gated PvP is what you wanted, you are done: skip this section. The override table is the lever for making the open-desert `Security` areas hostile as well.
+
+Funcom ships a second security-zone data table, `DT_SecurityZones_PvPOverride`, for a PvP variant of a map. It is reachable two ways: the `SecurityZones.UsePvPOverrideTable` cvar (scopable to a single pod via a podSpec `-ini:engine:[ConsoleVariables]:` arg, but not yet proven on a live pod - and that exact per-pod mechanism has silently no-opped before, so verify with a readback), or - the path self-host operators have proven working - swapping the data table directly, which applies to **every** partition reading that `UserGame.ini`:
 
 ```ini
 [/Script/DuneSandbox.DataTablesSubsystem]
@@ -125,7 +137,7 @@ What the override table actually does (confirmed by extracting the shipped rows)
 2. **A bad asset path crash-loops the server.** The data-table subsystem hard-faults (SIGSEGV, exit 139) when it is pointed at a missing or misspelled table asset. Copy the path exactly, and change one thing at a time so a crash loop is unambiguous.
 3. **The override table omits some stock zone types** (the shipped copy is missing `Story`, `Teleport`, and `TownNoClimb`). A placed volume that references a missing row has undefined fallback - most likely the default `NullSec` (full PvP) - so areas relying on those types can silently turn hostile. Bench-check them before relying on the override on a live map.
 
-For a plain "PvP world, built-in tradeposts stay safe" split you do **not** need the override table at all - partition opt-in plus the stock (enabled) security zones is enough. Reach for the override only when you want the general `Security` areas to be PvP as well.
+For shipwreck-gated PvP with safe tradeposts you do **not** need the override table at all - partition opt-in plus the stock (enabled) security zones already gives exactly that. Reach for the override only when you want the open-desert `Security` areas to be PvP as well.
 
 ### Safe *player bases* on a PvP partition
 

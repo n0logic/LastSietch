@@ -19,7 +19,7 @@ The guide targets Debian 12 because that is what the reference server runs. Debi
 | `steamcmd` (i386, non-free) | PASS. Same package version as bookworm (`0~20180105-5`), installs under i386 multiarch, and the binary runs (Steam API loads, exits 0) |
 | `lib32gcc-s1`, `bc` | PASS. In the trixie archive (`14.2.0-19`, `1.07.1-4`) |
 | `software-properties-common` | GONE from trixie. Nothing in this guide ever used it; Step 2 no longer installs it |
-| Enabling `non-free` | CHANGED. The default APT sources are deb822 format now: edit `Components:` in `/etc/apt/sources.list.d/debian.sources` instead of `/etc/apt/sources.list` (see Step 2) |
+| Enabling `non-free` | CHANGED. The default APT sources are deb822 format now: edit `Components:` in `/etc/apt/sources.list.d/debian.sources` instead of `/etc/apt/sources.list`. Some installs still ship the legacy one-line format, so run `sudo apt modernize-sources` first to create that file (see Step 2) |
 | Python tooling (bot, telemetry) | PASS. trixie ships Python 3.13; `discord.py`, `structlog`, `psycopg2-binary` all install with 3.13 wheels |
 | k3s | Expected to work, untested here. SUSE's validated-OS matrix lists neither Debian 12 nor 13, so 13 is no worse supported than 12; k3s bundles its own iptables and the trixie 6.12 kernel is fine |
 | Full bootstrap + live server | NOT yet run on a 13 host. The server itself runs inside k3s containers, so host-OS coupling is limited to the rows above |
@@ -45,6 +45,11 @@ The bootstrap downloads the server payload via Steam's anonymous CDN. You need `
 
 ```bash
 # Debian 13 only - Debian 12 uses /etc/apt/sources.list
+# Some Debian 13 installs still ship the legacy one-line sources format, so
+# /etc/apt/sources.list.d/debian.sources may not exist yet and the sed below
+# would silently do nothing. Convert first (no-op if already deb822; answer Y
+# to the prompt), then enable the components:
+sudo apt modernize-sources
 sudo sed -i 's/^Components: main.*/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
 ```
 

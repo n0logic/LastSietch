@@ -178,6 +178,35 @@ The audit script also catches:
 - DD ServerSet flipped back to `dedicatedScaling: true`
 - Custom memory limits reset to defaults
 
+## `apt install steamcmd` - "Unable to locate package steamcmd"
+
+**Symptom:** Step 2 fails with `E: Unable to locate package steamcmd`, even after editing the APT sources.
+
+**Root cause:** `steamcmd` is a `non-free`, **i386-only** package. APT can only see it once three things are true: the `non-free` component is enabled, the `i386` architecture is added, and `apt update` has been run afterward. Missing any one produces "Unable to locate package."
+
+**Common trap on Debian 13:** the `sed` that enables `non-free` targets the deb822 file `/etc/apt/sources.list.d/debian.sources`. Installs still using the legacy one-line `/etc/apt/sources.list` format do not have that file, so the `sed` silently changes nothing. Run `sudo apt modernize-sources` first to convert to the deb822 format, then re-run the `sed` (see Step 2 of the install guide).
+
+**Fix:**
+
+```bash
+# 1. Confirm non-free is actually enabled (you should see contrib/non-free in a Components line)
+grep -R "^Components:" /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null
+
+# 2. Add the i386 architecture and refresh the package lists
+sudo dpkg --add-architecture i386
+sudo apt update
+
+# 3. Confirm APT can now see the package (should show a Candidate version, not "(none)")
+apt-cache policy steamcmd
+
+# 4. Install
+echo steam steam/question select "I AGREE" | sudo debconf-set-selections
+echo steam steam/license note '' | sudo debconf-set-selections
+sudo apt install -y steamcmd lib32gcc-s1 bc
+```
+
+If `apt-cache policy steamcmd` still reports no candidate after step 2, `non-free` is not active: recheck the `Components:` line from step 1 (it must list `non-free`), fix it, then `sudo apt update` again.
+
 ## SteamCMD download fails twice
 
 **Symptom:** The bootstrap setup script reports "Steam download failed twice" and exits.

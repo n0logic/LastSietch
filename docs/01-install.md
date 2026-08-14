@@ -28,11 +28,15 @@ The manual steps below remain the reference: read them to understand what the in
 
 ## What this guide assumes
 
-- A clean Debian 12 host with root access
+- A clean **Debian 12** host you are logged into as **root** (every command below assumes root; if you use a non-root admin account, prefix them with `sudo`)
 - 64+ GB RAM (Funcom's minimum is 20 GB; we recommend more for headroom)
 - 100+ GB free disk on `/`
 - A public IP, with UDP `7777-7810` and TCP `31982` reachable from the internet
 - A self-host token already minted at <https://account.duneawakening.com/> (one-time, from your Funcom account)
+
+You do **not** need to clone this repository to follow the manual steps below; every command is inline on this page. (The automated installer is fetched with `curl`; only the "clone and run" variant needs `git`.)
+
+A minimal Debian install ships almost none of the common utilities these steps use, and even `sudo` may be absent. **Step 0** installs them, so start there rather than assuming a base image has `curl`, `jq`, and friends.
 
 ## Debian 13 (trixie) notes
 
@@ -49,6 +53,29 @@ The guide targets Debian 12 because that is what the reference server runs. Debi
 | Full bootstrap + live server | NOT yet run on a 13 host. The server itself runs inside k3s containers, so host-OS coupling is limited to the rows above |
 
 If you deploy on Debian 13, please report back (an issue is fine either way, working or broken).
+
+## Step 0 - Base packages and firewall
+
+Minimal Debian images do not include `curl`, `jq`, `bc`, or even `sudo`, and later steps need them: `curl` for the k3s installer (Step 3), `jq` for the Funcom world wizard which decodes your token (Step 8), `bc` for the bootstrap's disk check. Install them first. Run these as `root`; if `sudo` is missing, that is expected on a minimal install and this is the command that adds it:
+
+```bash
+apt update
+apt install -y curl ca-certificates jq bc sudo
+```
+
+`steamcmd`, `lib32gcc-s1`, `k3s`, and `kubectl` are installed by later steps, not here.
+
+### Firewall
+
+A clean Debian host has no firewall enabled, so out of the box there is nothing to open. If you enabled `ufw`, or your host or cloud provider has a firewall or security group in front of the box, allow the ports from the assumptions above:
+
+```bash
+# only if you actually run ufw
+sudo ufw allow 7777:7810/udp
+sudo ufw allow 31982/tcp
+```
+
+Cloud users: mirror those same rules in your provider's security group. If the server reaches `Healthy` but never shows in the browser, an unopened UDP range is the usual cause.
 
 ## Step 1 - Create the `dune` user
 

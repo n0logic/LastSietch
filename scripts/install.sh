@@ -149,6 +149,26 @@ detect_public_ip() {
     return 1
 }
 
+# ---- base packages ----------------------------------------------------------
+ensure_base_packages() {
+    # Minimal Debian ships without curl/jq/sudo, yet this script's own IP
+    # detection and the k3s installer need curl, and Funcom's world wizard needs
+    # jq. Install them before anything else relies on them.
+    if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
+        && command -v bc >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+        info "Base packages present (curl, jq, bc, sudo)."
+        return 0
+    fi
+    info "Installing base packages (curl, ca-certificates, jq, bc, sudo)..."
+    if command -v apt-get >/dev/null 2>&1; then
+        run apt-get update
+        run env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            curl ca-certificates jq bc sudo
+    else
+        warn "No apt-get found; install curl, jq, bc, sudo manually before continuing."
+    fi
+}
+
 # ---- preflight --------------------------------------------------------------
 preflight() {
     step "Preflight"
@@ -167,6 +187,9 @@ preflight() {
         ubuntu) warn "Ubuntu is best-effort; this installer is validated on Debian 12/13." ;;
         *) warn "Untested distro '$OS_ID'. Package steps may need adjustment." ;;
     esac
+
+    # Base utilities the rest of preflight (and later steps) rely on.
+    ensure_base_packages
 
     # Disk space on /
     local avail
@@ -496,6 +519,7 @@ ${C_B}Done.${C_N}
   Admin CLI:  sudo -u ${DUNE_USER} ${DUNE_DIR}/bin/battlegroup status
 
 Your server should appear in the in-game Experimental tab within ~2 minutes of Healthy.
+Firewall: if you run ufw or a cloud security group, allow UDP 7777-7810 and TCP 31982.
 Next: apply the canonical config (docs/02-canonical-config.md).
 EOF
 }

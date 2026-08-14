@@ -2,6 +2,30 @@
 
 This walks through deploying a Dune: Awakening self-hosted server on a bare-metal **Debian 12** host, using the same Funcom-shipped bootstrap script the official Windows wizard uses inside its Hyper-V VM.
 
+## Quick install (automated)
+
+If you just want a server up, [`scripts/install.sh`](../scripts/install.sh) automates every step below on Debian 12/13 (Ubuntu is best-effort). It pulls the Funcom server payload directly with `steamcmd`, so **you do not need a Windows install** to source the bootstrap (that manual copy is Step 7 below).
+
+You still need a self-host token (JWT) from <https://account.duneawakening.com/>.
+
+```bash
+# On the target host, as root:
+curl -fsSL https://raw.githubusercontent.com/n0logic/LastSietch/master/scripts/install.sh \
+  | sudo bash -s -- --jwt <YOUR_JWT> --world "My Sietch" --region 2 --ip auto
+```
+
+Or clone and run:
+
+```bash
+sudo ./scripts/install.sh --jwt <YOUR_JWT> --world "My Sietch" --region 2 --ip auto
+```
+
+- `--region` is `1` (Europe) or `2` (North America); `--ip auto` detects your public IP (or pass it explicitly).
+- The script creates the `dune` user, installs steamcmd + k3s, installs an `rc-service`→`systemctl` shim so Funcom's own setup chain runs on systemd, downloads the payload, drives the world wizard, and waits until the Battlegroup reports `Healthy`.
+- It is safe to re-run (each step is detected and skipped) and refuses to clobber an already-Healthy server. Use `--dry-run` to preview, `--help` for all flags.
+
+The manual steps below remain the reference: read them to understand what the installer does, or follow them by hand if you are on an unsupported distro or want full control.
+
 ## What this guide assumes
 
 - A clean Debian 12 host with root access

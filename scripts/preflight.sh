@@ -120,6 +120,43 @@ done
 [ "$bin_hits" -eq 0 ] && ok "no unexpected binaries"
 
 # ---------------------------------------------------------------------------
+# 2b. Foreign install paths. Allowlisted, not denylisted, and deliberately so.
+#
+#     The content scan below has a standing note that /opt/<something> is not a
+#     disclosure, which is right for OUR paths: they are conventions, already
+#     templated as ${VAR:-/opt/default}, and flagging them fired on correct code.
+#
+#     But it does not distinguish OUR install prefixes from OTHER PROJECTS'. A
+#     whole-VPS backup script published here enumerated several unrelated
+#     services on the same host, which is an inventory of what the operator runs
+#     and how it is backed up. That is a disclosure, and the blanket-/opt debate
+#     had already been settled "no", so nothing caught it.
+#
+#     A denylist naming those projects cannot live here -- this file is PUBLIC,
+#     so listing them would leak exactly what it protects, the same reason
+#     deployment specifics live in .preflight-local. So: name what BELONGS.
+# ---------------------------------------------------------------------------
+echo "-- install paths --"
+OPT_OK='^/opt/(lastsietch[a-z0-9-]*|cielago|backups?|rabbitmq|erlang|hol[a-z0-9-]*)$'
+opt_hits=0
+for f in "${FILES[@]}"; do
+    # This file documents the convention using /opt/default and /opt/something
+    # as examples, so it matches by construction -- the same reason the content
+    # scan below excludes it. Announced rather than skipped silently.
+    case "$f" in */preflight.sh|preflight.sh) continue ;; esac
+    p="$ROOT/$f"
+    [ -f "$p" ] && [ -s "$p" ] || continue
+    grep -Iq . "$p" 2>/dev/null || continue
+    while IFS= read -r path; do
+        [ -z "$path" ] && continue
+        printf '%s' "$path" | grep -qE "$OPT_OK" && continue
+        note "foreign install path $path in $f"
+        opt_hits=$((opt_hits + 1))
+    done < <(grep -hoE '/opt/[a-z0-9][a-z0-9._-]*' "$p" 2>/dev/null | sort -u)
+done
+[ "$opt_hits" -eq 0 ] && ok "no foreign install paths (preflight.sh excluded: it names the convention)"
+
+# ---------------------------------------------------------------------------
 # 3. Content scan. Paths alone are not enough: an innocuously named CR dump
 #    carried two classes of live credential and would pass any name-based
 #    review. This looks inside.
@@ -156,6 +193,17 @@ declare -a CONTENT=(
   '\[\[[a-z][a-z0-9]*[_-][a-z0-9_-]*\]\]:wiki-style link to a private note'
   'ops/maint-[0-9]{4}-[0-9]{2}:reference to an unpublished runbook'
   '(nobody was watching|a human noticed|hit us twice|bit us twice):incident narrative, generalise it'
+  # Reverse-engineering artefacts. Six scripts shipped here carrying live vtable
+  # pointers and struct member offsets for Funcom's server binary, and every
+  # check above passed them: they are not secrets, not binaries, and not named
+  # suspiciously. RE detail is the one class this gate had no opinion about.
+  #
+  # Matched narrowly on purpose. A bare 0x[0-9a-f]{7,} also hits 0xFFFFFFFF and
+  # 0x7FFFFFFFFFFF sentinels that appear in correct, publishable bounds checks,
+  # and a rule that fires on valid code is a rule someone disables.
+  '\bvptr\b:reverse-engineered vtable pointer'
+  '\bfile_off\b:reverse-engineered binary file offset'
+  '\+0x[0-9a-fA-F]{3,}:reverse-engineered struct member offset'
 )
 
 # Deployment specifics cannot be listed here. This file is PUBLIC, so an IP

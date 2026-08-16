@@ -33,3 +33,33 @@ sensitive; the value never appears in this repository, and reading it at call
 time is exactly why nothing here has to store it.
 """
 regexes = ['''FuncomLiveServices__[A-Za-z]+''']
+
+[[allowlists]]
+description = """
+Funcom's build-baked command auth token, not a credential of ours.
+
+The dedicated server validates the serverexec/broadcast envelope against a
+constant compiled into the shipped binary. It is identical on every Dune
+self-host -- not per-server, not issued to us, and not rotatable by us. The
+same value appears in at least six independent community projects (Go, Rust,
+Python, JavaScript, shell, PowerShell) because everyone who automates a
+self-host arrives at it from the binary.
+
+Removing it would not make it less public and would stop every admin command
+with "Invalid Auth Token". A scanner calls it generic-api-key on entropy; that
+classification is wrong, and it cost a real rotation scare on 2026-08-15.
+
+This is NOT the per-server FuncomLiveServices ServiceAuthToken JWT. That one
+is a real secret and is deliberately not allowlisted anywhere.
+"""
+# Scoped to the two files that must carry it. A stopword would be tighter --
+# suppressing the value rather than the file -- but stopwords and regexes are
+# not applied to rules inherited via [extend] useDefault in this gitleaks
+# version; only paths are. Verified, not assumed. Revisit if that changes.
+#
+# These two files are small, single-purpose RMQ senders. If either grows a
+# real credential this allowlist would hide it, so keep them small.
+paths = [
+  '''scripts/dune-server-command\.py''',
+  '''scripts/dune-service-broadcast\.py''',
+]

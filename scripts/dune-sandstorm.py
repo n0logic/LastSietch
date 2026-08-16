@@ -254,7 +254,7 @@ def _merge_storm_position(dims_out: dict) -> None:
         # -> center_nx/center_ny, radius -> radius_nr; heading_yaw/stage pass thru.
         ent["center_x"] = x
         ent["center_y"] = y
-        ent["radius"] = info.get("radius")        # +0x59C effect, linear cm
+        ent["radius"] = info.get("radius")        # effect radius, linear cm
         ent["heading_yaw"] = info.get("heading")  # quat yaw deg
         ent["stage"] = info.get("stage")
         ent["storm_sector"] = info.get("sector")

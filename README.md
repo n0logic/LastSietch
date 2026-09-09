@@ -12,6 +12,10 @@ We had to work it out to run our own community. A player asked whether we shared
 
 ## What is here today
 
+The September 2026 refresh makes deployment identities explicit configuration,
+strengthens local publication checks, and adds read-only schedule tooling.
+Start with [configuration changes](docs/19-configuration-changes.md) when upgrading.
+
 | | |
 |---|---|
 | [docs/](docs/) 01 to 11 | Fresh install on Debian 12 (with Debian 13 compatibility notes), canonical config, dual Deep Desert, server browser visibility, display names, memory tuning, troubleshooting, update procedure, BGD admin UI access, welcome package design |
@@ -19,6 +23,9 @@ We had to work it out to run our own community. A player asked whether we shared
 | [docs/13-safe-database-writes.md](docs/13-safe-database-writes.md) | Read before writing to the game database. Giving is safe, taking is not, and why |
 | [docs/14-known-funcom-issues.md](docs/14-known-funcom-issues.md) | Symptoms and detection for problems we have hit, so you can identify them in minutes instead of an evening |
 | [docs/15-control-plane-architecture.md](docs/15-control-plane-architecture.md) | How a web app safely drives a live game server it must never touch directly. The one idea here most worth copying |
+| [docs/16-persistent-map-maintenance.md](docs/16-persistent-map-maintenance.md) | Sietch instances versus map families, empty-state checks, backup and recovery boundaries |
+| [docs/17-server-time.md](docs/17-server-time.md) | Read-only server clock and explicitly configured recurrence display, with Python and JavaScript helpers |
+| [docs/18-publication-checks.md](docs/18-publication-checks.md) | Local staged-content, privacy, secret and provenance checks before publication |
 | [references/](references/) | Canonical item ids, community-sourced field notes |
 | [scripts/](scripts/) | The whole on-host toolkit: `dq.sh` database access, the forced-command dispatcher, and the 54 action scripts it routes to (grants, bans, storage, guilds, market, bases, blueprints, telemetry feeds), plus presence guard, pre-window readiness, backups, schema ownership check, memory limits |
 | [ops/](ops/) | Battlegroup watchdog (a stopped battlegroup never recovers itself), update orchestration and hotfix watching |
@@ -28,20 +35,27 @@ We had to work it out to run our own community. A player asked whether we shared
 
 ## Tested against
 
-Everything here is in production on one server. What that server currently runs:
+This is reference source, not a production configuration. The installation
+walkthrough's historical baseline and later maintenance observations are listed
+separately so they are not mistaken for a blanket compatibility guarantee.
 
 | | |
 |---|---|
 | Self-host product | Steam app ID `4754530`, "Dune: Awakening Self-Hosted Server" |
-| Steam buildid | `24376904` (installed 2026-07-24) |
-| Server image | `seabass-server:2051294-0-shipping` |
+| Historical install walkthrough | `seabass-server:2051294-0-shipping`, July 2026 |
+| Later maintenance observations | `seabass-server:2064155-0-shipping`, September 2026 |
 | Funcom operators | `v1.5.0` (battlegroup, database, server, utilities) |
-| Host OS | Debian 12 bookworm, kernel 6.1.0-50-amd64, dedicated hardware, public IPv4 |
-| k3s | `v1.34.5+k3s1`, single node, containerd 2.1.5-k3s1 |
+| Host OS | Debian 12 reference; Debian 13 package compatibility notes are not a full deployment certification |
 | Database | `igw-postgres:17.4-alpine-fc-13` |
 
 Funcom ships updates frequently and changes operator behaviour with them. If your
 versions differ from these, expect drift, and read before you run.
+
+The new publication and clock helpers have local fixture-based tests. The
+private production rolling controller is deliberately not included: a portable
+release needs an independently reviewed credential-proof provider and operator
+configuration. The clock helper has no restart capability, and the update
+orchestrator is disabled until explicitly configured and enabled.
 
 ## What is coming
 

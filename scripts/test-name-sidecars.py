@@ -14,13 +14,14 @@ Verifies, for each sidecar JSON under admin-backend/data/:
 Exit non-zero on any assertion failure. Safe to wire into CI later.
 """
 import json
+import os
 import sys
 from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 DATA_DIR = ROOT / "admin-backend/data"
-SRC = Path.home() / "Source/Security/DunePakRE/extracted/string_table_lookup.json"
+SRC = Path(os.environ.get("DUNE_STRING_TABLE_JSON", "string-table.local.json"))
 
 # (sidecar filename, pak namespace, pak suffix, minimum-acceptable alias count)
 SIDECARS = (

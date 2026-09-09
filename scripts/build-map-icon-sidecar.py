@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build the map-icon sidecar: marker_type -> authoritative in-game map glyph
-(T_UI_IconMap*_D), from the DunePakRE client-pak extraction.
+(T_UI_IconMap*_D), from an operator-provided local texture export.
 
 The portal maps plot dune.markers POIs. Most marker types are NOT items, so the
 item-icon sidecar can't resolve them (Shipwreck, Cave, Ecolab, Hazard_*,
@@ -11,14 +11,16 @@ glyph by rule + explicit override, verifies the extracted PNG is present, writes
 data/dune-map-icons.json, and copies the needed PNGs into static/img/dune-icons/
 (shared with the item icons, same URL convention).
 
-Offline only: reads the DunePakRE extraction, writes into the portal repo.
+Offline only: reads DUNE_TEXTURE_ROOT and writes local portal outputs.
+Generated assets are not publication candidates.
 """
 import json
+import os
 import shutil
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-EXTRACT = Path("/mnt/c/Users/the operator/Source/Security/DunePakRE/extracted/textures")
+EXTRACT = Path(os.environ.get("DUNE_TEXTURE_ROOT", "textures.local"))
 STATIC_ICONS = REPO / "admin-backend" / "static" / "img" / "dune-icons"
 SIDECAR = REPO / "admin-backend" / "data" / "dune-map-icons.json"
 SNAPSHOTS = REPO / "admin-backend" / "data"

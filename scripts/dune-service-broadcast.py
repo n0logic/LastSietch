@@ -15,13 +15,11 @@ level - the script's --dry-run prints the envelope + Erlang expression
 without invoking kubectl. Default mode is --dry-run; --send is required to
 actually publish.
 
-The inner AuthToken is a BUILD-BAKED constant (BUILTIN_AUTH_TOKEN) Funcom ships
-in every Dune dedicated server -- NOT the per-server FuncomLiveServices__ServiceAuthToken
-JWT (that JWT is the FLS gateway auth and NotificationSystem rejects it with
-"Invalid Auth Token"). Token resolution order:
+The command-envelope credential is distinct from the service gateway credential.
+Supply the appropriate value from your own authorized deployment. This repository
+does not provide a default credential. Resolution order:
   1. --token-file FILE (operator-staged file, mode 0600)
   2. DUNE_COMMAND_AUTH_TOKEN env var
-  3. BUILTIN_AUTH_TOKEN (the correct default for every self-host deployment)
 
 Audit log: /opt/lastsietch-rmq-bridge/service-broadcast.log
 """
@@ -50,7 +48,7 @@ MQ_POD_SUFFIX = "-mq-game-sts-0"
 # rejected with "Invalid Auth Token" -- which is why broadcasts published OK at
 # the broker but never actually displayed in-game. Proven live 2026-06-10.
 # Override via --token-file / DUNE_COMMAND_AUTH_TOKEN if a future build rotates it.
-BUILTIN_AUTH_TOKEN = "Nu6VmPWUMvdPMeB7qErr"
+# Command credentials are supplied by the operator at runtime.
 SHUTDOWN_TYPES = ("Restart", "Maintenance", "Update")
 DEFAULT_FREQUENCY_S = 600
 
@@ -119,19 +117,17 @@ def detect_namespace_and_pod(ns_override=None, pod_override=None):
 
 
 def load_token(token_file, namespace):
-    """Token resolution order: --token-file, env, k8s secret."""
     if token_file:
         try:
             with open(token_file) as f:
-                return f.read().strip()
+                value = f.read(4097).strip()
         except OSError as e:
             fail("could not read --token-file %s: %s" % (token_file, e))
-
-    env_token = os.environ.get("DUNE_COMMAND_AUTH_TOKEN")
-    if env_token:
-        return env_token.strip()
-
-    return BUILTIN_AUTH_TOKEN
+    else:
+        value = os.environ.get("DUNE_COMMAND_AUTH_TOKEN", "").strip()
+    if not value or len(value) > 4096 or any(char.isspace() for char in value):
+        fail("configure a nonempty command credential with --token-file or DUNE_COMMAND_AUTH_TOKEN")
+    return value
 
 
 def build_generic_inner(title, message, duration):

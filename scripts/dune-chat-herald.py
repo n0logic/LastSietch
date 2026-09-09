@@ -36,10 +36,10 @@ from datetime import datetime, timezone
 AUDIT_LOG = "/opt/lastsietch-rmq-bridge/chat-herald.log"
 NS_PREFIX = "funcom-seabass-"
 MQ_POD_SUFFIX = "-mq-game-sts-0"
-DEFAULT_SENDER = "Cielago"
+DEFAULT_SENDER = "Server"
 # A placeholder FuncomId for the bot. Display name comes from the spoofed name,
 # so this is metadata; override with --from-id if the client filters on it.
-DEFAULT_FROM_ID = "Cielago#0001"
+DEFAULT_FROM_ID = "Server#0001"
 
 
 def fail(msg, code=1):

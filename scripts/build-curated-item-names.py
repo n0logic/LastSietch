@@ -11,7 +11,7 @@ The synthesis fallback ships incorrect-but-plausible labels for resource
 template_ids that have no pak _NAME entry (e.g. `Stone` -> "Stone" when the
 canonical in-game name is "Granite Stone"; `Silicone` -> "Silicone" when the
 in-game name is "Silicone Block"). This script bootstraps the curated
-overlay from icehunter's `dune-admin` repo (~/Tools/dune-third-party/), which
+overlay from an operator-provided community item-name reference, which
 maintains its own player-facing mapping of ~3,500 template_ids.
 
 Filtering:
@@ -24,8 +24,8 @@ sidecar regenerates. Output is alphabetized for git-friendly diffs.
 
 Authoritative mode (2026-06-12): --authoritative <join.json> merges the
 game-data join (template_id -> ITEMS/<...>_NAME localized string, built from
-the DT_BaseItems_* datatables + client string table on <orchestrator-host>'s DunePakRE
-tree) INTO the existing curated sidecar. Existing curated entries WIN over
+an operator-provided local data export) INTO the existing curated sidecar.
+Existing curated entries WIN over
 generated ones unless identical — differing values are reported as conflicts
 and left untouched. Generated entries are gap-fillers only: ids the pak
 sidecar already resolves (with a non-placeholder value) are skipped.
@@ -41,6 +41,7 @@ Usage:
 """
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -50,7 +51,7 @@ DATA_DIR = REPO_ROOT / "admin-backend/data"
 PAK_SIDECAR = DATA_DIR / "dune-item-template-names.json"
 CURATED_OUT = DATA_DIR / "dune-item-template-names-curated.json"
 
-DEFAULT_SOURCE = Path.home() / "Tools/dune-third-party/dune-admin/item-data.json"
+DEFAULT_SOURCE = Path(os.environ.get("DUNE_ITEM_NAME_SOURCE", "item-names.local.json"))
 
 # Funcom in-development markers — never player-facing.
 JUNK_VALUE_PREFIXES = ("PH_", "XX_", "XXNOTUSED", "NOTUSED", "NOT_USED", "Placeholder", "TEST_", "DEV_", "WIP_")

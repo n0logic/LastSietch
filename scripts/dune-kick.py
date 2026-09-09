@@ -152,7 +152,7 @@ def resolve_fls_id_from_account(namespace, db_pod, account_id):
     if not pgpass:
         fail("could not read POSTGRES_PASSWORD from db pod %s" % db_pod)
     # PlayerId for RMQ ServerCommands must be accounts."user" (the hex Funcom
-    # UUID, e.g. 93700FA3235F3C5A), NOT accounts.funcom_id (the display
+    # UUID, represented as a hexadecimal account ID), NOT accounts.funcom_id (the display
     # "Name#tag"). Confirmed against Red-Blink dune-admin rmq_commands.go:285
     # ("flsIDFromActorID resolves the accounts.\"user\" hex Funcom UUID ... the
     # PlayerId format expected by RMQ server commands"). Using funcom_id makes

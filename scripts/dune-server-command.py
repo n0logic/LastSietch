@@ -60,7 +60,7 @@ DQ = "/root/dq.sh"  # DB query helper (kubectl exec into postgres pod)
 # NOTE: this is NOT the per-server FuncomLiveServices__ServiceAuthToken JWT -- that
 # JWT is the FLS *gateway* auth and is REJECTED here ("Invalid Auth Token").
 # Override via --token-file / DUNE_COMMAND_AUTH_TOKEN only if a future build rotates it.
-BUILTIN_AUTH_TOKEN = "Nu6VmPWUMvdPMeB7qErr"
+# Command credentials are supplied by the operator at runtime.
 
 DESTRUCTIVE = {"CleanPlayerInventory", "ResetProgression", "CheatScript"}
 KILL_SWITCH_ENV = "LASTSIETCH_SERVERCMD_ENABLED"
@@ -139,18 +139,17 @@ def detect_namespace_and_pod(ns_override=None, pod_override=None):
 
 
 def load_token(token_file, namespace):
-    """Resolution order: --token-file, DUNE_COMMAND_AUTH_TOKEN env, then the
-    build-baked BUILTIN_AUTH_TOKEN (the correct default for every self-host)."""
     if token_file:
         try:
             with open(token_file) as f:
-                return f.read().strip()
+                value = f.read(4097).strip()
         except OSError as e:
             fail("could not read --token-file %s: %s" % (token_file, e))
-    env_token = os.environ.get("DUNE_COMMAND_AUTH_TOKEN")
-    if env_token:
-        return env_token.strip()
-    return BUILTIN_AUTH_TOKEN
+    else:
+        value = os.environ.get("DUNE_COMMAND_AUTH_TOKEN", "").strip()
+    if not value or len(value) > 4096 or any(char.isspace() for char in value):
+        fail("configure a nonempty command credential with --token-file or DUNE_COMMAND_AUTH_TOKEN")
+    return value
 
 
 # --------------------------------------------------------------------------
@@ -308,7 +307,7 @@ def redact_token(s, token):
 def add_player_arg(sp):
     g = sp.add_mutually_exclusive_group(required=True)
     g.add_argument("--player-id", help="Target hex Funcom UUID (accounts.\"user\")")
-    g.add_argument("--resolve", help="Resolve target by FuncomId, e.g. 'Cielago#1234'")
+    g.add_argument("--resolve", help="Resolve target by FuncomId, e.g. 'Player#1234'")
 
 
 def build_parser():

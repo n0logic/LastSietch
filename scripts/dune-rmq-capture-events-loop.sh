@@ -16,7 +16,11 @@ set -u
 
 BRIDGE=/opt/lastsietch-rmq-bridge
 OUT=/var/lib/lastsietch-rmq-bridge/captures
-MQGIP=${MQGIP:-10.43.248.252}     # mq-game svc ClusterIP
+MQGIP=${MQGIP:-}
+if [ -z "$MQGIP" ]; then
+  printf 'configure MQGIP from your mq-game service before starting a capture\n' >&2
+  exit 2
+fi
 RK=${RK:-#}
 WINDOW=${WINDOW:-1800}
 CAP_MB=${CAP_MB:-500}             # hard ceiling for the mq-game captures tree

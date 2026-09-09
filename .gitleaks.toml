@@ -1,65 +1,9 @@
-# gitleaks configuration for Last Sietch.
-#
-# Keep this file small and every entry justified. An allowlist is where a
-# secret scanner goes to die: each line here is a place we have promised
-# ourselves not to look, so it needs a reason a reader can check.
-
 [extend]
 useDefault = true
 
 [[allowlists]]
-description = """
-Game progression tag names, not credentials.
-
-scripts/tags-data.json is a machine-generated list of Funcom's own gameplay
-tag identifiers, used to decide which tags a grant applies. Many are shaped
-like "Skills.Key.Trooper2" or "BigMoments.Base.Complete". The literal word
-"Key" plus the entropy of a CamelCase identifier trips the generic-api-key
-rule, twelve times.
-
-This file cannot contain a credential: it is a flat array of game tag strings
-regenerated from a character's own tag set. It is still scanned by
-scripts/preflight.sh for our own deployment-specific patterns.
-"""
-paths = ['''scripts/tags-data\.json''']
-
-[[allowlists]]
-description = """
-Kubernetes secret KEY NAMES, not secret values.
-
-Code that reads a secret out of the cluster at runtime has to name the key it
-wants, for example FuncomLiveServices__ServiceAuthToken. The name is not
-sensitive; the value never appears in this repository, and reading it at call
-time is exactly why nothing here has to store it.
-"""
-regexes = ['''FuncomLiveServices__[A-Za-z]+''']
-
-[[allowlists]]
-description = """
-Funcom's build-baked command auth token, not a credential of ours.
-
-The dedicated server validates the serverexec/broadcast envelope against a
-constant compiled into the shipped binary. It is identical on every Dune
-self-host -- not per-server, not issued to us, and not rotatable by us. The
-same value appears in at least six independent community projects (Go, Rust,
-Python, JavaScript, shell, PowerShell) because everyone who automates a
-self-host arrives at it from the binary.
-
-Removing it would not make it less public and would stop every admin command
-with "Invalid Auth Token". A scanner calls it generic-api-key on entropy; that
-classification is wrong, and it cost a real rotation scare on 2026-08-15.
-
-This is NOT the per-server FuncomLiveServices ServiceAuthToken JWT. That one
-is a real secret and is deliberately not allowlisted anywhere.
-"""
-# Scoped to the two files that must carry it. A stopword would be tighter --
-# suppressing the value rather than the file -- but stopwords and regexes are
-# not applied to rules inherited via [extend] useDefault in this gitleaks
-# version; only paths are. Verified, not assumed. Revisit if that changes.
-#
-# These two files are small, single-purpose RMQ senders. If either grows a
-# real credential this allowlist would hide it, so keep them small.
-paths = [
-  '''scripts/dune-server-command\.py''',
-  '''scripts/dune-service-broadcast\.py''',
-]
+description = "Gameplay tag values in the reference taxonomy, not credentials. Other content in this file remains scanned."
+condition = "AND"
+paths = ['''^scripts/tags-data\.json$''']
+regexTarget = "match"
+regexes = ['''Skills\.Key\.[A-Za-z0-9_]+''']

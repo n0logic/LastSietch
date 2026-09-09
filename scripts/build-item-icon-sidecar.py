@@ -11,10 +11,10 @@
 #
 # GAP-FILL (2026-06-12): templates the wiki doesn't know (NPC weapons, vehicle
 # module grades, schematic blueprints, MTX/swatch variants...) are resolved
-# EXACTLY from the client DataTables: scripts/data/dt-item-icon-map.json maps
-# DT_BaseItems_* row_key.lower() -> Icon AssetPathName basename (no fuzzing —
+# from an operator-provided DUNE_ITEM_ICON_MAP. The local file maps
+# row_key.lower() -> icon basename (no fuzzy matching;
 # this is the same binding the game UI reads). PNGs for those come from the
-# DunePakRE pak extraction (EXTRACT_ROOTS), falling back to wiki media by
+# operator-provided texture directories (DUNE_TEXTURE_ROOTS), falling back to wiki media by
 # basename. Entries whose PNG cannot be produced are dropped so the portal
 # falls back to the unknown glyph instead of a broken <img>.
 #
@@ -33,6 +33,7 @@
 import hashlib
 import io
 import json
+import os
 import re
 import sys
 import urllib.request
@@ -42,11 +43,8 @@ ROOT = Path(__file__).parent.parent / "admin-backend"
 ICONS_DIR = ROOT / "static/img/dune-icons"
 WIKI_ITEMS = Path("/tmp/awakening_all_items.json")
 TEMPLATES = Path(sys.argv[1]) if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else Path("/tmp/container_template_ids.txt")
-DT_MAP = Path(__file__).parent / "data" / "dt-item-icon-map.json"
-EXTRACT_ROOTS = [
-    Path.home() / "Source/Security/DunePakRE/extracted/textures",
-    Path("/mnt/c/Users/the operator/Source/Security/DunePakRE/extracted/textures"),
-]
+DT_MAP = Path(os.environ.get("DUNE_ITEM_ICON_MAP", "item-icon-map.local.json"))
+EXTRACT_ROOTS = [Path(value) for value in os.environ.get("DUNE_TEXTURE_ROOTS", "").split(os.pathsep) if value]
 FALLBACK = "T_UI_IconItemUnknownS_D"
 MEDIA = "https://media.awakening.wiki/wiki"
 
@@ -76,7 +74,7 @@ def default_templates():
 
 
 def pak_png_index():
-    """basename -> path for every PNG in the DunePakRE texture extractions."""
+    """Index only the operator-provided texture directories."""
     idx = {}
     for root in EXTRACT_ROOTS:
         if not root.is_dir():

@@ -50,11 +50,11 @@
 set -u
 
 # ---- config (override via env / the systemd unit) --------------------------
-ENABLE="${DUNE_UPD_ENABLE:-1}"
+ENABLE="${DUNE_UPD_ENABLE:-0}"
 GAME_HOST="${DUNE_UPD_GAME_HOST:-<game-host>}"
 NS="${DUNE_UPD_NS:-funcom-seabass-sh-<your-hostid>-<random>}"
 APPID="${DUNE_UPD_APPID:-4754530}"
-CURRENT_BUILDID="${DUNE_UPD_CURRENT_BUILDID:-24204075}"   # flip away from this = go (Jul 23 1.4.10.4 window; 1.4.10.3 baseline, installed==public verified 2026-07-22)
+CURRENT_BUILDID="${DUNE_UPD_CURRENT_BUILDID:-}"
 BG_BIN="${DUNE_UPD_BG_BIN:-/home/dune/.dune/bin/battlegroup}"
 DQ="${DUNE_UPD_DQ:-/root/dq.sh}"
 DL_DIR="${DUNE_UPD_DL_DIR:-/home/dune/.dune/download}"
@@ -78,8 +78,8 @@ LOCK_FILE="$WORKDIR/.lock"
 SNAP_DIR="$WORKDIR/snapshots"
 
 # Timing (UTC). TARGET = announced window start; warnings anchor to it.
-TARGET_UTC="${DUNE_UPD_TARGET_UTC:-2026-07-23 07:00:00}"      # 03:00 EDT (Funcom HOTFIX 1.4.10.4 window open; STAY ONLINE, poll for the flip)
-DEADLINE_UTC="${DUNE_UPD_DEADLINE_UTC:-2026-07-23 15:00:00}"  # 11:00 EDT; DM+stop if the build never reaches us
+TARGET_UTC="${DUNE_UPD_TARGET_UTC:-}"
+DEADLINE_UTC="${DUNE_UPD_DEADLINE_UTC:-}"
 POLL_INTERVAL="${DUNE_UPD_POLL_INTERVAL:-120}"     # depot poll cadence after T (s)
 VERIFY_TIMEOUT="${DUNE_UPD_VERIFY_TIMEOUT:-600}"
 VERIFY_INTERVAL="${DUNE_UPD_VERIFY_INTERVAL:-20}"
@@ -92,7 +92,7 @@ DM_SSH_HOST="${CIELAGO_SSH_HOST:-the web host}"
 CIELAGO_DIR="${CIELAGO_DIR:-/opt/cielago}"
 CIELAGO_VENV_PY="${CIELAGO_VENV_PY:-$CIELAGO_DIR/venv/bin/python}"
 CIELAGO_ENV="${CIELAGO_ENV:-$CIELAGO_DIR/.env}"
-OWNER_ID="${DUNE_UPD_OWNER_ID:-215146359479730176}"
+OWNER_ID="${DUNE_UPD_OWNER_ID:-}"
 SERVICE_ALERTS_CH="${DUNE_UPD_SERVICE_ALERTS_CH:-}"   # Discord channel id, required if alerts are enabled
 
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=20)
@@ -311,12 +311,27 @@ hold_window() {
 
 # =============================================================================
 main() {
+  if [ "$ENABLE" = "1" ] || [ "${1:-}" = "test-notify" ]; then
+    if [ "$DM_ENABLE" = "1" ] && ! [[ "$OWNER_ID" =~ ^[0-9]{17,20}$ ]]; then
+      printf 'configure DUNE_UPD_OWNER_ID or disable DUNE_UPD_DM_ENABLE\n' >&2
+      exit 2
+    fi
+  fi
   if [ "${1:-}" = "test-notify" ]; then
     log "test-notify: sending a DM to owner only (no channel/in-game)"
     dm_owner "🔧 Test from the Last Sietch update orchestrator on $(hostname -s). If you see this, the owner-DM path works. (test-notify; nothing else fired)"
     exit 0
   fi
   [ "$ENABLE" = "1" ] || { log "disabled no-op"; exit 0; }
+  if [[ "$GAME_HOST$NS" == *'<'* ]] || ! [[ "$CURRENT_BUILDID" =~ ^[0-9]+$ ]] \
+      || [ -z "$TARGET_UTC" ] || [ -z "$DEADLINE_UTC" ]; then
+    printf 'configure the game host, namespace, installed build, target and deadline before enabling updates\n' >&2
+    exit 2
+  fi
+  if [ "$CIELAGO_ENABLE" = "1" ] && ! [[ "$SERVICE_ALERTS_CH" =~ ^[0-9]{17,20}$ ]]; then
+    printf 'configure DUNE_UPD_SERVICE_ALERTS_CH or disable DUNE_UPD_CIELAGO_ENABLE\n' >&2
+    exit 2
+  fi
   [ -f "$DONE_MARKER" ] && { log "done-marker present -> no-op"; exit 0; }
   exec 9>"$LOCK_FILE"; flock -n 9 || { log "locked -> exit"; exit 0; }
 

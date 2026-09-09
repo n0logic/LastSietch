@@ -32,8 +32,8 @@ export WELCOME_PACK_COOLDOWN_DAYS="${WELCOME_PACK_COOLDOWN_DAYS:-30}"
 # In-game welcome whisper (Cielago herald). Sender renders from the funcom_id
 # of CIELAGO_HOSTID's account; works with the Cielago alt logged out.
 HERALD=/opt/lastsietch-rmq-bridge/dune-chat-herald.py
-CIELAGO_HOSTID=93700FA3235F3C5A
-CIELAGO_FUNCOMID="Cielago#47840"
+CIELAGO_HOSTID="${CIELAGO_HOST_ID:-}"
+CIELAGO_FUNCOMID="${CIELAGO_FUNCOM_ID:-}"
 # Welcome whisper, sent as one or more sequential whispers (in case a single
 # line exceeds the in-game whisper length limit). %s in the first line is the
 # recipient display name. Edit these lines to change the copy; no other change
@@ -63,7 +63,7 @@ run_psql() {
 }
 
 resolve_display_name() {
-  # Returns the display portion of funcom_id (before the '#'), e.g. "honeybee#28357" -> "honeybee"
+  # Return the display portion of funcom_id before its tag separator.
   local acct="$1"
   echo "SELECT funcom_id FROM dune.accounts WHERE id=$acct;" | run_psql 2>/dev/null | head -n1 | tr -d '\n' | sed 's/#.*$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
@@ -84,6 +84,10 @@ is_recipient_online() {
 }
 
 welcome_whisper() {
+  [[ "$CIELAGO_HOSTID" =~ ^[0-9A-Fa-f]{16}$ && "$CIELAGO_FUNCOMID" == *"#"* ]] || {
+    log "whisper disabled: configure CIELAGO_HOST_ID and CIELAGO_FUNCOM_ID"
+    return 0
+  }
   # Fire a one-time Cielago welcome whisper to a freshly-granted account.
   # Tied to the grant event (one-shot via ls_welcome_pack_grants), gated on
   # the recipient being online. Pack is the durable part; whisper is a bonus.
@@ -121,6 +125,10 @@ welcome_whisper() {
 }
 
 eligibility_whisper() {
+  [[ "$CIELAGO_HOSTID" =~ ^[0-9A-Fa-f]{16}$ && "$CIELAGO_FUNCOMID" == *"#"* ]] || {
+    log "whisper disabled: configure CIELAGO_HOST_ID and CIELAGO_FUNCOM_ID"
+    return 0
+  }
   # Whisper a cooldown-skip notice to a re-roll account. Gated on the recipient
   # being online (whispers only render to online clients). Best-effort, like the
   # welcome whisper.

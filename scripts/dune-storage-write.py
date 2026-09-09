@@ -98,7 +98,7 @@ VALID_MODES = ("sweep", "amount")
 # ---- drag-drop MOVE (Tier 3) --------------------------------------------------
 # Kill-switch (game-host env, default 0 = OFF). While off, a live MOVE refuses with
 # `move_disabled` WITHOUT opening a DB session; dry-run is always allowed for QA.
-MOVE_ENABLED = os.environ.get("LASTSIETCH_STORAGE_MOVE_ENABLED", "1") == "1"
+MOVE_ENABLED = os.environ.get("LASTSIETCH_STORAGE_MOVE_ENABLED", "0") == "1"
 # Optional swapped-item guard: an expected_template must be this safe charset.
 TEMPLATE_RE = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 # Templates with ZERO effective volume (never volume-gated). SolarisCoin is currency.

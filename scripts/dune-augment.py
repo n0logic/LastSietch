@@ -108,8 +108,7 @@ KEYSTONES_CLOTHING = [42, 43]
 KEYSTONES_MELEE = [44, 45, 46]
 KEYSTONES_RANGED = [47, 48, 49]
 
-_CATALOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                             "data", "augment-compatibility.json")
+_CATALOG_PATH = os.environ.get("DUNE_AUGMENT_CATALOG", "augment-compatibility.local.json")
 
 DQ = "/root/dq.sh"
 DB_PORT = "15432"

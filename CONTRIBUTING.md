@@ -14,7 +14,7 @@ Thanks for considering a contribution. This project tracks a moving target - Fun
 
 - **JWT tokens, secrets, FLS keys, or any other credentials** - the `.gitignore` blocks most filenames but please review your diff manually
 - **Redistributed Funcom assets** - container images, binaries, copyrighted text from their docs. Quote sparingly with attribution; never bundle.
-- **Player data / database dumps** - if you have a backup containing player saves, scrub it before sharing
+- **Player data / database dumps** - use synthetic test fixtures instead; never attach a production backup
 - **Game-derived assets** - meshes, textures, icons, or anything else extracted from the game's package files. Tooling that generates these locally from someone's own installation is welcome; its output is not.
 - **Other communities' content** - Discord logs, forum posts, or wiki text scraped from elsewhere. Link to it instead.
 
@@ -28,7 +28,17 @@ NS="${NS:-funcom-seabass-sh-<your-hostid>-<random>}"
 
 So a reader can see what the value looks like, an operator can export it, and nobody has to guess. Angle-bracket placeholders in prose and command examples, same idea.
 
-CI enforces this. Every push and pull request runs a secret scan plus two gates: one rejecting file classes that must never be committed, and one rejecting known deployment-specific identifiers. If a gate fires on something legitimate, say so in the PR rather than working around it; a check that flags correct work is a bug in the check.
+Run the local publication checks before pushing. Public CI is a backstop, not
+the first gate: by the time it runs, a push has already disclosed its content.
+The checks reject prohibited file classes, literal identities and addresses,
+and operator-specific values supplied through a private inventory kept outside
+the repository. Staged mode reads the actual Git index, not cleaned working
+copies. See [publication checks](docs/18-publication-checks.md).
+
+If a gate fires on legitimate content, add a narrow, tested correction. Do not
+exclude whole files, suppress failures, or put real protected values into a
+public deny rule. Review commit author and committer emails before pushing;
+a GitHub-provided noreply address avoids exposing a personal mailbox.
 
 ## Workflow
 

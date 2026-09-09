@@ -11,7 +11,11 @@ set -euo pipefail
 # allowlist applies to any key that's pinned to this dispatcher, so
 # rotation = update list + deploy. Free-shell keys (operator@workstation etc.)
 # never reach this script and are unaffected.
-ALLOWED_SOURCE_IPS="${LASTSIETCH_RELAY_ALLOWED_IPS:-173.249.194.214}"
+ALLOWED_SOURCE_IPS="${LASTSIETCH_RELAY_ALLOWED_IPS:-}"
+if [ -z "$ALLOWED_SOURCE_IPS" ]; then
+  echo "rejected: configure LASTSIETCH_RELAY_ALLOWED_IPS before enabling the dispatcher" >&2
+  exit 1
+fi
 if [ -n "${SSH_CLIENT:-}" ]; then
   client_ip="${SSH_CLIENT%% *}"
   allowed=0

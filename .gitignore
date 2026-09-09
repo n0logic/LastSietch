@@ -94,3 +94,13 @@ inventory.local.*
 # Python build artefacts
 __pycache__/
 *.pyc
+
+# Operator-provided sidecars and generated publication reports
+*.local.json
+*.local/
+item-icon-map.local.json
+string-table.local.json
+data/dt-item-icon-map.json
+scripts/data/dt-item-icon-map.json
+scripts/data/augment-compatibility.json
+public-manifest*.json

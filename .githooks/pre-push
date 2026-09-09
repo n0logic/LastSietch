@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+inventory_path=${PUBLIC_PUBLISH_INVENTORY:?Set PUBLIC_PUBLISH_INVENTORY to an external mode0600 private inventory}
+scanner=${GITLEAKS_BIN:-gitleaks}
+base_ref=${PUBLIC_BASE_REF:-refs/remotes/origin/master}
+test "$("$scanner" version)" = 8.30.1
+git diff --quiet
+git diff --cached --quiet
+head_oid=$(git rev-parse HEAD)
+base_oid=$(git rev-parse --verify "$base_ref^{commit}")
+base_roots=$(git rev-list --max-parents=0 "$base_oid" | sort)
+
+while read -r local_ref local_oid remote_ref remote_oid; do
+  if [[ "$local_ref" != refs/heads/* || "$local_oid" != "$head_oid" ]]; then
+    printf 'publication refused: only the reviewed HEAD branch may be pushed\n' >&2
+    exit 1
+  fi
+  git merge-base --is-ancestor "$base_oid" "$local_oid"
+  if [ "$(git rev-list --max-parents=0 "$local_oid" | sort)" != "$base_roots" ]; then
+    printf 'publication refused: unrelated source history\n' >&2
+    exit 1
+  fi
+  while IFS= read -r email; do
+    if ! [[ "$email" =~ ^[A-Za-z0-9.+_-]+@users\.noreply\.github\.com$ ]]; then
+      printf 'publication refused: outgoing commit email is not a GitHub noreply address\n' >&2
+      exit 1
+    fi
+  done < <(git log --format='%ae%n%ce' "$base_oid..$local_oid")
+  python3 scripts/public-preflight.py --staged --private-patterns "$inventory_path" \
+    --require-private-patterns --commit-range "$base_oid..$local_oid"
+  "$scanner" git --redact=100 --no-banner --ignore-gitleaks-allow \
+    --gitleaks-ignore-path /nonexistent-publication-ignore \
+    --config .gitleaks.toml --log-opts="$base_oid..$local_oid" .
+done

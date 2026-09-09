@@ -19,12 +19,13 @@ stdout JSON: { success, scope, mode, returncode, message_len, detail }
 Always exits 0 and reports status in JSON so the relay gets a clean response.
 """
 import json
+import os
 import re
 import subprocess
 import sys
 
 HERALD = "/opt/lastsietch-rmq-bridge/dune-chat-herald.py"
-CIELAGO_HOST_ID = "93700FA3235F3C5A"  # sender renders as "Cielago" (dune.accounts)
+CIELAGO_HOST_ID = os.environ.get("CIELAGO_HOST_ID", "")
 MAX_MSG = 1000
 FUNCOM_ID_RE = re.compile(r"^[^\s#]{1,32}#[0-9]{1,10}$")
 MAP_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,40}$")
@@ -61,6 +62,9 @@ def main():
         respond(False, scope, mode, -1, len(message), f"message exceeds {MAX_MSG} chars")
     if mode not in ("apply", "dry-run"):
         respond(False, scope, mode, -1, len(message), "mode must be 'apply' or 'dry-run'")
+
+    if not re.fullmatch(r"[0-9A-Fa-f]{16}", CIELAGO_HOST_ID):
+        respond(False, scope, mode, -1, len(message), "configure CIELAGO_HOST_ID for your sender account")
 
     argv = [sys.executable, HERALD, "--direct", "--user-id", CIELAGO_HOST_ID]
     if mode == "apply":

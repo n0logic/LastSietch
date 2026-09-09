@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build per-namespace friendly-name sidecars from the extracted pak string
 tables. Each namespace ships its own JSON to keep individual files under the
-500KB per-file budget called out in architect P4-EXECUTION-BRIEF §7.
+500KB per-file budget.
 
-Source: ~/Source/Security/DunePakRE/extracted/string_table_lookup.json
+Source: DUNE_STRING_TABLE_JSON, supplied from your own licensed installation
         (27k+ entries keyed like ITEMS/WEAPON_FOO_NAME).
 
 Outputs (admin-backend/data/):
@@ -19,7 +19,7 @@ lives in admin-backend/name_lookups.py — one NameSidecar instance per
 namespace, all loaded once at startup.
 
 Idempotent — safe to re-run. Each invocation overwrites the sidecar in
-place (no implicit backups; commit produced JSONs).
+place. Generated sidecars stay local and must not be committed here.
 
 Per-namespace peel lists were derived by sampling 50 rows + leading-token
 counter audit per architect §7 directive ("MUST inspect a 50-row sample
@@ -42,11 +42,12 @@ LIFT-11 follow-up notes (file as v1.1 backlog):
 """
 import argparse
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
-SRC = Path.home() / "Source/Security/DunePakRE/extracted/string_table_lookup.json"
+SRC = Path(os.environ.get("DUNE_STRING_TABLE_JSON", "string-table.local.json"))
 DATA_DIR = Path(__file__).parent.parent / "admin-backend/data"
 SIZE_BUDGET_BYTES = 500_000  # hard cap per architect §5 / §7
 

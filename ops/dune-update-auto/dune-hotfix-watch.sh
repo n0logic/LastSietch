@@ -28,8 +28,13 @@ DM_ENABLE="${DUNE_HFW_DM_ENABLE:-1}"
 DM_SSH_HOST="${CIELAGO_SSH_HOST:-the web host}"
 CIELAGO_VENV_PY="${CIELAGO_VENV_PY:-/opt/cielago/venv/bin/python}"
 CIELAGO_ENV="${CIELAGO_ENV:-/opt/cielago/.env}"
-OWNER_ID="${DUNE_HFW_OWNER_ID:-215146359479730176}"
+OWNER_ID="${DUNE_HFW_OWNER_ID:-}"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=20)
+
+if [ "$DM_ENABLE" = "1" ] && ! [[ "$OWNER_ID" =~ ^[0-9]{17,20}$ ]]; then
+  printf 'configure DUNE_HFW_OWNER_ID or disable DUNE_HFW_DM_ENABLE\n' >&2
+  exit 2
+fi
 
 mkdir -p "$WORKDIR"
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }

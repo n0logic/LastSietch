@@ -111,9 +111,9 @@ the vocabulary.
 
 The chain is complete: every layer from the API key down to psql is here.
 
-What is **not** here is the web front end that sits on top. That is the player
-portal, and it lands separately. You can drive this control plane from your own
-interface, or from curl, in the meantime.
+The web front end that sits on top is here too since v0.7: the player portal
+and admin panel under `admin-backend/`, described in `docs/20-player-portal.md`.
+You can still drive this control plane from your own interface, or from curl.
 
 A caution worth repeating from `docs/13`: many of these action scripts write to
 a live game database. Several are gated on the target player being offline for

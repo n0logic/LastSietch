@@ -15,6 +15,7 @@ host. Output feeds scripts/build-markers-snapshot.py.
 
   sudo python3 dune-markers-export.py            # -> stdout (JSON array)
   sudo python3 dune-markers-export.py -o out.json
+  sudo python3 dune-markers-export.py --maps 1,7,9,11 -o out.json   # all four portal maps
 """
 import json
 import subprocess
@@ -26,6 +27,8 @@ DBPOD = "sh-<your-hostid>-<random>-db-dbdepl-sts-0"
 # The static-layer maps to export. dimension_index = -1 is the shared static layer
 # (same terrain underlies a map's PvE/PvP instances).
 MAP_NAME_IDS = (7, 11)            # 7 = Deep Desert, 11 = Hagga Basin
+# The hub maps (1 = Arrakeen, 9 = Harko Village) carry only a few dozen named
+# markers; pass --maps 1,7,9,11 to export all four for build-portal-assets.py.
 
 
 def _db_creds() -> tuple[str, str]:
@@ -56,8 +59,8 @@ def _psql(sql: str) -> str:
     return out.stdout.strip()
 
 
-def export() -> list:
-    maps = ",".join(str(m) for m in MAP_NAME_IDS)
+def export(map_ids=MAP_NAME_IDS) -> list:
+    maps = ",".join(str(int(m)) for m in map_ids)
     sql = (
         "SELECT json_agg(json_build_object("
         "'map', map_name_id, "
@@ -73,10 +76,13 @@ def export() -> list:
 
 def main(argv) -> int:
     out_path = None
+    map_ids = MAP_NAME_IDS
     for i, a in enumerate(argv):
         if a in ("-o", "--out") and i + 1 < len(argv):
             out_path = argv[i + 1]
-    rows = export()
+        elif a == "--maps" and i + 1 < len(argv):
+            map_ids = tuple(int(x) for x in argv[i + 1].split(",") if x.strip())
+    rows = export(map_ids)
     text = json.dumps(rows, separators=(",", ":"))
     if out_path:
         with open(out_path, "w", encoding="utf-8") as f:

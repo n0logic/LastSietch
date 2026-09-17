@@ -104,3 +104,17 @@ data/dt-item-icon-map.json
 scripts/data/dt-item-icon-map.json
 scripts/data/augment-compatibility.json
 public-manifest*.json
+
+# Player portal: regenerated or fetched by scripts/build-portal-assets.py, and per-host state
+admin-backend/data/dune-item-*.json
+admin-backend/data/dune-map-icons.json
+admin-backend/data/*-markers-snapshot.json
+admin-backend/data/feature_flags.json
+admin-backend/static/img/stats/
+admin-backend/static/js/vendor/three/
+admin-backend/portal-nextgen/static/fonts/
+admin-backend/portal-nextgen/static/*.png
+admin-backend/portal-nextgen/build/
+admin-backend/portal-nextgen/node_modules/
+admin-backend/portal-nextgen/.svelte-kit/
+admin-backend/venv/

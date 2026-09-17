@@ -30,10 +30,24 @@ procedures, game assets, textures, meshes, icons, or other distributable
 assets are included in this repository.
 
 Where our tooling needs game-derived data (for example item icons or meshes
-used by the player portal), this repository ships the extraction script only.
-You run it against your own licensed installation of the game, and the output
-stays on your own machine. Nothing derived from Funcom's files is committed
-here or served from this repository.
+used by the player portal), this repository ships the script only. The
+portal's icons, names and map glyphs are fetched by scripts/build-portal-assets.py
+from the awakening.wiki community API, whose content licence (CC BY-NC-SA)
+binds the files you download; everything else you run against your own
+licensed installation of the game. In both cases the output stays on your own
+machine. Nothing derived from Funcom's files is committed here or served from
+this repository.
+
+THIRD-PARTY COMPONENTS USED BY THE PLAYER PORTAL
+------------------------------------------------
+
+This repository contains no binary files. The portal's fonts (JetBrains Mono
+and Saira, SIL Open Font License 1.1) and its copy of three.js (MIT) are
+fetched at install time by scripts/build-portal-assets.py from their upstream
+releases; their licence texts are under admin-backend/THIRD_PARTY_LICENSES/.
+Design notes in the admin grant tooling mirror icehunter's dune-admin (MIT).
+Python and npm dependencies are pulled at install time under their own
+licences; see requirements.txt and portal-nextgen/package.json.
 
 Configuration keys, schema notes, and behavioural documentation in this
 repository describe observed behaviour of software we operate under licence.

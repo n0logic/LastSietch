@@ -23,6 +23,7 @@ Start with [configuration changes](docs/19-configuration-changes.md) when upgrad
 | [docs/13-safe-database-writes.md](docs/13-safe-database-writes.md) | Read before writing to the game database. Giving is safe, taking is not, and why |
 | [docs/14-known-funcom-issues.md](docs/14-known-funcom-issues.md) | Symptoms and detection for problems we have hit, so you can identify them in minutes instead of an evening |
 | [docs/15-control-plane-architecture.md](docs/15-control-plane-architecture.md) | How a web app safely drives a live game server it must never touch directly. The one idea here most worth copying |
+| [docs/20-player-portal.md](docs/20-player-portal.md) | The player portal: what it does, the safety model, install, configuration, and the asset step that regenerates icons and maps from public sources |
 | [docs/16-persistent-map-maintenance.md](docs/16-persistent-map-maintenance.md) | Sietch instances versus map families, empty-state checks, backup and recovery boundaries |
 | [docs/17-server-time.md](docs/17-server-time.md) | Read-only server clock and explicitly configured recurrence display, with Python and JavaScript helpers |
 | [docs/18-publication-checks.md](docs/18-publication-checks.md) | Local staged-content, privacy, secret and provenance checks before publication |
@@ -32,6 +33,7 @@ Start with [configuration changes](docs/19-configuration-changes.md) when upgrad
 | [relay/](relay/) | The Dune-only relay, 106 routes. The web-tier side of the control plane |
 | [dune-telemetry/](dune-telemetry/) | Presence, world events, combat, market and progression collection. Standalone and usable today |
 | [discord/cielago-bot/](discord/cielago-bot/) | The support bot: watches help channels, classifies and dedups player reports into tickets, posts daily and weekly digests, in-game chat herald |
+| [admin-backend/](admin-backend/) | The player portal and admin panel: FastAPI API server, and under `portal-nextgen/` the SvelteKit front end with the live 3D maps. Code only; assets are regenerated with `scripts/build-portal-assets.py` |
 
 ## Tested against
 
@@ -44,6 +46,7 @@ separately so they are not mistaken for a blanket compatibility guarantee.
 | Self-host product | Steam app ID `4754530`, "Dune: Awakening Self-Hosted Server" |
 | Historical install walkthrough | `seabass-server:2051294-0-shipping`, July 2026 |
 | Later maintenance observations | `seabass-server:2064155-0-shipping`, September 2026 |
+| Player portal snapshot (v0.7) | `seabass-server:2111270-0-shipping` (Update 1.5.3), operators `v1.7.0`, k3s `v1.34.11+k3s1`, September 2026 |
 | Funcom operators | `v1.5.0` (battlegroup, database, server, utilities) |
 | Host OS | Debian 12 reference; Debian 13 package compatibility notes are not a full deployment certification |
 | Database | `igw-postgres:17.4-alpine-fc-13` |
@@ -62,7 +65,7 @@ orchestrator is disabled until explicitly configured and enabled.
 This repository is being expanded from a private monorepo, in stages, with each stage scrubbed of deployment-specific values before it lands. Rough order:
 
 1. ~~**Operations.**~~ Landed: see `docs/12` through `docs/14`, `scripts/`, and `ops/`.
-2. **Player portal.** A player-facing web portal: character and inventory views, CHOAM market browse and sell, storage management, coordinate-accurate Deep Desert and Hagga maps from your own database, guild directory, Landsraad board, and a 3D base blueprint viewer. This is the piece nothing else in the ecosystem currently offers. The control plane it drives is already here; what is missing is the front end.
+2. ~~**Player portal.**~~ Landed as v0.7: see `docs/20-player-portal.md` and `admin-backend/`. Character and inventory views, CHOAM market browse and sell, storage moves, coordinate-accurate Deep Desert and Hagga maps from your own database, guild directory, Landsraad board, rewards, the Karum trading venue, and a 3D base blueprint viewer.
 3. ~~**Telemetry and Discord.**~~ Landed: see `dune-telemetry/` and `discord/cielago-bot/`.
 
 No dates. This is volunteer work done around running an actual server, and a half-working portal helps nobody.
@@ -72,7 +75,7 @@ No dates. This is volunteer work done around running an actual server, and a hal
 Being explicit, because the gaps are intentional and you will notice them:
 
 - **No Funcom code, binaries, container images, or server-side stored procedures.** Not extracted, not paraphrased, not included.
-- **No game assets.** No meshes, textures, icons, or art extracted from the game's package files. Tooling that generates what it needs on *your* machine from *your* licensed install is fine, and that is how the portal gets its icons: roughly 86% of item templates resolve to their real icon from public community sources, and the rest fall back to a generic glyph.
+- **No game assets.** No meshes, textures, icons, or art extracted from the game's package files. Tooling that generates what it needs on *your* machine is fine, and that is how the portal gets its icons and map glyphs: `scripts/build-portal-assets.py` pulls them from the community wiki's public API (every item a player can see or trade), and the rest fall back to a generic glyph. The baked 3D relief and our own visual dressing (hero art, posters, crests, PWA icons) are not shipped either; the portal renders without them.
 - **No binary patching or package-signing tooling.** We have some. It stays private. Where a Funcom bug has an operational workaround, the symptom and the detection method are documented so you can recognise it, without shipping the patch itself.
 - **No exploit paths.** Where we have found something that could be abused, it is not published. Some of it becomes a defensive rule here, stated as the operator guidance without the mechanism.
 - **No player data.** No names, ids, coordinates, chat logs, or ticket text.

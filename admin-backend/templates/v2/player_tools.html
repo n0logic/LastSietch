@@ -1,0 +1,53 @@
+{% extends "v2/base.html" %}
+{% block title %}Player Tools{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="/admin/static/css/v2/player-tools.css">
+{% endblock %}
+{% block content %}
+<main class="v2-player-tools" id="v2-player-tools">
+
+  <header class="v2-player-tools__header">
+    <div class="card-title">Player picker{% if total_player_count %} · {{ total_player_count }} total{% endif %}</div>
+    <span id="v2-player-picker-loading" class="htmx-indicator" aria-live="polite">searching…</span>
+  </header>
+
+  <form id="player-picker-filter"
+        class="v2-player-tools__filter-bar"
+        hx-get="/admin/api/dune/v2/players/_picker"
+        hx-trigger="change, keyup changed delay:200ms from:#player-search, search from:#player-search"
+        hx-target="#v2-player-picker-list"
+        hx-swap="innerHTML"
+        hx-include="this"
+        hx-indicator="#v2-player-picker-loading"
+        hx-sync="this:replace">
+    <div class="v2-player-tools__filter-field">
+      <label for="player-search">Search</label>
+      <input id="player-search" name="q" type="search" autocomplete="off"
+             placeholder="name…"
+             value="{{ filter_q or '' }}"
+             maxlength="64">
+    </div>
+    <div class="v2-player-tools__filter-field v2-player-tools__filter-field--toggle">
+      <label for="player-online-only">Online only</label>
+      <input id="player-online-only" name="online_only" type="checkbox" value="1"
+             {% if filter_online_only %}checked{% endif %}>
+    </div>
+    <div class="v2-player-tools__filter-actions">
+      <button type="reset" class="btn btn-sm"
+              onclick="setTimeout(function(){ htmx.trigger('#player-picker-filter', 'change'); }, 0);">Reset</button>
+    </div>
+  </form>
+
+  {% if available == False %}
+    <div class="empty-state empty-state--loading-failed">
+      <p class="empty-state__headline">Player list unavailable</p>
+      <p class="empty-state__body">The relay couldn't reach the game-side roster. Try again in a moment.</p>
+    </div>
+  {% else %}
+    <div id="v2-player-picker-list" class="v2-player-tools__list-wrap">
+      {% include "v2/_fragments/player_picker_list.html" %}
+    </div>
+  {% endif %}
+
+</main>
+{% endblock %}

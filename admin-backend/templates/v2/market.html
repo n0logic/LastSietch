@@ -1,0 +1,246 @@
+{% extends "v2/base.html" %}
+{% block title %}Market bot{% endblock %}
+{% block extra_css %}
+<style>
+  /* Tokens only. Same story as the Discord-links page: `var(--v2-panel, ...)`
+     names a token that has never existed, so the hardcoded fallbacks were what
+     rendered. Ibad blue is not used here: nothing on this page polls live. */
+  .mkt-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--space-4); }
+  .mkt-card { grid-column: span 12; background: var(--bg-card); border: 1px solid var(--border);
+              border-left: 2px solid var(--accent-soft);
+              border-radius: var(--radius-lg); padding: var(--space-5) var(--space-6); }
+  @media (min-width: 900px) { .mkt-card--half { grid-column: span 6; } }
+  .mkt-card h2 { margin: 0 0 var(--space-4); font-size: var(--text-md); font-weight: 700;
+                 letter-spacing: 0.02em; color: var(--accent); }
+  .mkt-stat-row { display: flex; flex-wrap: wrap; gap: var(--space-5) var(--space-7); }
+  .mkt-stat { min-width: 120px; }
+  .mkt-stat__label { font-size: var(--text-2xs); text-transform: uppercase;
+                     letter-spacing: 0.06em; color: var(--text-muted); }
+  .mkt-stat__val { font-size: var(--text-lg); font-family: var(--font-mono);
+                   font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .mkt-pill { display: inline-block; padding: 2px var(--space-3); border-radius: var(--radius-full);
+              font-size: var(--text-xs); font-weight: 600; border: 1px solid transparent;
+              vertical-align: middle; }
+  .mkt-pill--up { background: var(--success-bg); border-color: var(--green); color: var(--green); }
+  .mkt-pill--down { background: var(--error-bg); border-color: var(--red); color: var(--red); }
+  /* Before the first status lands nobody knows whether the bot is up. Painting it
+     red on load is a claim, and it was wrong every time the bot was running. */
+  .mkt-pill--wait { background: var(--bg-elevated); border-color: var(--border-strong);
+                    color: var(--text-muted); }
+  .mkt-actions { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-1); }
+  .mkt-btn { background: transparent; color: var(--text); border: 1px solid var(--border);
+             border-radius: var(--radius-md); padding: var(--space-2) var(--space-4);
+             font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 600; cursor: pointer;
+             transition: border-color var(--motion-fast) var(--ease-in-out),
+                         color var(--motion-fast) var(--ease-in-out); }
+  .mkt-btn:hover { border-color: var(--border-strong); }
+  .mkt-btn--warn { border-color: var(--yellow); color: var(--yellow); }
+  .mkt-btn--danger { border-color: var(--red); color: var(--red); }
+  .mkt-btn--primary { color: var(--accent); border-color: var(--accent); }
+  .mkt-btn--primary:hover { background: var(--accent-glow); border-color: var(--accent-bright); color: var(--accent-bright); }
+  .mkt-btn:disabled { opacity: .4; cursor: not-allowed; }
+  table.mkt-trades { width: 100%; border-collapse: collapse; font-size: var(--text-sm);
+                     font-variant-numeric: tabular-nums; }
+  table.mkt-trades th, table.mkt-trades td { text-align: left; padding: var(--space-2) var(--space-2);
+                                             border-bottom: 1px solid var(--border-subtle); }
+  table.mkt-trades th { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.06em;
+                        color: var(--text-muted); font-weight: 600; }
+  table.mkt-trades tbody tr:hover { background: rgba(212, 137, 28, 0.05); }
+  table.mkt-trades td.num { text-align: right; }
+  .mkt-tag { font-size: var(--text-2xs); padding: 1px var(--space-2); border-radius: var(--radius-sm);
+             border: 1px solid transparent; }
+  .mkt-tag--buy { background: var(--bg-elevated); border-color: var(--border-strong); color: var(--text-muted); }
+  .mkt-tag--sell { background: var(--success-bg); border-color: var(--green); color: var(--green); }
+  .mkt-search-input { flex: 1; min-width: 220px; background: var(--bg-deep); color: var(--text);
+                      border: 1px solid var(--border); border-radius: var(--radius-md);
+                      padding: var(--space-2) var(--space-3); font-family: var(--font-mono);
+                      font-size: var(--text-sm);
+                      transition: border-color var(--motion-fast) var(--ease-in-out); }
+  .mkt-search-input:focus { outline: none; border-color: var(--accent); }
+  #mkt-policy { width: 100%; min-height: 280px; font-family: var(--font-mono); font-size: var(--text-xs);
+                background: var(--bg-deep); color: var(--text); border: 1px solid var(--border);
+                border-radius: var(--radius-md); padding: var(--space-3); }
+  #mkt-policy:focus { outline: none; border-color: var(--accent); }
+  .mkt-note { font-size: var(--text-xs); color: var(--text-muted); margin: var(--space-2) 0 0; }
+  .mkt-msg { margin-top: var(--space-3); font-size: var(--text-sm); min-height: 18px; }
+  .mkt-msg--err { color: var(--red); }
+  .mkt-msg--ok { color: var(--green); }
+</style>
+{% endblock %}
+{% block content %}
+{# .v2-main is the page frame every other v2 page uses; without it these cards
+   ran to the viewport edge. #}
+<main class="v2-main">
+<div class="mkt-grid">
+  <section class="mkt-card mkt-card--half">
+    <h2>Bot status <span id="mkt-svc-pill" class="mkt-pill mkt-pill--wait">checking…</span></h2>
+    <div class="mkt-stat-row">
+      <div class="mkt-stat"><div class="mkt-stat__label">Bank balance</div><div class="mkt-stat__val" id="mkt-balance">n/a</div></div>
+      <div class="mkt-stat"><div class="mkt-stat__label">Active listings</div><div class="mkt-stat__val" id="mkt-listings">n/a</div></div>
+      <div class="mkt-stat"><div class="mkt-stat__label">PID</div><div class="mkt-stat__val" id="mkt-pid">n/a</div></div>
+    </div>
+    <p class="mkt-note" id="mkt-since"></p>
+    <div class="mkt-actions">
+      <button class="mkt-btn" id="mkt-refresh">Refresh</button>
+      <button class="mkt-btn mkt-btn--warn" data-verb="restart">Restart</button>
+      <button class="mkt-btn" data-verb="start">Start</button>
+      <button class="mkt-btn mkt-btn--danger" data-verb="stop">Stop</button>
+    </div>
+    <div class="mkt-msg" id="mkt-svc-msg"></div>
+  </section>
+
+  <section class="mkt-card mkt-card--half">
+    <h2>Activity (rolling 7 days)</h2>
+    <div class="mkt-stat-row">
+      <div class="mkt-stat"><div class="mkt-stat__label">Units sold /7d</div><div class="mkt-stat__val" id="mkt-sells">n/a</div></div>
+      <div class="mkt-stat"><div class="mkt-stat__label">Buys /7d</div><div class="mkt-stat__val" id="mkt-buys">n/a</div></div>
+      <div class="mkt-stat"><div class="mkt-stat__label">Total logged</div><div class="mkt-stat__val" id="mkt-total">n/a</div></div>
+    </div>
+  </section>
+
+  <section class="mkt-card">
+    <h2>Recent trades</h2>
+    <table class="mkt-trades">
+      <thead><tr><th>Time</th><th>Item</th><th class="num">Price</th><th class="num">Qty</th><th>Side</th></tr></thead>
+      <tbody id="mkt-trades"><tr><td colspan="5">Loading…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="mkt-card">
+    <h2>Search active listings</h2>
+    <p class="mkt-note">Search the live CHOAM exchange by item (template id fragment, e.g. <code>Stillsuit</code>,
+      <code>Spitdart</code>, <code>Augment</code>). Letters, digits, <code>_</code> and <code>-</code> only.</p>
+    <div class="mkt-actions" style="margin-top:6px;">
+      <input class="mkt-search-input" id="mkt-search-q" type="text" placeholder="e.g. Spitdart" maxlength="64">
+      <button class="mkt-btn mkt-btn--primary" id="mkt-search-go">Search</button>
+    </div>
+    <div class="mkt-msg" id="mkt-search-msg"></div>
+    <table class="mkt-trades" style="margin-top:8px;">
+      <thead><tr><th>Item</th><th class="num">Price</th><th class="num">Qty</th><th class="num">Quality</th><th>Seller</th></tr></thead>
+      <tbody id="mkt-search-results"><tr><td colspan="5">Enter a search term above.</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="mkt-card">
+    <h2>Market policy</h2>
+    <p class="mkt-note">Edit price floors/ceilings, weekly sell budgets, and blocked sellers as JSON.
+      Saving writes <code>market-policy.json</code>; the bot loads it on startup, so use <strong>Restart</strong> above to apply.</p>
+    <textarea id="mkt-policy" spellcheck="false" aria-label="market policy JSON"></textarea>
+    <div class="mkt-actions" style="margin-top:10px;">
+      <button class="mkt-btn mkt-btn--primary" id="mkt-policy-save">Save policy</button>
+      <button class="mkt-btn" id="mkt-policy-reload">Reload from server</button>
+    </div>
+    <div class="mkt-msg" id="mkt-policy-msg"></div>
+  </section>
+</div>
+</main>
+{% endblock %}
+{% block scripts %}
+<script>
+function mktFmt(n){ return (n===null||n===undefined) ? 'n/a' : Number(n).toLocaleString('en-US'); }
+function mktMsg(id, text, ok){ var e=document.getElementById(id); e.textContent=text||''; e.className='mkt-msg'+(text?(ok?' mkt-msg--ok':' mkt-msg--err'):''); }
+
+function mktRenderStatus(d){
+  var svc=(d&&d.service)||{}, bot=(d&&d.bot)||{}, act=(d&&d.activity)||{};
+  var up = svc.active==='active';
+  var pill=document.getElementById('mkt-svc-pill');
+  pill.textContent = (svc.active||'unknown')+(svc.sub?(' · '+svc.sub):'');
+  pill.className='mkt-pill '+(up?'mkt-pill--up':'mkt-pill--down');
+  document.getElementById('mkt-balance').textContent=mktFmt(bot.balance);
+  document.getElementById('mkt-listings').textContent=mktFmt(bot.active_npc_listings);
+  document.getElementById('mkt-pid').textContent=svc.pid||'n/a';
+  document.getElementById('mkt-since').textContent=svc.since?('Active since '+svc.since):'';
+  document.getElementById('mkt-sells').textContent=mktFmt(act.sells_7d_units);
+  document.getElementById('mkt-buys').textContent=mktFmt(act.buys_7d);
+  document.getElementById('mkt-total').textContent=mktFmt(act.total_logged);
+  var tb=document.getElementById('mkt-trades'); tb.innerHTML='';
+  var rows=(act.recent||[]);
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="5">No recent trades.</td></tr>'; return; }
+  rows.forEach(function(r){
+    var tr=document.createElement('tr');
+    var t=(window.fmtLocal ? fmtLocal(r.logged_at) : (r.logged_at||'').replace('T',' ').replace(/\..*$/,''));
+    var tTitle=(window.utcLabel ? utcLabel(r.logged_at) : '');
+    var side=r.bot_trade ? '<span class="mkt-tag mkt-tag--buy">bot buy</span>' : '<span class="mkt-tag mkt-tag--sell">sale</span>';
+    tr.innerHTML='<td title="'+tTitle+'">'+t+'</td><td>'+(r.template_id||'')+'</td><td class="num">'+mktFmt(r.item_price)+'</td><td class="num">'+mktFmt(r.stack_size)+'</td><td>'+side+'</td>';
+    tb.appendChild(tr);
+  });
+}
+
+function mktLoadStatus(){
+  return apiCall('GET','/admin/api/dune/market/status').then(mktRenderStatus)
+    .catch(function(e){
+      var pill=document.getElementById('mkt-svc-pill');
+      pill.textContent='unreachable'; pill.className='mkt-pill mkt-pill--down';
+      mktMsg('mkt-svc-msg','Status unavailable: '+(e.message||e),false);
+    });
+}
+function mktLoadPolicy(){
+  return apiCall('GET','/admin/api/dune/market/policy').then(function(d){
+    document.getElementById('mkt-policy').value=JSON.stringify((d&&d.policy)||{}, null, 2);
+    mktMsg('mkt-policy-msg','',true);
+  }).catch(function(e){ mktMsg('mkt-policy-msg','Could not load policy: '+(e.message||e),false); });
+}
+
+function mktService(verb){
+  mktMsg('mkt-svc-msg','Running '+verb+'…',true);
+  apiCall('POST','/admin/api/dune/market/service',{verb:verb}).then(function(d){
+    if(d && d.status==='ok'){
+      mktMsg('mkt-svc-msg',verb+' ok',true);
+    } else {
+      mktMsg('mkt-svc-msg',verb+' failed: '+((d&&(d.message||d.error))||'the relay did not report ok'),false);
+    }
+    setTimeout(mktLoadStatus,1500);
+  }).catch(function(e){ mktMsg('mkt-svc-msg',verb+' failed: '+(e.message||e),false); });
+}
+
+function mktSearch(){
+  var q=(document.getElementById('mkt-search-q').value||'').trim();
+  var tb=document.getElementById('mkt-search-results');
+  if(!/^[A-Za-z0-9_-]{2,64}$/.test(q)){ mktMsg('mkt-search-msg','Term must be 2-64 chars of letters, digits, _ or -',false); return; }
+  mktMsg('mkt-search-msg','Searching…',true);
+  apiCall('GET','/admin/api/dune/market/listings?q='+encodeURIComponent(q)).then(function(d){
+    var rows=(d&&d.listings)||[];
+    var more=(d.total_matches>d.shown)?(' (showing '+d.shown+' of '+d.total_matches+')'):(' ('+(d.total_matches||0)+' match'+((d.total_matches===1)?'':'es')+')');
+    mktMsg('mkt-search-msg','Done'+more,true);
+    tb.innerHTML='';
+    if(!rows.length){ tb.innerHTML='<tr><td colspan="5">No matching listings.</td></tr>'; return; }
+    rows.forEach(function(r){
+      var seller=r.is_npc_order?'<span class="mkt-tag mkt-tag--sell">NPC</span>':'<span class="mkt-tag mkt-tag--buy">player</span>';
+      var tr=document.createElement('tr');
+      tr.innerHTML='<td>'+(r.template_id||'')+'</td><td class="num">'+mktFmt(r.item_price)+'</td><td class="num">'+mktFmt(r.stack)+'</td><td class="num">'+mktFmt(r.quality_level)+'</td><td>'+seller+'</td>';
+      tb.appendChild(tr);
+    });
+  }).catch(function(e){ mktMsg('mkt-search-msg','Search failed: '+(e.message||e),false); });
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+  fetchCsrf().then(function(){ mktLoadStatus(); mktLoadPolicy(); });
+  document.getElementById('mkt-refresh').onclick=mktLoadStatus;
+  document.getElementById('mkt-policy-reload').onclick=mktLoadPolicy;
+  document.getElementById('mkt-search-go').onclick=mktSearch;
+  document.getElementById('mkt-search-q').addEventListener('keydown',function(e){ if(e.key==='Enter') mktSearch(); });
+  document.querySelectorAll('[data-verb]').forEach(function(b){
+    b.onclick=function(){
+      var verb=b.getAttribute('data-verb');
+      if(verb==='restart'||verb==='stop'){
+        showConfirm('Really '+verb+' the market bot?', function(){ mktService(verb); });
+      } else { mktService(verb); }
+    };
+  });
+  document.getElementById('mkt-policy-save').onclick=function(){
+    var raw=document.getElementById('mkt-policy').value, parsed;
+    try { parsed=JSON.parse(raw); } catch(e){ mktMsg('mkt-policy-msg','Invalid JSON: '+e.message,false); return; }
+    if(typeof parsed!=='object'||Array.isArray(parsed)){ mktMsg('mkt-policy-msg','Policy must be a JSON object',false); return; }
+    showConfirm('Save market policy? Applies on next bot restart.', function(){
+      apiCall('POST','/admin/api/dune/market/policy',{policy:parsed}).then(function(d){
+        if(d && d.status==='ok'){
+          mktMsg('mkt-policy-msg','Saved'+(d.backup?(' (backup '+d.backup.split('/').pop()+')'):'')+'. Restart the bot to apply.',true);
+        } else {
+          mktMsg('mkt-policy-msg','Save failed: '+((d&&(d.message||d.error))||'the relay did not report ok')+'. market-policy.json is unchanged.',false);
+        }
+      }).catch(function(e){ mktMsg('mkt-policy-msg','Save failed: '+(e.message||e),false); });
+    });
+  };
+});
+</script>
+{% endblock %}

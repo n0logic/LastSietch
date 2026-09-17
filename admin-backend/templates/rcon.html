@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+{% block title %}RCON Console{% endblock %}
+{% block content %}
+<div class="container">
+
+  <!-- Quick Commands -->
+  <div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-title">Quick Commands</div>
+    <div class="btn-group" style="margin-top: 0;">
+      <button class="btn btn-sm" style="border-color:var(--green); color:var(--green);" onclick="fillCmd('listplayers')">listplayers</button>
+      <button class="btn btn-sm btn-accent" onclick="fillCmd('listbans')">listbans</button>
+      <button class="btn btn-sm" onclick="fillCmd('help')">help</button>
+      <button class="btn btn-sm" onclick="fillCmd('kickplayer ')">kickplayer</button>
+      <button class="btn btn-sm" onclick="fillCmd('banplayer ')">banplayer</button>
+      <button class="btn btn-sm" onclick="fillCmd('unbanplayer ')">unbanplayer</button>
+      <button class="btn btn-sm" onclick="fillCmd('GetServerSetting ')">GetServerSetting</button>
+      {% if user.role == 'admin' %}
+      <button class="btn btn-sm btn-stop" onclick="dangerCmd('SetServerSetting ')">SetServerSetting</button>
+      <button class="btn btn-sm btn-stop" onclick="dangerCmd('sql ')">sql</button>
+      <button class="btn btn-sm btn-stop" onclick="dangerCmd('con ')">con</button>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Terminal -->
+  <div class="card" style="margin-bottom: 1.5rem;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+      <div class="card-title" style="margin-bottom:0;">RCON Console</div>
+      <div id="rcon-status" style="font-family:var(--font-mono); font-size:0.7rem;"></div>
+    </div>
+
+    <div id="rcon-banner" style="display:none; background:rgba(241,196,15,0.1); border:1px solid var(--yellow); border-radius:4px; padding:0.75rem 1rem; margin-bottom:0.75rem; font-family:var(--font-mono); font-size:0.8rem; color:var(--yellow);">
+      RCON not available — server may be offline
+    </div>
+
+    <div style="position:relative;">
+      <div id="rcon-output" style="font-family:var(--font-mono); font-size:0.8rem; background:rgba(0,0,0,0.5); border:1px solid var(--border); border-radius:4px; padding:1rem; height:420px; overflow-y:auto; scroll-behavior:smooth;">
+        <div class="rcon-line" style="color:var(--text-muted); font-style:italic;">-- RCON console ready. Type a command or use a quick command above. --</div>
+      </div>
+      <button id="scroll-btn" class="btn btn-sm" style="display:none; position:absolute; bottom:0.5rem; right:0.5rem; font-size:0.65rem; opacity:0.7;" onclick="scrollToBottom()">&#8595; Bottom</button>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:0.5rem; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:4px; padding:0.5rem 0.75rem; margin-top:0.75rem;">
+      <span id="rcon-prompt" style="font-family:var(--font-mono); font-size:0.8rem; color:var(--accent); white-space:nowrap; user-select:none;">{{ user.username }}@conan:~#</span>
+      <input type="text" id="rcon-input" autocomplete="off" spellcheck="false" placeholder="Enter command..." style="flex:1; width:auto; background:transparent; border:none; padding:0.25rem 0; font-family:var(--font-mono); font-size:0.85rem;">
+      <button class="btn btn-accent btn-sm" id="rcon-send" onclick="submitCmd()">Send</button>
+    </div>
+    <div class="form-hint" style="margin-top:0.4rem;">Enter to send &bull; Up/Down for history &bull; Esc to clear &bull; All commands are audit-logged</div>
+  </div>
+
+  <!-- Session History -->
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div class="card-title" style="margin-bottom:0;">Session History</div>
+      <button class="btn btn-sm" onclick="toggleHistory()" id="history-toggle">Show</button>
+    </div>
+    <div id="history-panel" style="display:none; margin-top:1rem;">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Command</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
+      <div id="history-empty" style="text-align:center; color:var(--text-muted); font-family:var(--font-mono); font-size:0.8rem; padding:1rem;">No commands yet</div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('nav-rcon').classList.add('active');
+
+var GAME = '{{ game_id }}';
+var userRole = '{{ user.role }}';
+
+// Game-aware: redirect when the target doesn't support RCON.
+apiCall('GET', '/admin/api/games/' + GAME).then(function(info) {
+  document.title = 'RCON — ' + (info.display_name || GAME) + ' — Last Sietch Admin';
+  if (info.supports_rcon === false) {
+    alert('RCON is not supported for ' + (info.display_name || GAME) + '. Redirecting to dashboard.');
+    window.location = '/admin/dashboard/' + GAME;
+  }
+  // Update the prompt to use the active game id
+  var prompt = document.getElementById('rcon-prompt');
+  if (prompt) prompt.textContent = '{{ user.username }}@' + GAME + ':~#';
+}).catch(function() {});
+var cmdHistory = [];
+var historyIdx = -1;
+var sending = false;
+var sessionLog = [];
+
+// Blocked commands for operators
+var ADMIN_ONLY = ['sql', 'setserversetting', 'con', 'exec', 'buildingquery', 'buildingdestroy', 'buildingcontribution', 'validateallbuildings', 'shutdown', 'restart'];
+
+var rconOutput = document.getElementById('rcon-output');
+var rconInput = document.getElementById('rcon-input');
+var rconSend = document.getElementById('rcon-send');
+
+function escHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function appendLine(html, cls) {
+  var div = document.createElement('div');
+  div.className = 'rcon-line';
+  div.style.padding = '0.15rem 0';
+  if (cls) div.style.cssText += cls;
+  div.innerHTML = html;
+  rconOutput.appendChild(div);
+  scrollToBottom();
+}
+
+function appendCmd(username, command) {
+  var ts = new Date().toLocaleTimeString();
+  appendLine(
+    '<span style="color:var(--text-muted);">[' + ts + ']</span> ' +
+    '<span style="color:var(--accent);">' + escHtml(username) + ' &gt;</span> ' +
+    '<span style="color:var(--text);">' + escHtml(command) + '</span>',
+    'border-left:2px solid var(--accent); padding-left:0.5rem;'
+  );
+}
+
+function appendResponse(text, success) {
+  var color = success ? 'var(--green)' : 'var(--red)';
+  if (!text) {
+    appendLine(
+      '<span style="color:var(--yellow); font-style:italic;">-- No response returned --</span>',
+      'padding-left:1rem;'
+    );
+    return;
+  }
+  var lines = text.split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    appendLine(
+      '<span style="color:' + color + '; white-space:pre-wrap;">' + escHtml(lines[i]) + '</span>',
+      'padding-left:1rem;'
+    );
+  }
+}
+
+function appendSystem(text) {
+  appendLine(
+    '<span style="color:var(--text-muted); font-style:italic;">-- ' + escHtml(text) + ' --</span>'
+  );
+}
+
+function scrollToBottom() {
+  rconOutput.scrollTop = rconOutput.scrollHeight;
+}
+
+// Scroll button visibility
+rconOutput.addEventListener('scroll', function() {
+  var atBottom = rconOutput.scrollHeight - rconOutput.scrollTop - rconOutput.clientHeight < 50;
+  document.getElementById('scroll-btn').style.display = atBottom ? 'none' : '';
+});
+
+function fillCmd(cmd) {
+  rconInput.value = cmd;
+  rconInput.focus();
+  // Place cursor at end
+  rconInput.setSelectionRange(cmd.length, cmd.length);
+}
+
+function dangerCmd(cmd) {
+  showConfirm('This is a dangerous command that modifies live server state. All commands are audit-logged. Continue?', function() {
+    fillCmd(cmd);
+  });
+}
+
+function setSubmitting(state) {
+  sending = state;
+  rconSend.disabled = state;
+  rconSend.textContent = state ? 'Sending...' : 'Send';
+  rconInput.disabled = state;
+}
+
+function submitCmd() {
+  if (sending) return;
+  var cmd = rconInput.value.trim();
+  if (!cmd) return;
+
+  // Client-side operator block
+  var cmdName = cmd.split(/\s+/)[0].toLowerCase();
+  if (userRole !== 'admin' && ADMIN_ONLY.indexOf(cmdName) >= 0) {
+    appendLine(
+      '<span style="color:var(--red);">-- Permission denied: \'' + escHtml(cmdName) + '\' requires admin role --</span>'
+    );
+    return;
+  }
+
+  // Add to history
+  cmdHistory.unshift(cmd);
+  if (cmdHistory.length > 50) cmdHistory.pop();
+  historyIdx = -1;
+
+  appendCmd('{{ user.username }}', cmd);
+  rconInput.value = '';
+  setSubmitting(true);
+
+  apiCall('POST', '/admin/api/rcon/execute', { command: cmd, game_id: GAME }).then(function(d) {
+    appendResponse(d.response, d.success);
+    addHistoryRow(cmd, d.success);
+    setSubmitting(false);
+    rconInput.focus();
+  }).catch(function(e) {
+    appendResponse(e.message || 'Request failed', false);
+    addHistoryRow(cmd, false);
+    setSubmitting(false);
+    rconInput.focus();
+  });
+}
+
+// Keyboard handling
+rconInput.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (historyIdx < cmdHistory.length - 1) historyIdx++;
+    rconInput.value = cmdHistory[historyIdx] || '';
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (historyIdx > -1) historyIdx--;
+    rconInput.value = historyIdx >= 0 ? cmdHistory[historyIdx] : '';
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    submitCmd();
+  } else if (e.key === 'Escape') {
+    rconInput.value = '';
+    historyIdx = -1;
+  }
+});
+
+// Session history panel
+function toggleHistory() {
+  var panel = document.getElementById('history-panel');
+  var btn = document.getElementById('history-toggle');
+  if (panel.style.display === 'none') {
+    panel.style.display = '';
+    btn.textContent = 'Hide';
+  } else {
+    panel.style.display = 'none';
+    btn.textContent = 'Show';
+  }
+}
+
+function addHistoryRow(cmd, success) {
+  var ts = new Date().toLocaleTimeString();
+  sessionLog.unshift({ time: ts, command: cmd, success: success });
+  renderHistory();
+}
+
+function renderHistory() {
+  var tbody = document.getElementById('history-tbody');
+  var empty = document.getElementById('history-empty');
+  if (sessionLog.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = sessionLog.map(function(e) {
+    var statusColor = e.success ? 'var(--green)' : 'var(--red)';
+    var statusIcon = e.success ? '&#10003;' : '&#10007;';
+    return '<tr style="cursor:pointer;" onclick="fillCmd(\'' + escHtml(e.command).replace(/'/g, "&#39;") + '\')">' +
+      '<td style="font-family:var(--font-mono); font-size:0.75rem; white-space:nowrap;">' + escHtml(e.time) + '</td>' +
+      '<td style="font-family:var(--font-mono); font-size:0.8rem;">' + escHtml(e.command) + '</td>' +
+      '<td style="color:' + statusColor + '; text-align:center;">' + statusIcon + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+// Connection check on load
+function checkConnection() {
+  apiCall('GET', '/admin/api/games/' + GAME + '/server/status').then(function(d) {
+    var el = document.getElementById('rcon-status');
+    if (d.running) {
+      el.innerHTML = '<span style="color:var(--green);">&#9679;</span> <span style="color:var(--green);">CONNECTED</span>';
+      document.getElementById('rcon-banner').style.display = 'none';
+    } else {
+      el.innerHTML = '<span style="color:var(--red);">&#9679;</span> <span style="color:var(--red);">OFFLINE</span>';
+      document.getElementById('rcon-banner').style.display = '';
+    }
+  }).catch(function() {
+    var el = document.getElementById('rcon-status');
+    el.innerHTML = '<span style="color:var(--yellow);">&#9679;</span> <span style="color:var(--yellow);">UNKNOWN</span>';
+  });
+}
+
+checkConnection();
+setInterval(checkConnection, 60000);
+rconInput.focus();
+</script>
+{% endblock %}

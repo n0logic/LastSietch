@@ -1,0 +1,445 @@
+/* Last Sietch Companion V2: two-axis design tokens.
+ * Three-layer native cascade per V2-DESIGN-SYSTEM.md:
+ *   primitives  = theme-invariant (space/radius/type/motion + source --ls-* colors)
+ *   surface     = mode (data-theme = night | day): owns all chrome
+ *   accent      = house (data-house): overrides ONLY the accent quartet
+ * Amber owns chrome; Ibad blue is reserved for LIVE data only.
+ */
+
+/* Self-hosted fonts (CSP font-src 'self'): the validated Stillsuit prototype's
+ * stack -- Saira Condensed = monumental HUD display, Saira = body, JetBrains Mono
+ * = instrument data. Latin subset, served from static/fonts at /fonts.
+ * @font-face stays OUTSIDE @layer (layered @font-face is ignored by some engines). */
+@font-face { font-family: 'Saira Condensed'; font-weight: 600; font-style: normal; font-display: swap;
+  src: url('/fonts/saira-cond-600.woff2') format('woff2'); }
+@font-face { font-family: 'Saira Condensed'; font-weight: 700; font-style: normal; font-display: swap;
+  src: url('/fonts/saira-cond-700.woff2') format('woff2'); }
+@font-face { font-family: 'Saira'; font-weight: 400; font-style: normal; font-display: swap;
+  src: url('/fonts/saira-400.woff2') format('woff2'); }
+@font-face { font-family: 'Saira'; font-weight: 500; font-style: normal; font-display: swap;
+  src: url('/fonts/saira-500.woff2') format('woff2'); }
+@font-face { font-family: 'JetBrains Mono'; font-weight: 400; font-style: normal; font-display: swap;
+  src: url('/fonts/jbmono-400.woff2') format('woff2'); }
+@font-face { font-family: 'JetBrains Mono'; font-weight: 600; font-style: normal; font-display: swap;
+  src: url('/fonts/jbmono-600.woff2') format('woff2'); }
+
+@layer primitives, surface, accent, components;
+
+/* ---- primitives: invariant ------------------------------------------------ */
+@layer primitives {
+  :root {
+    /* Source colors (--ls-*). Semantic tokens point at these. */
+    --ls-sand-0: #070603; --ls-sand-1: #0c0a07; --ls-sand-2: #15110b;
+    --ls-sand-3: #1b160e; --ls-sand-4: #241d13; --ls-sand-5: #352c1d;
+    --ls-bleach-0: #d8c6a0; --ls-bleach-1: #e7d8b8; --ls-bleach-2: #f6efdd;
+    --ls-bleach-ink: #2c2215;
+    --ls-amber-soft: #a86916; --ls-amber: #d4891c;
+    --ls-amber-bright: #f5a23a; --ls-amber-glow: rgba(212,137,28,.30);
+    --ls-ibad: #3fb6c9; --ls-ibad-glow: rgba(63,182,201,.28);
+    --ls-fremen: #8a6bbf;
+    --ls-green: #5fcf6b; --ls-red: #d65a44; --ls-yellow: #e8c14a; --ls-info: #5aa9d6;
+
+    /* Spacing (4px base) */
+    --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+    --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 64px;
+
+    /* Radius: soft for raised content, sharp for live-data HUD instruments */
+    --radius-sm: 3px; --radius-md: 8px; --radius-lg: 14px; --radius-xl: 22px;
+
+    /* Shared content column: topbar inner + page body align to this width. */
+    --content-max: 1400px;
+
+    /* Type: Saira Condensed display (HUD), Saira body, JetBrains Mono data. */
+    --font-display: 'Saira Condensed', 'Arial Narrow', system-ui, sans-serif;
+    --font-sans: 'Saira', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+    --text-xs: 12px; --text-sm: 14px; --text-base: 16px; --text-lg: 19px;
+    --text-xl: 24px; --text-2xl: 31px; --text-3xl: 40px;
+    --text-4xl: clamp(2.6rem, 6vw, 4rem); --text-5xl: clamp(3.4rem, 8vw, 5.5rem);
+
+    /* Motion */
+    --motion-fast: 150ms; --motion-mid: 280ms; --motion-slow: 520ms;
+    --ease-out: cubic-bezier(.2,.7,.3,1); --ease-in-out: cubic-bezier(.6,0,.3,1);
+  }
+}
+
+/* ---- surface: the mood (data-theme) --------------------------------------- */
+@layer surface {
+  [data-theme='night'] {
+    --bg: #100e0b; --bg-deep: #0c0a08; --bg-elevated: #1a1712;
+    --bg-card: var(--ls-sand-3);
+    --text: #eee5d5; --text-muted: #baad98;
+    --border: #2e2516; --border-strong: #45371f; --border-subtle: #20190f;
+    --shadow-card: 0 1px 0 rgba(255,210,140,.06) inset, 0 8px 22px rgba(0,0,0,.5);
+    --shadow-overlay: 0 18px 50px rgba(0,0,0,.6);
+    --p-edge-light: rgba(255,214,150,.08);
+    /* Carved metal: panels are oxidized plate lit from above. */
+    --metal-1: #1d160d; --metal-0: #110b06;
+    --panel: linear-gradient(180deg, rgba(29,25,19,.95), rgba(20,17,13,.98)), url('/img/v3/textures/carved-sandstone.jpg');
+    --rail-surface: linear-gradient(rgba(15,13,10,.9), rgba(15,13,10,.95)), url('/img/v3/textures/black-basalt.jpg');
+    --edge: #39332a; --edge-hi: #605445; --metal-hi: rgba(255,225,170,.10);
+    --shadow-cast: rgba(6,4,1,.62);
+    --grain-blend: overlay; --grain-opacity: .025; --scan-opacity: 0;
+  }
+  [data-theme='day'] {
+    --bg: var(--ls-bleach-1); --bg-deep: var(--ls-bleach-0); --bg-elevated: #efe2c6;
+    --bg-card: var(--ls-bleach-2);
+    --text: var(--ls-bleach-ink); --text-muted: #6b573a;
+    --border: #cbb98f; --border-strong: #ac9560; --border-subtle: #d8c8a0;
+    --shadow-card: 0 1px 0 rgba(255,255,255,.5) inset, 0 6px 18px rgba(120,90,40,.18);
+    --shadow-overlay: 0 18px 50px rgba(120,90,40,.28);
+    --p-edge-light: rgba(255,255,255,.45);
+    /* Carved stone: sun-bleached parchment plate. */
+    --metal-1: #f7f0de; --metal-0: #eaddbe;
+    --panel: linear-gradient(180deg, var(--metal-1), var(--metal-0));
+    --edge: #c9b386; --edge-hi: #a98f5c; --metal-hi: rgba(255,255,255,.6);
+    --shadow-cast: rgba(120,90,40,.28);
+    --grain-blend: multiply; --grain-opacity: .04; --scan-opacity: .12;
+  }
+}
+
+/* ---- accent: the house (data-house) --------------------------------------- */
+@layer accent {
+  [data-house='none'] {
+    --accent: var(--ls-amber); --accent-bright: var(--ls-amber-bright);
+    --accent-text: var(--ls-amber-bright); --accent-soft: var(--ls-amber-soft);
+    --accent-glow: var(--ls-amber-glow); --accent-2: #a4441f;
+  }
+  /* Green-gold (owner ruling 2026-09-03): the old muted gold sat on top of the
+     default amber and read as no change at all. */
+  [data-house='atreides'] {
+    --accent: #9fb04c; --accent-bright: #c9d96c; --accent-text: #c9d96c;
+    --accent-soft: #6e7a30; --accent-glow: rgba(159,176,76,.30); --accent-2: #1d7a44;
+  }
+  [data-house='harkonnen'] {
+    --accent: #c42020; --accent-bright: #f04040; --accent-text: #f04040;
+    --accent-soft: #8a1717; --accent-glow: rgba(196,32,32,.30); --accent-2: #1a1a1a;
+  }
+  [data-house='corrino'] {
+    --accent: #e0b341; --accent-bright: #f0c95f; --accent-text: #f0c95f;
+    --accent-soft: #a3812c; --accent-glow: rgba(224,179,65,.30); --accent-2: #8a8d93;
+  }
+  [data-house='fremen'] {
+    --accent: #c9772e; --accent-bright: #e5933f; --accent-text: #e5933f;
+    --accent-soft: #95571f; --accent-glow: rgba(201,119,46,.30); --accent-2: var(--ls-ibad);
+  }
+  /* Day-mode --accent-text override (the only mode-scoped accent token): the lifted
+     night hues fail WCAG on the bleached day card, so darken on-card text in day. */
+  [data-theme='day'][data-house='none'] { --accent-text: #8a5613; }
+  [data-theme='day'][data-house='atreides'] { --accent-text: #3f6a1e; }
+  [data-theme='day'][data-house='harkonnen'] { --accent-text: #a11414; }
+  [data-theme='day'][data-house='corrino'] { --accent-text: #7a5e16; }
+  [data-theme='day'][data-house='fremen'] { --accent-text: #8a4e17; }
+}
+
+/* ---- base element styling ------------------------------------------------- */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  /* Oppressive-sun glow bleeding from the top, faint accent rise from below,
+     over the deep sand base. Fixed so it never scrolls away. */
+  background: radial-gradient(ellipse at 88% 0%, rgba(161,72,37,.09), transparent 45%), var(--bg);
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+  /* header, main.shell and footer are flex items (the SvelteKit wrapper is
+     display: contents); the shell grows so the footer sits at the bottom of a
+     short page without subtracting header heights (wave 4 review L1). The
+     fixed-position grain/scanline pseudo-elements are out of flow. */
+  display: flex; flex-direction: column;
+}
+/* Film grain: a fixed fractal-noise wash (img-src data: in the nextgen CSP). */
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: 60; pointer-events: none;
+  opacity: var(--grain-opacity); mix-blend-mode: var(--grain-blend);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+/* CRT scanlines: faint horizontal rule with an occasional flicker. */
+body::after {
+  content: ''; position: fixed; inset: 0; z-index: 61; pointer-events: none;
+  opacity: var(--scan-opacity);
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,.16) 0 1px, transparent 1px 3px);
+  animation: none;
+}
+@keyframes crt-flick { 0%,97%,100% { opacity: var(--scan-opacity); } 98% { opacity: calc(var(--scan-opacity) * .6); } 99% { opacity: calc(var(--scan-opacity) * 1.2); } }
+
+h1, h2, h3 { font-family: var(--font-display); font-weight: 700; letter-spacing: .01em; margin: 0; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* Panel caption. One global rule (the .mono/.skeleton house pattern), so routes
+   and components stop carrying their own copy; matches PageHeader's kicker. */
+.kicker {
+  color: var(--accent); text-transform: uppercase; letter-spacing: .34em;
+  font-size: var(--text-xs); margin: 0 0 var(--space-2);
+}
+p { text-wrap: pretty; }
+a { color: var(--accent-text); transition: color var(--motion-fast) var(--ease-out); }
+a:hover { color: var(--accent-bright); }
+
+/* Branded keyboard focus ring (a11y): amber, offset, never suppressed. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--radius-sm); }
+
+/* Themed scrollbars: a thin carved-metal thumb on a transparent track, so scroll
+   areas (layers panel, sheets) read as sietch chrome, not the OS default. Track
+   stays transparent to melt into whatever surface it overlays; thumb warms to
+   amber on hover. Firefox uses scrollbar-width/color; WebKit uses the pseudos. */
+* { scrollbar-width: thin; scrollbar-color: var(--edge-hi) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--edge-hi); border: 2px solid transparent; background-clip: padding-box;
+  border-radius: 6px;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--accent-soft); background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* Shaped skeleton: a sweeping shimmer plate while a value loads. */
+.skeleton {
+  display: inline-block; min-width: 6.5rem; height: 1.5em; border-radius: var(--radius-sm);
+  color: transparent; user-select: none;
+  background: linear-gradient(100deg, var(--metal-0) 30%, color-mix(in srgb, var(--accent) 14%, var(--metal-1)) 50%, var(--metal-0) 70%);
+  background-size: 220% 100%; animation: shimmer 1.4s var(--ease-in-out) infinite;
+}
+@keyframes shimmer { 0% { background-position: 130% 0; } 100% { background-position: -130% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  body::after { animation: none; }
+  .skeleton { animation: none; }
+}
+
+/* ============================================================================
+   M1 Maps board (appended). Two parts:
+   1. New source tokens (melange spice family, worm threat tiers, board-art
+      pigments). The board plane + its etched grid are backdrop ART, invariant
+      across themes; overlay glyph hues are game-semantic (threat/spice/live).
+   2. Global styling for elements the map engine (src/lib/map/) creates inside
+      the board SVG/backdrop. Those nodes are outside Svelte scoping, so their
+      class contract lives here (names mirror V1 portal.css; visuals retuned).
+   ========================================================================== */
+@layer primitives {
+  :root {
+    /* Modal layer: above the sticky topbar (50), below the decorative grain
+       overlays (60/61, pointer-inert). Write-confirm dialogs (rescue) use it
+       so nothing interactive can bleed through an open modal. */
+    --z-modal: 55;
+    /* Dialog layer: focus-trapped modal dialogs (Modal.svelte). Kept ABOVE the
+       decorative grain overlays (60/61) so a dialog reads as the top surface,
+       which is the look every hand-rolled dialog shipped with (hardcoded 90/91).
+       The panel itself sits one above the scrim: calc(var(--z-dialog) + 1). */
+    --z-dialog: 90;
+    /* Melange violet: the spice overlay family. */
+    --ls-melange: #b14dff; --ls-melange-soft: #9d4edd;
+    --ls-melange-hi: #c89bff; --ls-melange-pale: #f0d9ff;
+    --ls-melange-glow: rgba(177, 77, 255, .55);
+    /* Worm threat ladder: calm -> surfaced -> enraged -> breaching. */
+    --ls-orange: #e8843a;
+    --map-worm-calm: #9a865a;
+    /* Board-art pigments: the sand plane + survey grid etched into it. */
+    --map-sand-hi: #d8a862; --map-sand: #c89048; --map-sand-lo: #b67c38;
+    --map-grid-line: rgba(20, 14, 6, .35);
+    --map-grid-label: rgba(30, 20, 8, .6);
+  }
+}
+
+@layer components {
+  /* ---- backdrop plates (engine picks the class off /data meta) ---------- */
+  .map-backdrop--sand {
+    background-color: var(--map-sand);
+    background-image:
+      repeating-linear-gradient(118deg, rgba(150, 100, 45, .06) 0 7px, transparent 7px 26px),
+      repeating-linear-gradient(64deg, rgba(110, 72, 32, .05) 0 9px, transparent 9px 34px),
+      radial-gradient(circle at 22% 28%, rgba(120, 80, 30, .16) 0 2px, transparent 3px),
+      radial-gradient(circle at 68% 62%, rgba(120, 80, 30, .13) 0 2px, transparent 3px),
+      radial-gradient(circle at 45% 82%, rgba(140, 95, 40, .11) 0 3px, transparent 4px),
+      radial-gradient(ellipse at 50% 0%, var(--map-sand-hi) 0%, var(--map-sand) 55%, var(--map-sand-lo) 100%);
+    background-size: auto, auto, 90px 90px, 130px 130px, 70px 70px, 100% 100%;
+  }
+  .map-backdrop--image { background-repeat: no-repeat; }
+
+  /* ---- survey grid (SVG, engine-drawn) ----------------------------------- */
+  .map-grid line { stroke: var(--map-grid-line); stroke-width: 1; }
+  .map-grid-label {
+    fill: var(--map-grid-label); font-size: 18px; font-family: var(--font-mono);
+    text-anchor: middle; dominant-baseline: middle;
+  }
+
+  /* ---- spice overlay: candidates translucent, active bright + pulsing ---- */
+  .map-spice-candidate {
+    fill: color-mix(in srgb, var(--ls-melange-soft) 38%, transparent);
+    stroke: var(--ls-melange-hi); stroke-width: 2;
+    filter: drop-shadow(0 0 3px var(--ls-melange-glow));
+  }
+  .map-spice-active {
+    fill: var(--ls-melange); stroke: var(--ls-melange-pale); stroke-width: 2.5;
+    filter: drop-shadow(0 0 7px var(--ls-melange-glow));
+    animation: map-spice-glow 2.2s var(--ease-in-out) infinite;
+  }
+  @keyframes map-spice-glow {
+    0%, 100% { filter: drop-shadow(0 0 5px var(--ls-melange-glow)); }
+    50% { filter: drop-shadow(0 0 12px var(--ls-melange-hi)); }
+  }
+  .map-spice-pulse {
+    fill: color-mix(in srgb, var(--ls-melange-soft) 28%, transparent);
+    animation: map-spice-blow 2.2s ease-out infinite;
+    transform-box: fill-box; transform-origin: center;
+  }
+  @keyframes map-spice-blow {
+    0% { opacity: .55; transform: scale(.6); }
+    70%, 100% { opacity: 0; transform: scale(1.5); }
+  }
+  .map-spice-medium {
+    fill: color-mix(in srgb, var(--ls-melange-soft) 22%, transparent);
+    stroke: var(--ls-melange-hi); stroke-width: 1.5;
+    filter: drop-shadow(0 0 2px var(--ls-melange-glow));
+  }
+  .map-spice-medium-active {
+    fill: color-mix(in srgb, var(--ls-melange) 55%, transparent);
+    stroke: var(--ls-melange-pale); stroke-width: 2;
+    filter: drop-shadow(0 0 5px var(--ls-melange-glow));
+  }
+
+  /* ---- sandworm glyphs: arrow head + seismograph trace ------------------- */
+  .map-worm__wave {
+    fill: none; stroke: var(--ls-yellow); stroke-width: 3;
+    stroke-linejoin: round; stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+    filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, .7));
+  }
+  .map-worm__arrow {
+    fill: var(--ls-yellow); stroke: rgba(0, 0, 0, .6); stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+  .map-worm.is-submerged .map-worm__wave { stroke: var(--map-worm-calm); opacity: .7; }
+  .map-worm.is-submerged .map-worm__arrow { fill: var(--map-worm-calm); opacity: .7; }
+  .map-worm.is-surfaced .map-worm__wave { stroke: var(--ls-yellow); }
+  .map-worm.is-surfaced .map-worm__arrow { fill: var(--ls-yellow); }
+  .map-worm.is-enraged .map-worm__wave { stroke: var(--ls-orange); stroke-width: 3.4; }
+  .map-worm.is-enraged .map-worm__arrow { fill: var(--ls-orange); }
+  .map-worm.is-breaching .map-worm__wave { stroke: var(--ls-red); stroke-width: 4; }
+  .map-worm.is-breaching .map-worm__arrow { fill: var(--ls-red); }
+  .map-worm.is-breaching { animation: map-worm-flash .55s steps(2) infinite; }
+  @keyframes map-worm-flash { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+  /* Dead-reckoning trail: last few fixes as fading dots behind the glyph.
+     The engine sets a per-dot inline opacity ATTRIBUTE (newest -> oldest), so
+     fill only here; CSS opacity would multiply against it. */
+  .map-worm-trail { fill: var(--ls-yellow); pointer-events: none; }
+  .map-worm-trail-layer { pointer-events: none; }
+
+  /* ---- sandstorm overlay: Ibad-family sweep geometry --------------------- */
+  .map-storm-circle {
+    fill: color-mix(in srgb, var(--ls-ibad) 10%, transparent);
+    stroke: color-mix(in srgb, var(--ls-ibad) 70%, transparent);
+    stroke-width: 2; stroke-dasharray: 6 5; pointer-events: none;
+  }
+  .map-storm-center {
+    fill: var(--ls-ibad); stroke: rgba(8, 24, 30, .75); stroke-width: 1;
+    pointer-events: none;
+  }
+  .map-storm-heading {
+    stroke: var(--ls-ibad); stroke-width: 2.5; stroke-linecap: round;
+    pointer-events: none;
+  }
+  .map-storm-band {
+    stroke: color-mix(in srgb, var(--ls-ibad) 75%, transparent);
+    stroke-width: 3; stroke-linecap: round; pointer-events: none;
+  }
+  /* Dead-reckoned storm track (.is-extrapolated toggled by the engine while
+     the position is an estimate, not a real RAM fix): estimates are AMBER,
+     only fresh fixes earn Ibad (honesty rule). */
+  .map-storm-track.is-extrapolated .map-storm-center { fill: var(--accent); }
+  .map-storm-track.is-extrapolated .map-storm-heading { stroke: var(--accent); }
+  .map-storm-track.is-extrapolated .map-storm-circle {
+    fill: color-mix(in srgb, var(--accent) 10%, transparent);
+    stroke: color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+  .map-storm-track.is-extrapolated .map-storm-band {
+    stroke: color-mix(in srgb, var(--accent) 75%, transparent);
+  }
+
+  /* ---- M2 personal layer (engine-drawn, class names mirror V1) ----------- */
+  /* Waypoints: amber pins, the player's private marks on the board. */
+  .map-wp-pin {
+    fill: var(--accent); stroke: var(--bg-deep); stroke-width: 1.5;
+    filter: drop-shadow(0 0 4px var(--accent-glow));
+  }
+  .map-wp-pin__dot { fill: var(--bg-deep); }
+
+  /* Own position: the ONLY genuinely live glyph, so it alone wears Ibad.
+     Online = breathing ring; offline = dim last-known echo (honesty rule). */
+  .map-me-pin__body { fill: var(--ls-ibad); stroke: #eaf7ff; stroke-width: 1.5; }
+  .map-me-pin__dot { fill: rgba(8, 24, 30, .9); }
+  .map-me-pin.is-online .map-me-pin__body {
+    filter: drop-shadow(0 0 5px var(--ls-ibad-glow));
+  }
+  .map-me-pin.is-offline { opacity: .5; }
+  .map-me-pin.is-offline .map-me-pin__body {
+    fill: color-mix(in srgb, var(--ls-ibad) 45%, var(--map-sand-lo));
+  }
+  .map-me-pulse {
+    fill: none; stroke: var(--ls-ibad); stroke-width: 1.5;
+    animation: me-ring-breathe 2.4s var(--ease-in-out) infinite;
+    pointer-events: none;
+  }
+  /* Mid-lerp estimate (engine toggles is-estimated while gliding between
+     fixes): estimates are AMBER, only a real fresh fix earns Ibad (same
+     honesty rule as the storm track). */
+  .map-me-pin.is-estimated .map-me-pin__body { fill: var(--accent); }
+  /* Quiet /me feed (engine toggles is-stale off chrome's setMeFresh clock):
+     the board pin degrades with the chip. Amber, breathe killed, last-known
+     position kept. Placed after is-online AND is-estimated so it wins at
+     equal specificity when states compose. */
+  .map-me-pin.is-stale .map-me-pin__body {
+    fill: var(--accent-soft); filter: none;
+  }
+  .map-me-pin.is-stale .map-me-pulse { display: none; }
+  @keyframes me-ring-breathe {
+    0%, 100% { opacity: .25; transform: scale(.85); transform-box: fill-box; transform-origin: center; }
+    50% { opacity: .8; transform: scale(1.15); transform-box: fill-box; transform-origin: center; }
+  }
+
+  /* Base totems + owned vehicles: amber glyphs (yours, not live telemetry). */
+  .map-me-base__body {
+    fill: color-mix(in srgb, var(--accent) 80%, transparent);
+    stroke: rgba(20, 14, 6, .8); stroke-width: 1.2;
+  }
+  .map-me-base.is-outpost .map-me-base__body {
+    fill: color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+  .map-me-vehicle__icon { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .7)); }
+  /* Sprite tokens (icons.js) carry their own dark halo, so no shadow here. */
+  .map-me-base__icon { filter: none; }
+  /* The ornithopter strip is three 96 px frames stacked; one animation on the
+     shared <symbol> flaps every <use> at once. */
+  /* The ornithopter strips flap on a SMIL <animate> built by lib/map/icons.js
+     (a CSS transform inside a <symbol> did not move the <use> clones), so the
+     reduced-motion gate lives there too. Nothing to animate here. */
+  .map-me-vehicle__dot {
+    fill: var(--accent-soft); stroke: rgba(20, 14, 6, .8); stroke-width: 1;
+  }
+
+  /* Live OTHER players (public positions feed, Hagga): small Ibad dots, the
+     crowd — distinct from your own pin above. World vehicles are dimmer amber.
+     Anonymous (coords only), so no glow that would read as a tracked target. */
+  .map-other-player {
+    fill: var(--ls-ibad); stroke: rgba(8, 24, 30, .85); stroke-width: .6;
+    opacity: .88;
+  }
+  .map-other-vehicle {
+    fill: var(--accent-soft); stroke: rgba(20, 14, 6, .7); stroke-width: .5;
+    opacity: .66;
+  }
+  /* The steel sprites carry their own dark rim; the dot's dimming would sink
+     them into the sand (the owner's worry), so a token shows at near full. */
+  .map-other-vehicle.map-icon { opacity: .9; }
+
+  /* Reduced motion: the worm wave's SMIL <animate> is gated engine-side at
+     append time (SMIL ignores CSS display), so only CSS animations stop here. */
+  @media (prefers-reduced-motion: reduce) {
+    .map-spice-active, .map-spice-pulse, .map-worm.is-breaching,
+    .map-me-pulse { animation: none; }
+  }
+}

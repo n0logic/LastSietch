@@ -1,0 +1,6 @@
+{# Economy tab sub-tabs. Active state comes from `nav_path` (set in base.html). #}
+<nav class="v2-subnav" aria-label="Economy sub-tabs">
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/server/market') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/server/market">Market bot</a>
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/economy') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/economy">History</a>
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/portal/karum') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/portal/karum">Karum</a>
+</nav>

@@ -1,0 +1,107 @@
+/* Content takedowns (admin wave 2, lever C).
+ *
+ * Loaded on Economy and Social AFTER systems.css, and it borrows that file's
+ * card and grid classes rather than restating them: the takedown cards must
+ * look like the read cards they sit under, or the section reads as a different
+ * product bolted on.
+ *
+ * Amber is chrome here, exactly as it is everywhere else. There is no Ibad blue
+ * in this file at all, and that is deliberate: nothing in this section is
+ * polled, so nothing in it may wear the colour that means "this is live".
+ * Destructive buttons take --red from design-system.css through .btn-destructive.
+ */
+
+body.admin-page .td-section {
+  margin-top: var(--space-8);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border);
+}
+
+body.admin-page .td-section__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+body.admin-page .td-section__copy {
+  max-width: 74ch;
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+/* The amber left edge is the one visual difference from a read card: a card
+   with a button that writes should not look identical to one that cannot. */
+body.admin-page .td-card {
+  border-left: 2px solid var(--accent);
+}
+
+body.admin-page .td-scope {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+body.admin-page .td-copy {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+body.admin-page .td-copy a {
+  color: var(--accent);
+}
+
+body.admin-page .td-label {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+body.admin-page .td-input {
+  width: 100%;
+  max-width: 46ch;
+  margin-bottom: var(--space-4);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+body.admin-page .td-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+body.admin-page .td-actions {
+  margin-bottom: var(--space-3);
+}
+
+body.admin-page .td-status {
+  margin: 0;
+  min-height: 1.4em;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+body.admin-page .td-status--ok { color: var(--text); }
+body.admin-page .td-status--bad { color: var(--red); }
+
+@media (max-width: 720px) {
+  body.admin-page .td-input { max-width: 100%; }
+}

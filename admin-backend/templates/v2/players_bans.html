@@ -1,0 +1,22 @@
+{% extends "v2/base.html" %}
+{% block title %}Bans — Players{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="/admin/static/css/v2/player-tools.css">
+{% endblock %}
+{% block content %}
+<main class="v2-main v2-player-bans" id="v2-player-bans">
+
+  <header class="v2-player-bans__header">
+    <h1 class="v2-player-bans__title">Bans</h1>
+    <p class="v2-player-bans__subtitle">
+      Active bans are keyed by FLS id (a ban survives a fresh character). Full history
+      shows every kick, ban, and unban action.
+    </p>
+  </header>
+
+  <section id="v2-bans-body" aria-live="polite">
+    {% include "v2/_fragments/bans_table.html" %}
+  </section>
+
+</main>
+{% endblock %}

@@ -1,0 +1,105 @@
+{% set rows = bans.rows if bans.rows is defined else [] %}
+{% set history = bans.history if bans.history is defined else False %}
+
+<div class="v2-player-bans__modes" role="tablist" aria-label="Ban view mode">
+  <button type="button" role="tab" aria-selected="{{ 'false' if history else 'true' }}"
+          class="v2-subnav__tab{% if not history %} v2-subnav__tab--active{% endif %}"
+          hx-get="/admin/api/dune/v2/players/_bans?history=0"
+          hx-target="#v2-bans-body" hx-swap="innerHTML"
+          hx-push-url="/admin/v2/players/bans?history=0">Active bans</button>
+  <button type="button" role="tab" aria-selected="{{ 'true' if history else 'false' }}"
+          class="v2-subnav__tab{% if history %} v2-subnav__tab--active{% endif %}"
+          hx-get="/admin/api/dune/v2/players/_bans?history=1"
+          hx-target="#v2-bans-body" hx-swap="innerHTML"
+          hx-push-url="/admin/v2/players/bans?history=1">Full history</button>
+</div>
+
+{% if not bans.available %}
+  <div class="empty-state empty-state--loading-failed">
+    <p class="empty-state__headline">Bans unavailable</p>
+    <p class="empty-state__body">The relay couldn't reach the moderation tables. Try again in a moment.</p>
+    <div class="empty-state__actions">
+      <button type="button" class="btn btn-sm"
+              hx-get="/admin/api/dune/v2/players/_bans?history={{ 1 if history else 0 }}"
+              hx-target="#v2-bans-body" hx-swap="innerHTML">Retry</button>
+    </div>
+  </div>
+{% elif rows %}
+  <div class="v2-player-bans__summary card-title">
+    {{ rows|length }} {{ 'action' if history else 'active ban' }}{{ '' if rows|length == 1 else 's' }}
+  </div>
+  <div style="overflow-x: auto;">
+    <table class="table table--compact table--zebra v2-bans-table">
+      <thead>
+        {% if history %}
+          <tr>
+            <th scope="col">When</th>
+            <th scope="col">Action</th>
+            <th scope="col">Player</th>
+            <th scope="col">Reason</th>
+            <th scope="col">Admin</th>
+          </tr>
+        {% else %}
+          <tr>
+            <th scope="col">Player</th>
+            <th scope="col">Reason</th>
+            <th scope="col">Banned by</th>
+            <th scope="col">Banned</th>
+            <th scope="col">Expires</th>
+          </tr>
+        {% endif %}
+      </thead>
+      <tbody>
+        {% if history %}
+          {% for r in rows %}
+            <tr>
+              <td class="v2-bans-table__when">{{ (r.created_at or '')[:19]|replace('T', ' ') }}</td>
+              <td>
+                {% set a = (r.action_type or '')|lower %}
+                <span class="v2-ban-action v2-ban-action--{{ a }}">{{ a or '—' }}</span>
+              </td>
+              <td>
+                {{ r.character_name or ('Account ' ~ r.account_id) }}
+                {% if r.account_id %}<span class="v2-bans-table__acct">#{{ r.account_id }}</span>{% endif %}
+              </td>
+              <td>{{ r.reason or '—' }}</td>
+              <td class="v2-bans-table__admin">{{ r.admin_user or '—' }}</td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          {% for r in rows %}
+            <tr>
+              <td>
+                {{ r.character_name or ('Account ' ~ r.account_id) }}
+                {% if r.account_id %}<span class="v2-bans-table__acct">#{{ r.account_id }}</span>{% endif %}
+              </td>
+              <td>{{ r.reason or '—' }}</td>
+              <td class="v2-bans-table__admin">{{ r.banned_by or '—' }}</td>
+              <td class="v2-bans-table__when">{{ (r.banned_at or '')[:19]|replace('T', ' ') }}</td>
+              <td>
+                {% if not r.expires_at %}
+                  <span class="v2-ban-action v2-ban-action--perm">permanent</span>
+                {% elif r.expired %}
+                  <span class="v2-bans-table__expired">expired {{ (r.expires_at or '')[:19]|replace('T', ' ') }}</span>
+                {% else %}
+                  {{ (r.expires_at or '')[:19]|replace('T', ' ') }}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div class="empty-state empty-state--zero-results">
+    <p class="empty-state__headline">{{ 'No moderation actions recorded' if history else 'No active bans' }}</p>
+    <p class="empty-state__body">
+      {% if history %}
+        Kicks, bans, and unbans will appear here once they happen.
+      {% else %}
+        The sietch is clean. Banned players will appear here, keyed by FLS id.
+      {% endif %}
+    </p>
+  </div>
+{% endif %}

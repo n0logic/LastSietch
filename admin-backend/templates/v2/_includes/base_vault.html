@@ -1,0 +1,47 @@
+<dialog class="bv-drawer" id="bv-dialog" aria-labelledby="bv-title" aria-describedby="bv-scope">
+  <header class="bv-drawer__head">
+    <div>
+      <p class="bv-eyebrow">Base Vault</p>
+      <h2 id="bv-title">Base snapshot history</h2>
+    </div>
+    <button type="button" class="btn btn-sm" id="bv-close" aria-label="Close Base Vault">Close</button>
+  </header>
+  <div class="bv-drawer__body">
+    <p class="bv-scope" id="bv-scope">Snapshots preserve persisted database state. Unsaved game memory is not included. Capture leaves the placed base and its ownership unchanged; it does not pack a base into a BRT tool.</p>
+    <dl class="bv-context" id="bv-context"></dl>
+    <section class="bv-capture" aria-label="Snapshot capture">
+      <div class="bv-actions">
+        <button type="button" class="btn btn-accent" id="bv-capture" disabled>Take snapshot</button>
+        <button type="button" class="btn btn-sm" id="bv-refresh">Check status</button>
+      </div>
+      <p class="bv-status" id="bv-status" role="status" aria-live="polite" aria-atomic="true"></p>
+      <p class="bv-note" id="bv-operation"></p>
+    </section>
+    <section class="bv-recovery" id="bv-recovery" aria-labelledby="bv-recovery-title">
+      <div class="bv-section-head">
+        <h3 id="bv-recovery-title">Restore planning</h3>
+        <span class="bv-note">Original location</span>
+      </div>
+      <p class="bv-note">Stage a snapshot from history to check recovery at its original location, with its original ownership. Staging creates a plan and does not change the game world.</p>
+      <div class="bv-plan-picker" id="bv-plan-picker" hidden>
+        <label for="bv-plans">Recent restore plans</label>
+        <select class="input" id="bv-plans"><option value="">Choose a plan</option></select>
+      </div>
+      <p class="bv-status" id="bv-plan-status" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">Choose Stage for restore on a snapshot below.</p>
+      <div id="bv-plan-body" aria-busy="false"></div>
+      <div class="bv-actions bv-plan-actions">
+        <button type="button" class="btn btn-sm" id="bv-plan-refresh" disabled>Refresh plan</button>
+        <button type="button" class="btn btn-sm" id="bv-plan-restage" disabled>Recheck snapshot</button>
+        <button type="button" class="btn btn-sm" id="bv-plan-apply" disabled aria-describedby="bv-restore-note">Apply restore</button>
+      </div>
+      <p class="bv-note" id="bv-restore-note">Live apply is unavailable. Restoring requires a separately approved target and maintenance window, safe map lifecycle, and in-game verification. An isolated database check is not proof of an in-game restore.</p>
+    </section>
+    <section aria-labelledby="bv-history-title">
+      <div class="bv-section-head">
+        <h3 id="bv-history-title">Snapshot history</h3>
+        <span class="bv-note" id="bv-history-count"></span>
+      </div>
+      <div id="bv-history" aria-busy="false"></div>
+    </section>
+  </div>
+</dialog>

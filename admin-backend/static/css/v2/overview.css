@@ -1,0 +1,463 @@
+/* ============================================================================
+ * V2 Overview tab layout
+ * Tokens + components live in design-system.css. This file is layout-only.
+ * Source: P1-BUILD-PLAN section 4 + section 9 (mobile breakpoints).
+ * ============================================================================ */
+
+body.admin-page .v2-overview {
+  padding: var(--space-5) var(--space-7);
+  max-width: 1400px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas:
+    "hero hero"
+    "stats stats"
+    "presence presence"
+    "map roster";
+  gap: var(--space-6);
+}
+
+/* ---------------------------------------------------------------------------
+ * Admin hero strip (2026-06-11) - fal.ai Arrakis sietch banner, reused on
+ * login page too. Slim variant: enough height to establish identity without
+ * eating data-density space. Bottom scrim keeps title legible.
+ * --------------------------------------------------------------------------- */
+body.admin-page .v2-overview__hero {
+  grid-area: hero;
+  position: relative;
+  min-height: 96px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  padding: var(--space-4) var(--space-5);
+  background-color: var(--bg-card);
+  background-image:
+    linear-gradient(0deg, rgba(10,10,15,0.92) 0%, rgba(10,10,15,0.40) 55%, rgba(10,10,15,0.18) 100%),
+    url("/admin/static/img/admin-hero.jpg?v=20260611a");
+  background-size: cover;
+  background-position: center 38%;
+}
+
+body.admin-page .v2-overview__hero-inner {
+  position: relative;
+  z-index: 1;
+}
+
+body.admin-page .v2-overview__hero-kicker {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: var(--space-1);
+}
+
+body.admin-page .v2-overview__hero-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+}
+
+@media (min-width: 768px) {
+  body.admin-page .v2-overview__hero { min-height: 128px; padding: var(--space-5) var(--space-7); }
+  body.admin-page .v2-overview__hero-title { font-size: var(--text-xl); }
+}
+
+body.admin-page .v2-overview__stats {
+  grid-area: stats;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-5);
+}
+
+body.admin-page .v2-overview__map {
+  grid-area: map;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Six instance panels (2 Hagga sietches, 2 Deep Desert dimensions, 2 hubs) do
+   not belong in one column - at 4:3 each that is several screens of scrolling
+   for a dashboard that is meant to be glanceable. */
+body.admin-page .v2-overview__map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-4);
+}
+
+body.admin-page .v2-overview__map-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+body.admin-page .v2-overview__map-canvas {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Deep Desert has no terrain image - it is regenerated every Coriolis cycle,
+   so there is nothing stable to ship. Stylized sand stands in, matching the
+   portal's .map-backdrop--sand (that rule is scoped to body.portal-page and
+   cannot be reused directly from an admin page). Painted on ::before, not on the
+   canvas itself: the dim filter has to apply to the sand alone, and a filter on
+   the canvas would drag the dot and grid layers down with it. */
+body.admin-page .v2-overview__map-canvas--sand::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: #c89653;
+  background-image:
+    repeating-linear-gradient(118deg, rgba(150,100,45,0.06) 0 7px, transparent 7px 26px),
+    repeating-linear-gradient(64deg, rgba(110,72,32,0.05) 0 9px, transparent 9px 34px),
+    radial-gradient(circle at 22% 28%, rgba(120,80,30,0.16) 0 2px, transparent 3px),
+    radial-gradient(circle at 68% 62%, rgba(120,80,30,0.13) 0 2px, transparent 3px),
+    radial-gradient(circle at 45% 82%, rgba(140,95,40,0.11) 0 3px, transparent 4px),
+    radial-gradient(ellipse at 50% 0%, #d8a862 0%, #c89048 55%, #b67c38 100%);
+  background-size: auto, auto, 90px 90px, 130px 130px, 70px 70px, 100% 100%;
+  /* Dim it to sit with the admin palette rather than glare next to the cards. */
+  filter: saturate(0.72) brightness(0.62);
+}
+
+/* Survey grid (Deep Desert 9x9). Bare sand gives a dot no frame of reference,
+   and DD positions are always spoken as a cell ("F5"), so the labels are the
+   readable part, not decoration. */
+body.admin-page .v2-overview__gridline {
+  stroke: rgba(255, 255, 255, 0.16);
+  stroke-width: 0.15;
+}
+
+body.admin-page .v2-overview__gridlabel {
+  fill: rgba(255, 255, 255, 0.34);
+  font-family: var(--font-mono);
+  font-size: 2.4px;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+body.admin-page .v2-overview__map-elsewhere {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+ * Stale feed marker, and the unavailable stat.
+ * Same idea and the same yellow as world-map.css .wm__stale: a frozen feed has
+ * to look different from a quiet one. Two nouns this page must keep apart are
+ * "nobody is there" and "nothing answered".
+ * --------------------------------------------------------------------------- */
+body.admin-page .v2-overview__stale {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--yellow);
+  white-space: nowrap;
+}
+
+body.admin-page .stat-card--unavailable {
+  border-top-color: var(--border);
+}
+
+body.admin-page .stat-card__value--na {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+body.admin-page .v2-roster__unavailable {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--yellow);
+  padding: var(--space-3);
+}
+
+body.admin-page .v2-overview__map-canvas svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body.admin-page .v2-overview__map-canvas img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* HaggaBasin is 1:1 and the canvas is 4:3 - `contain` letterboxes the image
+     so it stays aligned with the SVG overlay (which uses preserveAspectRatio
+     xMidYMid meet over the same 0-100 viewBox). `cover` would crop the image
+     and the dot coordinates would no longer line up with visible terrain. */
+  object-fit: contain;
+  opacity: 0.65;
+}
+
+body.admin-page .v2-overview__dot {
+  fill: var(--accent);
+  stroke: rgba(0, 0, 0, 0.6);
+  stroke-width: 0.15;
+}
+
+body.admin-page .v2-overview__map-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+body.admin-page .v2-overview__map-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-overview__roster {
+  grid-area: roster;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+body.admin-page .v2-overview__roster-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+body.admin-page .v2-overview__roster-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-overview__roster-table-wrap {
+  overflow-x: auto;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+body.admin-page .v2-overview__roster-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+body.admin-page .v2-overview__roster-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  z-index: 1;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-strong);
+  text-align: left;
+}
+
+body.admin-page .v2-overview__roster-table tbody td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+body.admin-page .v2-overview__roster-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+body.admin-page .v2-overview__ticker {
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-overview__ticker-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+body.admin-page .v2-overview__ticker-item:last-child {
+  border-bottom: none;
+}
+
+body.admin-page .v2-overview__ticker-time {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  min-width: 90px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Presence history chart (ported from v1 dune_dashboard, restyled to tokens)
+ * --------------------------------------------------------------------------- */
+body.admin-page .v2-overview__presence {
+  grid-area: presence;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+body.admin-page .v2-overview__presence-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+body.admin-page .v2-overview__presence-head .card-title {
+  margin: 0;
+}
+
+body.admin-page .v2-overview__win.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+
+body.admin-page .v2-overview__presence-chart {
+  width: 100%;
+  min-height: 180px;
+}
+
+body.admin-page .v2-overview__presence-chart svg {
+  width: 100%;
+  height: 180px;
+  display: block;
+}
+
+body.admin-page .v2-overview__presence-empty {
+  margin: 0;
+  padding: var(--space-7) 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-overview__presence-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+body.admin-page .v2-overview__presence-area {
+  fill: rgba(212, 137, 28, 0.15);
+  stroke: none;
+}
+
+body.admin-page .v2-overview__presence-axis {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+body.admin-page .v2-overview__presence-axis-label {
+  fill: var(--text-muted);
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+body.admin-page .v2-overview__presence-meta {
+  display: flex;
+  gap: var(--space-7);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-overview__presence-meta[hidden] {
+  display: none;
+}
+
+body.admin-page .v2-overview__presence-meta strong {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+ * Responsive breakpoints (per P1-BUILD-PLAN section 9)
+ * --------------------------------------------------------------------------- */
+@media (max-width: 1024px) {
+  body.admin-page .v2-overview {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "hero"
+      "stats"
+      "presence"
+      "map"
+      "roster";
+    padding: var(--space-4) var(--space-5);
+  }
+
+  body.admin-page .v2-overview__stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  body.admin-page .v2-overview {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  body.admin-page .v2-overview__map {
+    display: none;
+  }
+
+  body.admin-page .v2-overview__stats {
+    grid-template-columns: 1fr;
+  }
+}

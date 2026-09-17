@@ -1,0 +1,290 @@
+{% extends "v2/base.html" %}
+{% block title %}{{ player.name or 'Player' }} — Player Detailed View{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="/admin/static/css/v2/player-tools.css">
+{% endblock %}
+{% block content %}
+<main class="v2-player-drilldown" id="v2-player-drilldown" data-account-id="{{ account_id }}">
+
+  {% set status_lc = (player.online_status or '')|string|lower %}
+  {% set is_online = status_lc == 'online' or player.online_status == True or player.is_online %}
+  {% set is_grace = player.in_grace_period %}
+
+  <div class="v2-player-drilldown__eyebrow-row">
+    <a class="btn btn-sm btn-ghost" href="/admin/v2/players/search">&larr; Players</a>
+    <span class="v2-player-drilldown__eyebrow">Player Detailed View</span>
+  </div>
+
+  <section class="v2-player-drilldown__hero" aria-label="Player overview">
+    <div class="char-card char-card--detail" data-account-id="{{ account_id }}">
+      <div class="char-card__portrait char-card__portrait--detail" aria-hidden="true">
+        <span class="char-card__portrait-glyph char-card__portrait-glyph--detail">{{ (player.name or '?')[0]|upper }}</span>
+        {% if is_grace %}
+          <span class="status-dot status-dot--grace char-card__dot char-card__dot--detail" aria-hidden="true"></span>
+        {% elif is_online %}
+          <span class="status-dot status-dot--online char-card__dot char-card__dot--detail" aria-hidden="true"></span>
+        {% else %}
+          <span class="status-dot status-dot--offline char-card__dot char-card__dot--detail" aria-hidden="true"></span>
+        {% endif %}
+      </div>
+      <div class="char-card__meta char-card__meta--detail">
+        <h1 class="char-card__name char-card__name--detail">{{ player.name or '—' }}</h1>
+        <div class="char-card__sub">
+          <span class="char-card__acct">account #{{ account_id }}</span>
+          {% if is_grace %}
+            <span class="status-badge status-badge--grace">grace period</span>
+          {% elif is_online %}
+            <span class="status-badge status-badge--online">online</span>
+          {% else %}
+            <span class="status-badge status-badge--offline">offline</span>
+          {% endif %}
+        </div>
+        <div class="char-card__hint">
+          {% if player.last_login_iso %}
+            last seen <time datetime="{{ player.last_login_iso }}">{{ player.last_login_display or player.last_login_iso }}</time>
+          {% elif player.last_login_time %}
+            last seen {{ player.last_login_time }}
+          {% else %}
+            never logged in
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="v2-player-drilldown__actions"
+       id="v2-player-actions"
+       data-account-id="{{ account_id }}"
+       data-player-name="{{ player.name or '' }}"
+       data-online="{{ '1' if is_online else '0' }}">
+    <button type="button" class="btn btn-sm btn-accent" id="v2-action-dm">Whisper</button>
+    <a class="btn btn-sm btn-ghost" href="/admin/v2/players/grants?aid={{ account_id }}"
+       title="Open this player in the Grant Bench">Open in Grant Bench →</a>
+    <span class="v2-player-drilldown__actions-spacer"></span>
+    <button type="button" class="btn btn-sm" id="v2-action-kick"
+            title="Kick this player from the server (typed confirm required)">Kick</button>
+    <button type="button" class="btn btn-sm btn-destructive" id="v2-action-ban"
+            title="Ban this player (kick + re-kick on rejoin)">Ban</button>
+    <button type="button" class="btn btn-sm" id="v2-action-unban"
+            title="Lift the active ban on this player">Unban</button>
+  </div>
+
+  {% set active_tab = initial_subtab or 'identity' %}
+
+  <nav class="v2-player-drilldown__subtabs" aria-label="Player sub-tabs" role="tablist">
+    <button type="button"
+            class="v2-player-drilldown__subtab {% if active_tab == 'identity' %}active{% endif %}"
+            id="subtab-identity"
+            role="tab"
+            aria-selected="{{ 'true' if active_tab == 'identity' else 'false' }}"
+            aria-controls="player-subtab-body"
+            hx-get="/admin/api/dune/v2/player/{{ account_id }}/_identity"
+            hx-target="#player-subtab-body"
+            hx-swap="innerHTML"
+            hx-indicator="#v2-player-subtab-loading"
+            hx-push-url="/admin/v2/players/{{ account_id }}?tab=identity"
+            data-subtab="identity">Identity</button>
+    <button type="button"
+            class="v2-player-drilldown__subtab {% if active_tab == 'grants' %}active{% endif %}"
+            id="subtab-grants"
+            role="tab"
+            aria-selected="{{ 'true' if active_tab == 'grants' else 'false' }}"
+            aria-controls="player-subtab-body"
+            hx-get="/admin/api/dune/v2/player/{{ account_id }}/_grants"
+            hx-target="#player-subtab-body"
+            hx-swap="innerHTML"
+            hx-indicator="#v2-player-subtab-loading"
+            hx-push-url="/admin/v2/players/{{ account_id }}?tab=grants"
+            data-subtab="grants">Grants</button>
+    <button type="button"
+            class="v2-player-drilldown__subtab {% if active_tab == 'live_actions' %}active{% endif %}"
+            id="subtab-live_actions"
+            role="tab"
+            aria-selected="{{ 'true' if active_tab == 'live_actions' else 'false' }}"
+            aria-controls="player-subtab-body"
+            hx-get="/admin/api/dune/v2/player/{{ account_id }}/_live_actions"
+            hx-target="#player-subtab-body"
+            hx-swap="innerHTML"
+            hx-indicator="#v2-player-subtab-loading"
+            hx-push-url="/admin/v2/players/{{ account_id }}?tab=live_actions"
+            data-subtab="live_actions">Live Actions</button>
+    <button type="button"
+            class="v2-player-drilldown__subtab {% if active_tab == 'containers' %}active{% endif %}"
+            id="subtab-containers"
+            role="tab"
+            aria-selected="{{ 'true' if active_tab == 'containers' else 'false' }}"
+            aria-controls="player-subtab-body"
+            hx-get="/admin/api/dune/v2/player/{{ account_id }}/_containers"
+            hx-target="#player-subtab-body"
+            hx-swap="innerHTML"
+            hx-indicator="#v2-player-subtab-loading"
+            hx-push-url="/admin/v2/players/{{ account_id }}?tab=containers"
+            data-subtab="containers">Containers</button>
+    <button type="button"
+            class="v2-player-drilldown__subtab {% if active_tab == 'audit' %}active{% endif %}"
+            id="subtab-audit"
+            role="tab"
+            aria-selected="{{ 'true' if active_tab == 'audit' else 'false' }}"
+            aria-controls="player-subtab-body"
+            hx-get="/admin/api/dune/v2/player/{{ account_id }}/_audit"
+            hx-target="#player-subtab-body"
+            hx-swap="innerHTML"
+            hx-indicator="#v2-player-subtab-loading"
+            hx-push-url="/admin/v2/players/{{ account_id }}?tab=audit"
+            data-subtab="audit">Audit</button>
+    <button type="button"
+            class="v2-player-drilldown__subtab {% if active_tab == 'export' %}active{% endif %}"
+            id="subtab-export"
+            role="tab"
+            aria-selected="{{ 'true' if active_tab == 'export' else 'false' }}"
+            aria-controls="player-subtab-body"
+            hx-get="/admin/api/dune/v2/player/{{ account_id }}/_export"
+            hx-target="#player-subtab-body"
+            hx-swap="innerHTML"
+            hx-indicator="#v2-player-subtab-loading"
+            hx-push-url="/admin/v2/players/{{ account_id }}?tab=export"
+            data-subtab="export">Export</button>
+    <span id="v2-player-subtab-loading" class="htmx-indicator" aria-live="polite">loading…</span>
+  </nav>
+
+  <section id="player-subtab-body" class="v2-player-drilldown__body" role="tabpanel" aria-labelledby="subtab-{{ active_tab }}">
+    {% if active_tab == 'identity' and identity is defined %}
+      {% include "v2/_fragments/player_identity.html" %}
+    {% elif active_tab == 'grants' and grants is defined %}
+      {% include "v2/_fragments/player_grants.html" %}
+    {% elif active_tab == 'live_actions' and live_actions is defined %}
+      {% include "v2/_fragments/player_live_actions.html" %}
+    {% elif active_tab == 'containers' and containers is defined %}
+      {% include "v2/_fragments/player_containers.html" %}
+    {% elif active_tab == 'audit' and audit is defined %}
+      {% include "v2/_fragments/player_audit_rows.html" %}
+    {% elif active_tab == 'export' and export is defined %}
+      {% include "v2/_fragments/player_export.html" %}
+    {% endif %}
+  </section>
+
+</main>
+
+<!-- Kick modal (typed-CONFIRM) -->
+<div id="v2-kick-overlay" class="confirm-overlay">
+  <div class="confirm-dialog v2-mod-dialog">
+    <h3 id="v2-kick-title">Kick player</h3>
+    <p class="v2-mod__target" id="v2-kick-target"></p>
+    <div class="form-group">
+      <label class="form-label" for="v2-kick-reason">Reason</label>
+      <input type="text" id="v2-kick-reason" maxlength="500" autocomplete="off"
+             placeholder="Brief reason for the audit log">
+      <div class="v2-mod-presets" aria-label="Quick reasons">
+        <button type="button" class="v2-mod-preset" data-target="kick" data-reason="Spamming chat">Spam</button>
+        <button type="button" class="v2-mod-preset" data-target="kick" data-reason="AFK in a restricted area">AFK</button>
+        <button type="button" class="v2-mod-preset" data-target="kick" data-reason="Toxic behavior toward other players">Toxicity</button>
+        <button type="button" class="v2-mod-preset" data-target="kick" data-reason="Exploiting a game bug">Exploit</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="v2-kick-confirm">Type KICK to confirm</label>
+      <input type="text" id="v2-kick-confirm" autocomplete="off" spellcheck="false"
+             placeholder="KICK">
+    </div>
+    <p class="v2-mod__hint">Disconnects the player now. They can rejoin immediately.</p>
+    <div class="msg" id="v2-kick-msg"></div>
+    <div class="btn-group" style="justify-content: flex-end;">
+      <button class="btn" type="button" onclick="closeV2Mod('kick')">Cancel</button>
+      <button class="btn btn-accent" type="button" id="v2-kick-send" disabled>Kick</button>
+    </div>
+  </div>
+</div>
+
+<!-- Ban modal (typed-CONFIRM + duration + note) -->
+<div id="v2-ban-overlay" class="confirm-overlay">
+  <div class="confirm-dialog v2-mod-dialog">
+    <h3 id="v2-ban-title">Ban player</h3>
+    <p class="v2-mod__target" id="v2-ban-target"></p>
+    <div class="form-group">
+      <label class="form-label" for="v2-ban-reason">Reason</label>
+      <input type="text" id="v2-ban-reason" maxlength="500" autocomplete="off"
+             placeholder="Brief reason (public-ish, shown in audit)">
+      <div class="v2-mod-presets" aria-label="Quick presets (set reason and duration)">
+        <button type="button" class="v2-mod-preset" data-target="ban" data-reason="Cheating or third-party tools" data-duration="">Cheating · perm</button>
+        <button type="button" class="v2-mod-preset" data-target="ban" data-reason="Exploiting a game bug" data-duration="1440">Glitch abuse · 24h</button>
+        <button type="button" class="v2-mod-preset" data-target="ban" data-reason="Harassment of other players" data-duration="10080">Harassment · 7d</button>
+        <button type="button" class="v2-mod-preset" data-target="ban" data-reason="Griefing or base destruction" data-duration="4320">Griefing · 3d</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="v2-ban-duration">Duration (minutes, blank = permanent)</label>
+      <input type="number" id="v2-ban-duration" min="1" max="525600" autocomplete="off"
+             placeholder="e.g. 1440 = 24h">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="v2-ban-note">Internal note (optional)</label>
+      <textarea id="v2-ban-note" maxlength="1000"
+                placeholder="Mod-only context, not shown to the player"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="v2-ban-confirm">Type BAN to confirm</label>
+      <input type="text" id="v2-ban-confirm" autocomplete="off" spellcheck="false"
+             placeholder="BAN">
+    </div>
+    <p class="v2-mod__hint">Bans are keyed by FLS id. A re-kick watcher disconnects rejoin attempts within ~30s.</p>
+    <div class="msg" id="v2-ban-msg"></div>
+    <div class="btn-group" style="justify-content: flex-end;">
+      <button class="btn" type="button" onclick="closeV2Mod('ban')">Cancel</button>
+      <button class="btn btn-destructive" type="button" id="v2-ban-send" disabled>Ban</button>
+    </div>
+  </div>
+</div>
+
+<!-- Unban modal (typed-CONFIRM) -->
+<div id="v2-unban-overlay" class="confirm-overlay">
+  <div class="confirm-dialog v2-mod-dialog">
+    <h3 id="v2-unban-title">Unban player</h3>
+    <p class="v2-mod__target" id="v2-unban-target"></p>
+    <div class="form-group">
+      <label class="form-label" for="v2-unban-reason">Unban reason</label>
+      <input type="text" id="v2-unban-reason" maxlength="500" autocomplete="off"
+             placeholder="Why is the ban being lifted?">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="v2-unban-confirm">Type UNBAN to confirm</label>
+      <input type="text" id="v2-unban-confirm" autocomplete="off" spellcheck="false"
+             placeholder="UNBAN">
+    </div>
+    <p class="v2-mod__hint">The re-kick watcher stops on the next tick (~30s).</p>
+    <div class="msg" id="v2-unban-msg"></div>
+    <div class="btn-group" style="justify-content: flex-end;">
+      <button class="btn" type="button" onclick="closeV2Mod('unban')">Cancel</button>
+      <button class="btn btn-accent" type="button" id="v2-unban-send" disabled>Unban</button>
+    </div>
+  </div>
+</div>
+
+<!-- DM (whisper) composer modal -->
+<div id="v2-dm-overlay" class="confirm-overlay">
+  <div class="confirm-dialog v2-dm-dialog">
+    <h3 id="v2-dm-title">Whisper player</h3>
+    <p id="v2-dm-recipient-line" class="v2-dm__recipient"></p>
+    <div class="form-group" id="v2-dm-manual-row" hidden>
+      <label class="form-label" for="v2-dm-recipient">Recipient FuncomId (Display#tag)</label>
+      <input type="text" id="v2-dm-recipient" autocomplete="off" spellcheck="false" placeholder="Display#tag">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="v2-dm-message">Message</label>
+      <textarea id="v2-dm-message" maxlength="500" placeholder="The spice must flow."></textarea>
+      <div class="char-count"><span id="v2-dm-charcount">0</span> / 500</div>
+    </div>
+    <p class="v2-dm__hint">Sent in-game as the Cielago herald. Whispers reach online players only.</p>
+    <div class="msg" id="v2-dm-msg"></div>
+    <div class="btn-group" style="justify-content: flex-end;">
+      <button class="btn" type="button" onclick="closeV2Dm()">Cancel</button>
+      <button class="btn btn-accent" type="button" id="v2-dm-send">Send whisper</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/v2-player.js" defer></script>
+<script src="/admin/static/js/v2/player-moderation.js" defer></script>
+{% endblock %}

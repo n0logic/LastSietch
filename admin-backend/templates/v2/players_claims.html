@@ -1,0 +1,86 @@
+{% extends "v2/base.html" %}
+{% block title %}Claims — Players{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="/admin/static/css/v2/base-vault.css?v=20260911b">
+<link rel="stylesheet" href="/admin/static/css/v2/player-tools.css">
+<link rel="stylesheet" href="/admin/static/css/v2/claims-map.css?v=3">
+{% endblock %}
+{% block content %}
+{# Calibration travels as data attributes rather than an inline <script>: the
+   portal CSP forbids inline script outright and the admin panel should not
+   depend on being the laxer of the two. Values come from map_model.MAPS so the
+   map cannot drift from the portal's projection. #}
+<main class="v2-main v2-claims" id="v2-claims"
+      data-origin-x="{{ cal.originX }}" data-span-x="{{ cal.spanX }}"
+      data-origin-y="{{ cal.originY }}" data-span-y="{{ cal.spanY }}"
+      data-game-map="{{ game_map }}" data-initial-dim="0">
+
+  <header class="v2-claims__header">
+    <h1 class="v2-claims__title">Claims</h1>
+    <p class="v2-claims__subtitle">
+      Who owns what, on the ground. Ownership is not stored on the totem: it comes from
+      permission_actor_rank, where rank 1 is the owner. Hover a claim for the owner, click to
+      pin it, or click bare terrain for the nearest claims to that point. Open Base Vault
+      from a selected claim to capture a snapshot or inspect its history. Admin
+      only: this names players against map positions.
+    </p>
+  </header>
+
+  <div class="v2-claims-toolbar">
+    <div class="v2-claims-instances" role="group" aria-label="Sietch instance">
+      {# One at a time, never both. The two share a coordinate space, so drawing
+         them together would stack unrelated bases on the same pixel. #}
+      <button type="button" class="v2-claims-instances__btn" data-claims-dim="0"
+              aria-pressed="true">Habbanya · PvE</button>
+      <button type="button" class="v2-claims-instances__btn" data-claims-dim="1"
+              aria-pressed="false">Kulon · PvP</button>
+      <button type="button" class="v2-claims-instances__btn" data-claims-dim="2"
+              aria-pressed="false">Amtal · Full PvP</button>
+    </div>
+    <input type="search" id="v2-claims-filter" class="input v2-claims-toolbar__filter"
+           placeholder="Filter by base name, owner, account or totem id..."
+           autocomplete="off" aria-label="Filter claims">
+    <span class="v2-claims-count" id="v2-claims-count">loading…</span>
+  </div>
+
+  <div class="v2-claims-layout">
+    <div class="v2-claims-map" id="v2-claims-map">
+      <div class="v2-claims-map__stage" id="v2-claims-stage">
+        {# A 2048 downscale of the 8192 portal asset: 512 KB against 3.6 MB, on a
+           page you pan and zoom. The Overview map loads the full-size
+           /assets/HaggaBasin.webp, which the EDGE serves fine even though the
+           app itself 404s that path; correcting an earlier claim of mine that
+           /assets was unreachable from admin. Either source works, this one is
+           seven times lighter. #}
+        <img class="v2-claims-map__img" id="v2-claims-img" alt=""
+             src="/admin/static/img/maps/hagga-map.webp?v=1" draggable="false">
+        <svg class="v2-claims-map__svg" id="v2-claims-svg"
+             viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-label="Claim map"></svg>
+      </div>
+      <div class="v2-claims-map__zoom">
+        <button type="button" id="v2-claims-zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+        <button type="button" id="v2-claims-zoom-out" title="Zoom out" aria-label="Zoom out">&minus;</button>
+        <button type="button" id="v2-claims-zoom-reset" title="Reset view" aria-label="Reset view">&#8634;</button>
+      </div>
+      <div class="v2-claims-map__hint">drag to pan · scroll to zoom · click terrain for nearest</div>
+    </div>
+
+    <aside class="v2-claims-side">
+      <h2>Claim detail</h2>
+      <div id="v2-claims-detail">
+        <p class="v2-claims-side__hint">Loading directory…</p>
+      </div>
+      <div id="v2-claims-legend"></div>
+      <p class="v2-claims-note" id="v2-claims-note"></p>
+    </aside>
+  </div>
+
+  <div class="v2-claims-tip" id="v2-claims-tip" hidden role="tooltip"></div>
+
+</main>
+{% include "v2/_includes/base_vault.html" %}
+{% endblock %}
+{% block scripts %}
+<script src="/admin/static/js/v2/base-vault.js?v=20260911b" defer></script>
+<script src="/admin/static/js/v2/player-claims.js?v=5" defer></script>
+{% endblock %}

@@ -1,0 +1,198 @@
+{# Storage containers — GET /portal/containers
+   Context (from routers/portal.py portal_containers):
+     active_character_name: str
+     containers: {available, count, containers[]} | None
+       containers: [{id, custom_name, type_label, map, item_count}]
+     containers_error: bool
+     portal_session, portal_csrf_token (base_ctx)
+   Items per container are loaded on demand from
+     GET /portal/containers/{id}/items  (portal-containers.js -> drawer).
+#}
+{% extends "portal/base.html" %}
+{% set active_nav = "storage" %}
+
+{% block title %}Your storage — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+
+<nav class="portal-breadcrumb" aria-label="Breadcrumb">
+</nav>
+
+<section class="portal-hero portal-hero--storage" aria-label="Your storage">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Last Sietch</span>
+    <p class="portal-hero__title">Your Storage</p>
+    <p class="portal-hero__sub">
+      Containers placed by <strong>{{ active_character_name }}</strong> — select one to see inside.
+    </p>
+    <p class="portal-hero__actions">
+      <a class="portal-btn portal-btn--ghost portal-btn--sm" href="/portal/storage">Open Storage Manager →</a>
+    </p>
+  </div>
+</section>
+
+{% if containers_error or containers is none or not containers.available %}
+<article class="portal-card">
+  <div class="portal-msg portal-msg--warning" role="status">
+    Live storage data is temporarily unavailable. Please refresh in a minute.
+  </div>
+</article>
+{% elif containers.count == 0 %}
+<article class="portal-card">
+  <div class="portal-msg portal-msg--info" role="status">
+    No storage containers found. Place a chest or storage container in-game and it
+    will show up here.
+  </div>
+</article>
+{% else %}
+
+<article class="portal-card">
+  <h2 class="portal-card__title">Find an item</h2>
+  <p class="portal-card__subtitle">
+    Search across all your containers at once — see which box has it and how many.
+  </p>
+  <input type="search" id="cont-search-input" class="cont-search__input"
+         placeholder="e.g. Granite Stone" autocomplete="off" aria-label="Search all your storage">
+  <div id="cont-search-results" class="cont-search__panel" aria-live="polite"></div>
+</article>
+
+<article class="portal-card">
+  <h2 class="portal-card__title">Containers</h2>
+  <p class="portal-card__subtitle">
+    {{ containers.count }} container{{ '' if containers.count == 1 else 's' }}.
+    Select one to view its contents. This is a read-only view; nothing here changes your chests.
+  </p>
+
+  <div class="cont-grid" role="list" aria-label="Storage containers">
+    {% for c in containers.containers %}
+    <button type="button" role="listitem"
+            class="cont-tile{% if c.item_count %} cont-tile--filled{% else %} cont-tile--empty{% endif %}{% if c.is_bank %} cont-tile--bank{% endif %}{% if c.is_vehicle %} cont-tile--vehicle{% endif %}"
+            data-container-id="{{ c.id }}"
+            data-type="{{ c.type_label }}"
+            data-name="{{ c.custom_name }}"
+            data-count="{{ c.item_count }}"
+            aria-label="{{ c.custom_name or c.type_label }}, {{ c.item_count }} item{{ '' if c.item_count == 1 else 's' }}{% if c.map %}, on {{ c.map }}{% endif %}">
+      <span class="cont-tile__count" aria-hidden="true">{{ c.item_count }}</span>
+      {% if c.icon %}
+      <img class="cont-tile__icon" src="/admin/static/img/containers/{{ c.icon }}.png" alt="" aria-hidden="true" loading="lazy" width="56" height="56">
+      {% endif %}
+      {% if c.custom_name %}
+        <span class="cont-tile__name">{{ c.custom_name }}</span>
+        <span class="cont-tile__type">{{ c.type_label }}</span>
+      {% else %}
+        <span class="cont-tile__name{% if c.icon %} cont-tile__name--sub{% endif %}">{{ c.type_label }}</span>
+      {% endif %}
+      {% if c.is_bank %}<span class="cont-tile__map">Account-wide</span>
+      {% elif c.map %}<span class="cont-tile__map">{{ c.map }}</span>{% endif %}
+    </button>
+    {% endfor %}
+  </div>
+</article>
+
+{# Hover peek tooltip (desktop quick-look; filled by the script). #}
+<div id="cont-tooltip" class="ls-tooltip" role="tooltip" hidden></div>
+
+{# Detail drawer (slides in on click; fetches items on demand). #}
+<div id="cont-drawer-overlay" class="ls-drawer-overlay" hidden></div>
+<aside id="cont-drawer" class="ls-drawer" role="dialog" aria-modal="true" aria-labelledby="cont-drawer-title" hidden>
+  <header class="ls-drawer__header">
+    <h2 id="cont-drawer-title" class="ls-drawer__title">Container</h2>
+    <button type="button" id="cont-drawer-close" class="ls-drawer__close" aria-label="Close">×</button>
+  </header>
+  <div id="cont-drawer-body" class="ls-drawer__body"></div>
+</aside>
+
+{# List-on-Exchange modal (opened by portal-containers.js from a storage item's
+   "List" button). Quantity 1..stack, price per unit, duration, a LIVE exchange
+   fee, and the offline/bank note. POSTs to /portal/market/sell with CSRF; the
+   seller's controller_id + owned-item check are enforced server-side. #}
+<div id="sell-modal-overlay" class="ls-modal-overlay" hidden></div>
+<div id="sell-modal" class="ls-modal" role="dialog" aria-modal="true"
+     aria-labelledby="sell-modal-title" hidden>
+  <header class="ls-modal__header">
+    <h2 id="sell-modal-title" class="ls-modal__title">List on Exchange</h2>
+    <button type="button" id="sell-modal-close" class="ls-drawer__close" aria-label="Close">×</button>
+  </header>
+  <div class="ls-modal__body">
+    <p class="sell-modal__item">
+      <span class="sell-modal__item-name" data-sell-itemname>Item</span>
+      <span class="sell-modal__item-stack">in stock: <span class="mono" data-sell-stackmax>1</span></span>
+    </p>
+
+    <div class="sell-modal__field">
+      <label class="sell-modal__label" for="sell-qty">Quantity</label>
+      <div class="sell-modal__inputrow">
+        <input type="number" id="sell-qty" class="cont-search__input sell-modal__num"
+               min="1" step="1" inputmode="numeric" value="1" data-sell-qty
+               aria-label="Quantity to list">
+        <span class="sell-modal__hint">/ <span data-sell-stackmax2>1</span> available</span>
+      </div>
+    </div>
+
+    <div class="sell-modal__field">
+      <label class="sell-modal__label" for="sell-price">Price per unit</label>
+      <div class="sell-modal__inputrow">
+        <input type="number" id="sell-price" class="cont-search__input sell-modal__num"
+               min="1" step="1" inputmode="numeric" placeholder="0" data-sell-price
+               aria-label="Price per unit in Solari">
+        <img class="market-solari-ico" src="/admin/static/img/dune-icons/solari.png"
+             alt="Solari" aria-hidden="true">
+      </div>
+    </div>
+
+    <div class="sell-modal__field">
+      <span class="sell-modal__label">Duration</span>
+      <div class="sell-modal__durations" role="group" aria-label="Listing duration">
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm sell-modal__dur"
+                data-sell-dur="1">1 day</button>
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm sell-modal__dur"
+                data-sell-dur="3">3 days</button>
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm sell-modal__dur sell-modal__dur--active"
+                data-sell-dur="7">7 days</button>
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm sell-modal__dur"
+                data-sell-dur="14">14 days</button>
+      </div>
+    </div>
+
+    <dl class="sell-modal__summary">
+      <div class="sell-modal__sumrow">
+        <dt>Listing total</dt>
+        <dd><span class="mono" data-sell-total>0</span><img class="market-solari-ico"
+            src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true"></dd>
+      </div>
+      <div class="sell-modal__sumrow sell-modal__sumrow--fee">
+        <dt>Exchange fee</dt>
+        <dd><span class="mono" data-sell-fee>0</span><img class="market-solari-ico"
+            src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true"></dd>
+      </div>
+    </dl>
+
+    <p class="sell-modal__note">
+      Lists while you are <strong>offline</strong>. The fee is paid from your CHOAM bank Solari.
+    </p>
+
+    <div class="sell-modal__actions">
+      <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm" id="sell-cancel">Cancel</button>
+      <button type="button" class="portal-btn portal-btn--primary portal-btn--sm" id="sell-confirm">List item</button>
+    </div>
+    <p class="sell-modal__msg" id="sell-msg" role="status" aria-live="polite"></p>
+    <div class="sell-modal__result" id="sell-result"></div>
+  </div>
+</div>
+
+<noscript>
+  <article class="portal-card">
+    <div class="portal-msg portal-msg--info" role="status">
+      Enable JavaScript to browse the contents of each container. The list above shows
+      each container's type, custom name, and item count.
+    </div>
+  </article>
+</noscript>
+
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/portal-containers.js?v=20260606b" defer></script>
+{% endblock %}

@@ -1,0 +1,391 @@
+{# Portal dashboard — GET /portal/account
+   Context (canonical, from routers/portal.py portal_account):
+     discord_handle: str
+     active_character: {character_name, lvl, linked_at, current_map, online, faction}
+     active_character_name: str (alias)
+     linked: [{character_name, linked_at, is_active}]
+     linked_characters: [...] (alias, same data)
+     live: {character_level, current_map, faction, faction_crest, intel_points,
+            solari, bank_solari, last_online} | None
+     live_error: str | None
+     specializations: {tracks:[{name, level, pct, xp}], level_cap,
+                       keystones_owned, keystones_total} | None
+     stat_icons: {level, intel, xp, skill_point, solari, scrip} (basename|None)
+     logout_post_url: "/portal/logout"
+     portal_session: {discord_handle}
+     portal_csrf_token: str
+#}
+{% extends "portal/base.html" %}
+{% set active_nav = "character" %}
+
+{% block title %}Your account — Last Sietch Dune Portal{% endblock %}
+
+{# Optional stat/currency glyph; renders nothing when no icon basename is set. #}
+{% macro stat_icon(slug) %}{% if slug %}<img class="portal-stat__icon" src="/admin/static/img/stats/{{ slug }}.png" alt="" aria-hidden="true" width="16" height="16">{% endif %}{% endmacro %}
+
+{% block content %}
+
+{# Expose faction for the House-colors opt-in prompt (portal.js wireFactionPrompt).
+   JS reads this, caches to localStorage, and shows the one-time band site-wide. #}
+{% if live and live.faction in ('Atreides', 'Harkonnen') %}
+<span data-portal-faction="{{ live.faction | lower }}" hidden aria-hidden="true"></span>
+{% endif %}
+
+{# Cinematic brand hero (fal.ai art, theme-swapped night/day). Brand banner,
+   not the page heading - the character name below is the single h1. #}
+<section class="portal-hero" aria-label="Last Sietch">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Last Sietch</span>
+    <p class="portal-hero__title">Dune: Awakening Companion</p>
+    <p class="portal-hero__sub">Your character, storage, market, and Landsraad — anywhere.</p>
+  </div>
+</section>
+
+{# Team-lead verbatim disclosure (mandatory on landing + dashboard) #}
+<section class="portal-banner" aria-label="Portal disclosure">
+  This is the public player portal. Identity verification ties your Discord account to your Last Sietch character. Last Sietch admins maintain the underlying server state — see Discord <strong>#help-and-feedback</strong> if anything looks wrong.
+</section>
+
+{# Unified player vitals card: identity + crest + live stats in one place.
+   Replaces the old hero + separate "Character snapshot" card. #}
+<article class="portal-card portal-vitals">
+  <div class="portal-vitals__head">
+    {% if live and live.faction_crest %}
+    <span class="portal-vitals__crest portal-vitals__crest--{{ live.faction | lower }}">
+      <img src="/admin/static/img/factions/{{ live.faction_crest }}.png" alt="{{ live.faction }}" width="56" height="56">
+    </span>
+    {% else %}
+    <span class="portal-vitals__crest portal-vitals__crest--none" aria-hidden="true">◇</span>
+    {% endif %}
+    <div class="portal-vitals__id">
+      <p class="portal-dash__handle">Signed in as <strong>{{ discord_handle }}</strong></p>
+      <h1 class="portal-dash__char-name">{{ active_character.character_name }}</h1>
+      {% if active_character.online %}
+      <span class="portal-pill portal-pill--online">online now</span>
+      {% else %}
+      <span class="portal-pill portal-pill--offline">offline</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="portal-vitals__cols">
+  <div class="portal-vitals__left">
+  {% if live_error %}
+  <div class="portal-msg portal-msg--warning" role="status">
+    {{ live_error }}
+  </div>
+  {% elif live %}
+  <div class="portal-dash__stats portal-dash__stats--list">
+    <div class="portal-stat">
+      <span class="portal-stat__label">{{ stat_icon(stat_icons.level) }}Level</span>
+      <span class="portal-stat__value {% if live.character_level is none %}portal-stat__value--empty{% endif %}">
+        {{ live.character_level if live.character_level is not none else '—' }}
+      </span>
+    </div>
+    <div class="portal-stat">
+      <span class="portal-stat__label">Faction</span>
+      <span class="portal-stat__value {% if not live.faction or live.faction == 'Unaligned' %}portal-stat__value--empty{% endif %}">
+        {{ live.faction if (live.faction and live.faction != 'Unaligned') else 'Not aligned' }}
+      </span>
+    </div>
+    {% if live.intel_points is not none %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">{{ stat_icon(stat_icons.intel) }}Intel points</span>
+      <span class="portal-stat__value">{{ live.intel_points }}</span>
+    </div>
+    {% endif %}
+    {% if live.character_xp_display %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">{{ stat_icon(stat_icons.xp) }}Total XP</span>
+      <span class="portal-stat__value">{{ live.character_xp_display }}</span>
+    </div>
+    {% endif %}
+    {% if live.unspent_sp is not none %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">{{ stat_icon(stat_icons.skill_point) }}Unspent skill points</span>
+      <span class="portal-stat__value {% if live.unspent_sp == 0 %}portal-stat__value--empty{% endif %}">{{ live.unspent_sp }}</span>
+    </div>
+    {% endif %}
+    {% if live.bank_solari_display %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">{{ stat_icon(stat_icons.solari_bank or stat_icons.solari) }}Bank Solari</span>
+      <span class="portal-stat__value">{{ live.bank_solari_display }}</span>
+    </div>
+    {% endif %}
+    {% if live.pocket_solari_display %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">{{ stat_icon(stat_icons.solari) }}Solari in storage</span>
+      <span class="portal-stat__value" title="Solari Coins held across your backpack, containers, and vehicles">{{ live.pocket_solari_display }}</span>
+    </div>
+    {% endif %}
+    {% if live.scrip_display %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">{{ stat_icon(stat_icons.scrip) }}Scrip</span>
+      <span class="portal-stat__value">{{ live.scrip_display }}</span>
+    </div>
+    {% endif %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">Current map</span>
+      {% if active_character.online %}
+      <span class="portal-stat__value {% if not live.current_map %}portal-stat__value--empty{% endif %}">
+        {{ live.current_map if live.current_map else 'Unknown' }}
+      </span>
+      {% else %}
+      <span class="portal-stat__value portal-stat__value--empty">Offline</span>
+      {% endif %}
+    </div>
+  </div>
+  {% if live.last_online %}
+  <p class="portal-card__subtitle portal-card__fine-print">
+    {{ live.last_online }}
+  </p>
+  {% endif %}
+  {% else %}
+  <div class="portal-msg portal-msg--info" role="status">
+    No live snapshot available right now. Log in to the game and refresh this page.
+  </div>
+  {% endif %}
+  <p class="portal-card__subtitle portal-card__fine-print">
+    Linked <span class="mono">{{ active_character.linked_at }}</span>
+  </p>
+  </div>{# /portal-vitals__left #}
+
+  {# Character stage: equipped-gear rail + 3D turntable + item details.
+     Items come from equipped_items ctx (demo set under PORTAL_SHOW_GEAR_DEMO;
+     the live equipment feed lands with the gated collector update). #}
+  <div class="portal-charstage" data-character-stage>
+    {% if equipped_items %}
+    <ul class="portal-charstage__rail" data-gear-rail aria-label="Equipped items">
+      {% for it in equipped_items %}
+      <li>
+        <button type="button" class="portal-charstage__slot" data-gear-item
+                data-template-id="{{ it.template_id }}" data-slot="{{ it.slot }}"
+                data-category="{{ it.category }}" data-item-name="{{ it.name }}"
+                data-quality="{{ it.quality if it.quality is not none else '' }}"
+                data-variant="{{ it.variant_id | default('', true) }}"
+                data-dye="{{ it.swatch_id | default('', true) }}"
+                aria-haspopup="dialog">
+          <span class="portal-charstage__slot-label">{{ it.slot }}</span>
+          <span class="portal-charstage__slot-name">{{ it.name }}</span>
+        </button>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <div class="portal-charstage__view">
+      <canvas class="portal-charstage__canvas" data-gear-canvas
+              aria-label="3D item preview"></canvas>
+      {% if not equipped_items %}
+      <div class="portal-charstage__empty">
+        <p>Equipped-gear display is coming after the next maintenance window.</p>
+      </div>
+      {% else %}
+      <div class="portal-charstage__empty" data-gear-empty hidden>
+        <p>3D preview unavailable for this loadout yet.</p>
+      </div>
+      {% endif %}
+      {# Item stats popup: filled + toggled by portal-character.js on rail click.
+         The persistent turntable figure stays mounted behind it. #}
+      <div class="portal-charstage__popup" data-gear-popup role="dialog"
+           aria-modal="false" aria-label="Equipped item details" hidden>
+        <div class="portal-charstage__popup-card">
+          <button type="button" class="portal-charstage__popup-close"
+                  data-gear-popup-close aria-label="Close">&times;</button>
+          <span class="portal-charstage__popup-slot" data-p-slot></span>
+          <span class="portal-charstage__popup-name" data-p-name></span>
+          <div class="portal-charstage__popup-chips" data-p-chips></div>
+          <p class="portal-charstage__popup-desc" data-p-desc hidden></p>
+          <dl class="portal-charstage__popup-stats" data-p-stats></dl>
+          <dl class="portal-charstage__popup-meta" data-p-meta></dl>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div>{# /portal-vitals__cols #}
+  <script type="application/json" data-gear-items>{{ equipped_items_json | safe }}</script>
+</article>
+
+{# Faction standing: rank + numeric standing + progress to next rank. Shown only
+   for the two aligned houses (Atreides/Harkonnen) that carry reputation. #}
+{% if faction_rep %}
+<article class="portal-card portal-faction">
+  <h2 class="portal-card__title">Faction standing</h2>
+  <div class="portal-faction__head">
+    {% if faction_rep.crest %}
+    <span class="portal-faction__crest portal-faction__crest--{{ faction_rep.faction | lower }}">
+      <img src="/admin/static/img/factions/{{ faction_rep.crest }}.png" alt="{{ faction_rep.faction }}" width="44" height="44">
+    </span>
+    {% endif %}
+    <div class="portal-faction__id">
+      <span class="portal-faction__name">House {{ faction_rep.faction }}</span>
+      <span class="portal-faction__rank">Rank {{ faction_rep.rank }} · {{ faction_rep.rank_name }}</span>
+    </div>
+    <span class="portal-faction__standing mono">
+      {% if faction_rep.standing_icon %}<img class="portal-stat__icon" src="/admin/static/img/stats/{{ faction_rep.standing_icon }}.png" alt="" aria-hidden="true" width="16" height="16">{% endif %}{{ faction_rep.standing_display }}
+    </span>
+  </div>
+  <div class="portal-faction__bar" role="progressbar" aria-valuenow="{{ faction_rep.pct }}" aria-valuemin="0" aria-valuemax="100" aria-label="Progress to next rank">
+    <div class="portal-faction__bar-fill" style="width: {{ faction_rep.pct }}%"></div>
+  </div>
+  <p class="portal-card__subtitle portal-card__fine-print">
+    {% if faction_rep.at_max %}Maximum standing reached.{% else %}{{ faction_rep.to_next_display }} standing to rank {{ faction_rep.next_rank }}.{% endif %}
+  </p>
+</article>
+{% endif %}
+
+{# Specialization tracks: level per track + keystone progress (Landsraad-gated
+   progression, separate from character XP). Hidden when no data. #}
+{% if specializations and specializations.tracks %}
+<article class="portal-card portal-spec">
+  <h2 class="portal-card__title">Specialization tracks</h2>
+  <p class="portal-card__subtitle">
+    <strong>{{ specializations.keystones_owned }}</strong> of {{ specializations.keystones_total }}
+    specialization traits unlocked across your five tracks.
+  </p>
+  <ul class="portal-spec__list">
+    {% for t in specializations.tracks %}
+    <li class="portal-spec__track">
+      <div class="portal-spec__head">
+        <span class="portal-spec__name">{% if t.icon %}<img class="portal-spec__icon" src="/admin/static/img/stats/{{ t.icon }}.png" alt="" aria-hidden="true" width="18" height="18">{% endif %}{{ t.name }}</span>
+        <span class="portal-spec__lvl mono">Lv {{ t.level }}<span class="portal-spec__cap"> / {{ specializations.level_cap }}</span></span>
+      </div>
+      <div class="portal-spec__bar" role="progressbar" aria-valuenow="{{ t.level }}" aria-valuemin="0" aria-valuemax="{{ specializations.level_cap }}" aria-label="{{ t.name }} level">
+        <div class="portal-spec__bar-fill" style="width: {{ t.pct }}%"></div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</article>
+{% endif %}
+
+{% if journey %}
+<article class="portal-card portal-journey">
+  <h2 class="portal-card__title">Journey &amp; exploration</h2>
+  <p class="portal-card__subtitle">
+    <strong>{{ journey.arcs_completed }}</strong> story journey{{ '' if journey.arcs_completed == 1 else 's' }} completed.
+  </p>
+  {% if journey.arc_names %}
+  <ul class="portal-journey__arcs">
+    {% for a in journey.arc_names %}
+    <li class="portal-journey__arc">{{ a }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <div class="portal-journey__stats">
+    <div class="portal-journey__stat">
+      <span class="portal-journey__num mono">{{ journey.poi_total }}</span>
+      <span class="portal-journey__lbl">Points of interest</span>
+    </div>
+    <div class="portal-journey__stat">
+      <span class="portal-journey__num mono">{{ journey.big_moments_count }}</span>
+      <span class="portal-journey__lbl">Big moment{{ '' if journey.big_moments_count == 1 else 's' }}</span>
+    </div>
+    <div class="portal-journey__stat">
+      <span class="portal-journey__num mono">{{ journey.codex_count }}</span>
+      <span class="portal-journey__lbl">Codex entr{{ 'y' if journey.codex_count == 1 else 'ies' }}</span>
+    </div>
+  </div>
+</article>
+{% endif %}
+
+{# Landsraad rewards + storage share a row on desktop, stack on mobile. #}
+<div class="portal-row">
+  {% if landsraad_teaser %}
+  <article class="portal-card portal-landsraad-teaser">
+    <h2 class="portal-card__title">Landsraad rewards</h2>
+    <p class="portal-card__subtitle">
+      You have <strong>{{ landsraad_teaser.total_lines }}</strong> reward{{ '' if landsraad_teaser.total_lines == 1 else 's' }}
+      waiting at the house reps{% if landsraad_teaser.total_solari_display != '0' %},
+      including <span class="mono">{{ landsraad_teaser.total_solari_display }}</span> Solari{% endif %}{% if landsraad_teaser.schematic_lines %}
+      and {{ landsraad_teaser.schematic_lines }} schematic{{ '' if landsraad_teaser.schematic_lines == 1 else 's' }}{% endif %}.
+    </p>
+    <a href="/portal/landsraad" class="portal-btn portal-btn--ghost portal-btn--sm">View all rewards →</a>
+  </article>
+  {% endif %}
+
+  <article class="portal-card">
+    <h2 class="portal-card__title">Your storage</h2>
+    <p class="portal-card__subtitle">
+      Browse the chests and storage containers you have placed, and see what is inside each one.
+    </p>
+    <a href="/portal/containers" class="portal-btn portal-btn--ghost portal-btn--sm">View your storage →</a>
+  </article>
+
+  <article class="portal-card">
+    <h2 class="portal-card__title">CHOAM Exchange</h2>
+    <p class="portal-card__subtitle">
+      Browse what is for sale on the live exchange right now — search by item or pick a category.
+    </p>
+    <a href="/portal/market" class="portal-btn portal-btn--ghost portal-btn--sm">Browse the exchange →</a>
+  </article>
+</div>
+
+{# Deep Desert spice map card removed 2026-06-04 pending the active-field signal
+   work; route + spice_fields/spice.html kept dormant for restore. #}
+
+{% if linked_characters and linked_characters | length > 1 %}
+<article class="portal-card">
+  <h2 class="portal-card__title">Your linked characters</h2>
+  <p class="portal-card__subtitle">
+    These are all the characters linked to your Discord account. Switching between them ships in v1.1.
+  </p>
+  <ul class="portal-link-list">
+    {% for link in linked_characters %}
+    <li class="portal-link-list__item {% if link.is_active %}portal-link-list__item--active{% endif %}">
+      <div>
+        <div class="portal-link-list__name">{{ link.character_name }}</div>
+        <div class="portal-link-list__since">Linked {{ link.linked_at }}</div>
+      </div>
+      {% if link.is_active %}
+        <span class="portal-link-list__since">Active</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</article>
+{% endif %}
+
+{# Account link management: re-point this Discord link to a different / current
+   character (e.g. after a character transfer), or unlink entirely. Relink
+   re-runs the same ownership quiz; it never binds a character you don't own.
+   Both forms post with the session CSRF token (hydrated by portal.js) and gate
+   on a confirm() dialog. #}
+<article class="portal-card portal-link-manage">
+  <h2 class="portal-card__title">Account link</h2>
+  <p class="portal-card__subtitle">
+    Your Discord account is linked to <strong>{{ active_character.character_name }}</strong>.
+    Imported or transferred a character, or linked the wrong one? Re-point your
+    link below — you will verify ownership of the new character the same way you
+    did the first time.
+  </p>
+  <div class="portal-link-manage__actions">
+    <form method="post" action="/portal/link/relink" class="portal-link-manage__form"
+          data-portal-csrf-form data-portal-busy-on-submit>
+      <input type="hidden" name="csrf_token" value="{{ portal_csrf_token | default('', true) }}">
+      <button type="submit" class="portal-btn portal-btn--primary portal-btn--sm"
+              data-portal-action="relink"
+              data-portal-confirm="Re-point your Discord link to a different character? You will need to find your character and pass the identity quiz again.">
+        Link a different character
+      </button>
+    </form>
+    <form method="post" action="/portal/link/unlink" class="portal-link-manage__form"
+          data-portal-csrf-form data-portal-busy-on-submit>
+      <input type="hidden" name="csrf_token" value="{{ portal_csrf_token | default('', true) }}">
+      <button type="submit" class="portal-btn portal-btn--ghost portal-btn--sm"
+              data-portal-action="unlink"
+              data-portal-confirm="Unlink your Discord account from this character? You will be signed out and can link again at any time.">
+        Unlink this account
+      </button>
+    </form>
+  </div>
+</article>
+
+{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/admin/static/css/portal/portal-solido.css?v=20260629b">
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/portal-character.js?v=20260622d" defer></script>
+{% endblock %}

@@ -1,0 +1,17 @@
+{# Context: request, title, message, back_url #}
+{% extends "portal/base.html" %}
+
+{% block title %}{{ title | default('Discord sign-in cancelled', true) }} — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+<article class="portal-card">
+  <div class="portal-error">
+    <div class="portal-error__icon" aria-hidden="true">↺</div>
+    <h1 class="portal-error__title">{{ title | default('Discord sign-in cancelled', true) }}</h1>
+    <p class="portal-error__body">
+      {{ message | default('You declined the Discord login or Discord rejected the request. Please try again.', true) }}
+    </p>
+    <a href="{{ back_url | default('/portal/', true) }}" class="portal-btn portal-btn--primary">Try again</a>
+  </div>
+</article>
+{% endblock %}

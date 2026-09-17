@@ -1,0 +1,145 @@
+{# Context contract (architect P3c-EXECUTION-BRIEF §4):
+   container_items = {
+     available, account_id, container_id,
+     items: [{id, template_id, name, stack_size, quality, cur_dur, max_dur}],
+     count, total_count, page, page_size,
+     stale?: bool, error?: str
+   }
+   Also expects `account_id` and `container_id` in context (route fills both).
+#}
+{% set payload = container_items if container_items is defined else {} %}
+{% set rows = payload.get('items', []) if payload else [] %}
+{% set available = payload.get('available', False) if payload else False %}
+{% set container_id = payload.get('container_id', container_id if container_id is defined else '') %}
+{% set page = payload.get('page', 1) if payload else 1 %}
+{% set page_size = payload.get('page_size', 100) if payload else 100 %}
+{% set total = payload.get('total_count', rows|length) if payload else 0 %}
+{% set total_pages = ((total + page_size - 1) // page_size) if total else 1 %}
+{% set stale = payload.get('stale', False) if payload else False %}
+{% set err = payload.get('error', '') if payload else '' %}
+
+<div class="v2-player-container-items">
+
+  <div class="msg warning" role="note">
+    Read-only view. Last Sietch never modifies chest contents from this panel. Items added/removed are RAM-fragile and clobber on game-pod restart.
+  </div>
+
+  {% if not available %}
+    <div class="empty-state empty-state--loading-failed">
+      <p class="empty-state__headline">Items unavailable</p>
+      <p class="empty-state__body">
+        {% if err == 'not_owned' %}
+          This container is not owned by account #{{ account_id }}.
+        {% else %}
+          The relay couldn't reach the game-side items helper. Try again in a moment.
+        {% endif %}
+      </p>
+      {% if err != 'not_owned' %}
+        <div class="empty-state__actions">
+          <button type="button" class="btn btn-sm"
+                  hx-get="/admin/api/dune/v2/player/{{ account_id }}/_container/{{ container_id }}/_items"
+                  hx-target="#v2-container-items-pane"
+                  hx-swap="innerHTML"
+                  hx-indicator="#v2-container-items-loading">Retry</button>
+        </div>
+      {% endif %}
+    </div>
+  {% elif rows %}
+    <div class="v2-player-container-items__header">
+      <h3 class="v2-player-container-items__title">
+        Container #{{ container_id }}
+        {% if stale %}<span class="v2-player-container-items__stale" title="Served from cache; relay is slow">cached</span>{% endif %}
+      </h3>
+      <div class="v2-player-container-items__subtitle">
+        {{ total }} item{{ '' if total == 1 else 's' }}{% if total_pages > 1 %} · page {{ page }} of {{ total_pages }}{% endif %}
+      </div>
+    </div>
+
+    <div class="v2-player-container-items__filter-row">
+      <input type="search" class="v2-items-filter" autocomplete="off"
+             placeholder="Search items on this page…" aria-label="Search items">
+      <span class="v2-items-filter-count" aria-live="polite"></span>
+    </div>
+
+    <div style="overflow-x: auto;">
+      <table class="table table--compact table--dense">
+        <thead>
+          <tr>
+            <th scope="col">ID</th>
+            <th scope="col">Template</th>
+            <th scope="col" class="v2-player-container-items__num">Stack</th>
+            <th scope="col" class="v2-player-container-items__num">Quality</th>
+            <th scope="col" class="v2-player-container-items__num">Durability</th>
+            <th scope="col" class="v2-player-container-items__action" aria-label="Actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for it in rows %}
+            <tr data-filter="{{ ((it.name or '') ~ ' ' ~ (it.template_id or ''))|lower }}">
+              <td class="v2-player-container-items__id">{{ it.id }}</td>
+              <td>
+                {% if it.name %}
+                  {{ it.name }}
+                {% else %}
+                  <span class="v2-player-container-items__template-fallback">{{ it.template_id or '—' }}</span>
+                {% endif %}
+              </td>
+              <td class="v2-player-container-items__num">{{ it.stack_size if it.stack_size is not none else '—' }}</td>
+              <td class="v2-player-container-items__num">
+                {% if it.quality is not none %}
+                  <span class="quality-pip quality-tier-{{ it.quality }}" title="Quality {{ it.quality }}">{{ it.quality }}</span>
+                {% else %}—{% endif %}
+              </td>
+              <td class="v2-player-container-items__num">
+                {% if it.cur_dur or it.max_dur %}
+                  {% set cur = it.cur_dur | int if it.cur_dur else 0 %}
+                  {% set mx = it.max_dur | int if it.max_dur else 0 %}
+                  {% set pct = ((cur / mx * 100) | round(0, 'floor') | int) if mx else 0 %}
+                  <span class="dura-wrap" title="{{ it.cur_dur or '?' }} / {{ it.max_dur or '?' }}">
+                    <span class="dura-bar"><span class="dura-bar__fill{% if pct < 25 %} dura-bar__fill--low{% elif pct < 60 %} dura-bar__fill--mid{% endif %}" style="width: {{ pct }}%"></span></span>
+                    <span class="dura-text">{{ it.cur_dur or '?' }}/{{ it.max_dur or '?' }}</span>
+                  </span>
+                {% else %}—{% endif %}
+              </td>
+              <td class="v2-player-container-items__action">
+                {# Order 0: surface "Export" affordance inline for blueprint
+                   devices. Container-items endpoint doesn't carry bp_id, so
+                   the link routes to the Export subtab's picker instead of
+                   a direct download. #}
+                {% if it.template_id == 'BuildingBlueprint_CopyDevice' %}
+                  <a class="btn btn-xs btn-link"
+                     href="/admin/v2/players/{{ account_id }}?tab=export"
+                     title="Open the Export subtab to download this blueprint as Solido JSON">→ Export</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if total_pages > 1 %}
+      <nav class="pagination" aria-label="Container items pagination">
+        <button type="button" class="btn btn-sm"
+                {% if page <= 1 %}disabled{% endif %}
+                hx-get="/admin/api/dune/v2/player/{{ account_id }}/_container/{{ container_id }}/_items?page={{ page - 1 }}"
+                hx-target="#v2-container-items-pane"
+                hx-swap="innerHTML"
+                hx-indicator="#v2-container-items-loading">Previous</button>
+        <span class="pagination__total">Page {{ page }} of {{ total_pages }} · {{ total }} items</span>
+        <button type="button" class="btn btn-sm"
+                {% if page >= total_pages %}disabled{% endif %}
+                hx-get="/admin/api/dune/v2/player/{{ account_id }}/_container/{{ container_id }}/_items?page={{ page + 1 }}"
+                hx-target="#v2-container-items-pane"
+                hx-swap="innerHTML"
+                hx-indicator="#v2-container-items-loading">Next</button>
+      </nav>
+    {% endif %}
+  {% else %}
+    <div class="empty-state empty-state--zero-results">
+      <p class="empty-state__headline">Container is empty</p>
+      <p class="empty-state__body">Container #{{ container_id }} holds no items.</p>
+    </div>
+  {% endif %}
+
+</div>

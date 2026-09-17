@@ -1,0 +1,29 @@
+{% set rows = roster if roster is defined else (initial_roster if initial_roster is defined else []) %}
+{% if roster_available is defined and not roster_available %}
+  {# The roster comes over the relay. An empty table and an unreachable feed
+     look identical once the rows are gone, and only one of them means nobody is
+     playing. #}
+  <tr class="v2-roster__row v2-roster__row--stale">
+    <td colspan="4" class="v2-roster__unavailable">
+      Roster feed unreachable. Who is online is unknown right now, not zero.
+    </td>
+  </tr>
+{% elif rows %}
+  {% for p in rows %}
+    {% set is_online = p.online or p.is_online or (p.status == 'online') %}
+    <tr class="v2-roster__row {% if is_online %}v2-roster__row--online{% endif %}">
+      <td>
+        <span class="status-badge {% if is_online %}status-badge--online{% else %}status-badge--offline{% endif %}"
+              aria-label="{{ 'online' if is_online else 'offline' }}">
+          <span class="status-dot" aria-hidden="true"></span>
+          {{ 'online' if is_online else 'offline' }}
+        </span>
+      </td>
+      <td class="v2-roster__name">{{ p.character_name or p.name or p.username or '-' }}</td>
+      <td>{{ p.map or p.world or '-' }}</td>
+      <td>{{ p.faction or '-' }}</td>
+    </tr>
+  {% endfor %}
+{% else %}
+  <tr><td colspan="4" class="empty-state empty-state--inline">No players in roster.</td></tr>
+{% endif %}

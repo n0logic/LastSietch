@@ -1,0 +1,7 @@
+{# Systems & Health tab sub-tabs. Filename kept as server_subnav.html: it is the
+   server-health nav, and ops/deploy-session-20260611.sh ships this exact path.
+   Active state comes from `nav_path` (set in base.html). #}
+<nav class="v2-subnav" aria-label="Systems and Health sub-tabs">
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/systems') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/systems">Health</a>
+  <a class="v2-subnav__tab{% if nav_path == '/v2/server' or nav_path.startswith('/v2/server/monitor') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/server/monitor">Monitor</a>
+</nav>

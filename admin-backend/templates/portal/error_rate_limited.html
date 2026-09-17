@@ -1,0 +1,25 @@
+{# Context: request, title, message, retry_after_seconds, back_url #}
+{% extends "portal/base.html" %}
+
+{% block title %}{{ title | default('Too many requests', true) }} — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+<article class="portal-card">
+  <div class="portal-error">
+    <div class="portal-error__icon" aria-hidden="true">⌛</div>
+    <h1 class="portal-error__title">{{ title | default('Too many requests', true) }}</h1>
+    <p class="portal-error__body">
+      {{ message | default('Please slow down and try again shortly.', true) }}
+    </p>
+    {% if retry_after_seconds %}
+    <div class="portal-error__countdown" aria-live="polite"
+         data-portal-countdown-seconds="{{ retry_after_seconds }}">
+      Try again in <span data-portal-countdown-label>{{ retry_after_seconds }}s</span>.
+    </div>
+    {% endif %}
+    <p class="portal-error__body portal-error__back">
+      <a href="{{ back_url | default('/portal/', true) }}">Back to the start</a>
+    </p>
+  </div>
+</article>
+{% endblock %}

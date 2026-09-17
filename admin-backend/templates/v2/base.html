@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Admin v2{% endblock %} · Last Sietch Admin</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon.ico">
+{# One font request for the whole panel. Saira Condensed is the display face
+   (--font-display): systems.css claimed it was loaded here and it was not, so
+   only Live Map, which loaded it per page, ever rendered in it. #}
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=JetBrains+Mono:wght@400;700&family=Saira+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+{# The admin edge sends no Cache-Control, so the ?v= key IS the cache bust, and
+   an asset with no key at all can never be busted. Every /admin/static asset
+   loaded here carries one; bump the key in the same commit as the content. #}
+<link rel="stylesheet" href="/admin/static/css/design-system.css?v=20260904a">
+{% block extra_css %}{% endblock %}
+<script src="/admin/static/vendor/htmx.min.js?v=20260904a" defer></script>
+<script src="/admin/static/js/time-local.js?v=20260610e" defer></script>
+<script src="/admin/static/js/v2-shell.js?v=20260904a" defer></script>
+<script src="/admin/static/js/v2-actions.js?v=20260612a" defer></script>
+</head>
+<body class="admin-page admin-v2">
+
+{# Six-tab IA, per docs/dune-research/admin-panel/ADMIN-WAVE1-PLAN-2026-09-03.md §5.
+   The highlight is derived from the request PATH, not from `current_tab`: nine
+   routers set that key and only two of them are in this change, so a key-based
+   highlight would go stale on any page whose router was not edited (and did,
+   for the drilldown). The path is the one signal every page already agrees on.
+   nginx serves the app under /admin and strips the prefix; the strip below only
+   matters if it is ever mounted with the prefix intact. #}
+{% set nav_path = request.url.path if request else '' %}
+{% set nav_path = nav_path[6:] if nav_path.startswith('/admin/') else nav_path %}
+{% set nav_tab =
+     'players' if nav_path.startswith('/v2/players') or nav_path.startswith('/v2/social')
+                  or nav_path.startswith('/v2/server/chat')
+     else 'economy' if nav_path.startswith('/v2/economy') or nav_path.startswith('/v2/server/market')
+                       or nav_path.startswith('/v2/portal/karum')
+     else 'world' if nav_path.startswith('/v2/world') or nav_path.startswith('/v2/server/cvars')
+     else 'systems' if nav_path.startswith('/v2/systems') or nav_path.startswith('/v2/server')
+     else 'admin' if nav_path.startswith('/v2/audit') or nav_path.startswith('/v2/portal')
+     else 'overview' if nav_path.startswith('/v2/overview')
+     else '' %}
+
+<header class="v2-header">
+  <div class="v2-header__chrome">
+    <span class="v2-header__env v2-header__env--{{ env|default('prod') }}">{{ env|default('prod') }}</span>
+    <span class="v2-header__title">root@sietch:~/admin</span>
+  </div>
+  <nav class="v2-nav" aria-label="Admin sections">
+    <a href="/admin/v2/overview" id="nav-v2-overview" class="v2-nav__tab{% if nav_tab == 'overview' %} v2-nav__tab--active{% endif %}"{% if nav_tab == 'overview' %} aria-current="page"{% endif %}>Overview</a>
+    <a href="/admin/v2/players" id="nav-v2-players" class="v2-nav__tab{% if nav_tab == 'players' %} v2-nav__tab--active{% endif %}"{% if nav_tab == 'players' %} aria-current="page"{% endif %}>Players</a>
+    <a href="/admin/v2/server/market" id="nav-v2-economy" class="v2-nav__tab{% if nav_tab == 'economy' %} v2-nav__tab--active{% endif %}"{% if nav_tab == 'economy' %} aria-current="page"{% endif %}>Economy</a>
+    <a href="/admin/v2/world/map" id="nav-v2-world" class="v2-nav__tab{% if nav_tab == 'world' %} v2-nav__tab--active{% endif %}"{% if nav_tab == 'world' %} aria-current="page"{% endif %}>World &amp; Maps</a>
+    <a href="/admin/v2/systems" id="nav-v2-systems" class="v2-nav__tab{% if nav_tab == 'systems' %} v2-nav__tab--active{% endif %}"{% if nav_tab == 'systems' %} aria-current="page"{% endif %}>Systems &amp; Health</a>
+    <a href="/admin/users" id="nav-v2-admin" class="v2-nav__tab{% if nav_tab == 'admin' %} v2-nav__tab--active{% endif %}"{% if nav_tab == 'admin' %} aria-current="page"{% endif %}>Admin</a>
+  </nav>
+  <div class="v2-header__user">
+    {% include "v2/_includes/header_user_menu.html" %}
+  </div>
+</header>
+
+{% block subnav %}
+  {% if nav_tab == 'players' %}
+    {% include "v2/_includes/players_subnav.html" %}
+  {% elif nav_tab == 'economy' %}
+    {% include "v2/_includes/economy_subnav.html" %}
+  {% elif nav_tab == 'world' %}
+    {% include "v2/_includes/world_subnav.html" %}
+  {% elif nav_tab == 'systems' %}
+    {% include "v2/_includes/server_subnav.html" %}
+  {% elif nav_tab == 'admin' %}
+    {% include "v2/_includes/portal_subnav.html" %}
+  {% endif %}
+{% endblock %}
+
+{% block player_picker %}{% endblock %}
+
+{% block content %}{% endblock %}
+
+<!-- Confirmation Dialog -->
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-dialog">
+    <p id="confirm-message">Are you sure?</p>
+    <div class="btn-group">
+      <button class="btn btn-accent" id="confirm-yes">Confirm</button>
+      <button class="btn" onclick="closeConfirm()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Password Prompt Dialog -->
+<div class="confirm-overlay" id="password-overlay">
+  <div class="confirm-dialog" style="text-align: left;">
+    <p id="password-message" style="text-align: center;">Enter new password</p>
+    <div class="form-group">
+      <input type="password" id="password-input" placeholder="New password (16+ characters)">
+    </div>
+    <div class="btn-group" style="justify-content: center;">
+      <button class="btn btn-accent" id="password-confirm">Set Password</button>
+      <button class="btn" onclick="closePasswordPrompt()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Typed-token confirmation (window.v2ConfirmTyped in v2-shell.js).
+     The destructive idiom: the operator has to type the token, so a live
+     server-wide send cannot be a reflex click. Markup lives here because it is
+     shared; the behaviour lives in v2-shell.js beside showConfirm. -->
+<div class="confirm-overlay" id="typed-confirm-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="typed-confirm-title" aria-describedby="typed-confirm-body">
+  <div class="confirm-dialog confirm-dialog--typed">
+    <h2 class="confirm-dialog__title" id="typed-confirm-title">Confirm</h2>
+    <p id="typed-confirm-body"></p>
+    <div class="form-group">
+      <label class="form-label" for="typed-confirm-input">
+        Type <code id="typed-confirm-token"></code> to confirm
+      </label>
+      <input type="text" id="typed-confirm-input" autocomplete="off"
+             autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="btn-group">
+      <button type="button" class="btn btn-destructive" id="typed-confirm-yes" disabled>Confirm</button>
+      <button type="button" class="btn" id="typed-confirm-no">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+<script>
+var csrfToken = '';
+
+function fetchCsrf() {
+  return fetch('/admin/api/auth/csrf', { credentials: 'same-origin' })
+    .then(function(r) {
+      if (r.status === 401) { window.location = '/admin/login'; throw new Error('Unauthorized'); }
+      return r.json();
+    })
+    .then(function(d) { csrfToken = d.token; });
+}
+
+function apiCall(method, path, body) {
+  return fetch(path, {
+    method: method,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': csrfToken
+    },
+    credentials: 'same-origin',
+    body: body ? JSON.stringify(body) : undefined
+  }).then(function(r) {
+    if (r.status === 401) { window.location = '/admin/login'; throw new Error('Unauthorized'); }
+    return r.json().then(function(data) {
+      if (r.ok) return data;
+      var err = new Error(data.detail || 'Request failed');
+      err.status = r.status;
+      throw err;
+    });
+  });
+}
+
+function doLogout() {
+  apiCall('POST', '/admin/api/auth/logout').then(function() {
+    window.location = '/admin/login';
+  }).catch(function() {
+    window.location = '/admin/login';
+  });
+}
+
+var pendingConfirmCallback = null;
+
+function showConfirm(message, callback) {
+  pendingConfirmCallback = callback;
+  document.getElementById('confirm-message').textContent = message;
+  document.getElementById('confirm-overlay').classList.add('active');
+  document.getElementById('confirm-yes').onclick = function() {
+    var cb = pendingConfirmCallback;
+    closeConfirm();
+    if (cb) cb();
+  };
+}
+
+function closeConfirm() {
+  document.getElementById('confirm-overlay').classList.remove('active');
+  pendingConfirmCallback = null;
+}
+
+var pendingPasswordCallback = null;
+
+function showPasswordPrompt(message, callback) {
+  pendingPasswordCallback = callback;
+  document.getElementById('password-message').textContent = message;
+  document.getElementById('password-input').value = '';
+  document.getElementById('password-overlay').classList.add('active');
+  document.getElementById('password-input').focus();
+  document.getElementById('password-confirm').onclick = function() {
+    var pw = document.getElementById('password-input').value;
+    if (pw.length < 16) {
+      alert('Password must be at least 16 characters');
+      return;
+    }
+    var cb = pendingPasswordCallback;
+    closePasswordPrompt();
+    if (cb) cb(pw);
+  };
+  document.getElementById('password-input').onkeydown = function(e) {
+    if (e.key === 'Enter') document.getElementById('password-confirm').click();
+  };
+}
+
+function closePasswordPrompt() {
+  document.getElementById('password-overlay').classList.remove('active');
+  pendingPasswordCallback = null;
+}
+
+function showMsg(id, text, type) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'msg ' + type;
+}
+
+function hideMsg(id) {
+  var el = document.getElementById(id);
+  if (el) { el.className = 'msg'; el.textContent = ''; }
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    closeConfirm();
+    closePasswordPrompt();
+  }
+});
+
+function getCookie(name) {
+  var m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function setGameCookie(game) {
+  document.cookie = 'ls_game=' + encodeURIComponent(game) + '; path=/admin; max-age=31536000; SameSite=Lax';
+}
+
+fetchCsrf();
+</script>
+
+{% block scripts %}{% endblock %}
+
+</body>
+</html>

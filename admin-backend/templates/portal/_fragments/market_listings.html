@@ -1,0 +1,71 @@
+{# CHOAM exchange browse/search results — GET /portal/market/search?q=&sort=&category=&page=
+   Rendered into #market-results by portal-market.js. Rows are buttons that open
+   the item price-ladder drawer. Paged: page 1 renders the full panel; page>1
+   (results.append) renders ONLY the <li> rows + a meta node the JS reads to
+   update the Load-more button.
+   Context:
+     results = {available, items[], item_count, total_items, sort, category,
+                page, has_more, append, browse_unavailable?, invalid?, error?}
+       items: [{template_id, name, icon, listing_count, total_qty,
+                total_qty_display, price_display, has_npc, has_player}]
+     query, sort, category
+#}
+{% macro row(it) %}
+<li>
+  <button type="button" class="market-row market-row--button{% if it.is_schematic %} market-row--schematic{% endif %}" data-market-tpl="{{ it.template_id }}"
+          aria-label="View listings for {{ it.name }}{% if it.is_schematic %} (schematic){% endif %}">
+    <span class="cont-item__icon-wrap{% if it.is_schematic %} cont-item__icon-wrap--schematic{% endif %}">
+      <img class="cont-item__icon" loading="lazy" alt="" data-icon-fallback
+           src="/admin/static/img/dune-icons/{{ it.icon }}.png">
+      {% if it.max_quality %}<span class="cont-item__grade quality-tier-{{ it.max_quality }}" title="Listings include upgraded gear up to quality tier {{ it.max_quality }} — higher tiers cost more, which is why the price range is wide">{{ it.max_quality }}</span>{% endif %}
+    </span>
+    <span class="market-row__name">{{ it.name }}</span>
+    <span class="market-row__badges">
+      {% if it.is_schematic %}<span class="market-badge market-badge--schematic" title="An imperial permit to fabricate this item — a blueprint you learn, not the physical item">Schematic</span>{% endif %}
+      {% if it.has_npc %}<span class="market-badge market-badge--npc" title="Sold by the server market-maker">NPC</span>{% endif %}
+      {% if it.has_player %}<span class="market-badge market-badge--player" title="Sold by a player">Player</span>{% endif %}
+      {% if it.bot_buy_display %}<span class="market-badge market-badge--botbuy" title="The market-maker auto-buys this item at or below this per-unit price">Bot pays ≤ {{ it.bot_buy_display }}</span>{% endif %}
+    </span>
+    <span class="market-row__listings mono">{{ it.listing_count }} listing{{ '' if it.listing_count == 1 else 's' }}</span>
+    <span class="market-row__qty mono" title="Total quantity on offer">×{{ it.total_qty_display }}</span>
+    <span class="market-row__price mono" title="Price in Solari (lowest{% if ' – ' in it.price_display %}–highest{% endif %})">{{ it.price_display }}<img class="market-solari-ico" src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true"></span>
+    <span class="market-row__chevron" aria-hidden="true">›</span>
+  </button>
+</li>
+{% endmacro %}
+
+{% set res = results if results is defined else {} %}
+{% if res.get('append') %}
+  {# Load-more page: just the rows + a meta node for the JS. #}
+  {% for it in res['items'] %}{{ row(it) }}{% endfor %}
+  <div class="market-loadmore-meta" data-has-more="{{ 'true' if res.get('has_more') else 'false' }}"
+       data-next-page="{{ (res.get('page') or 1) + 1 }}" hidden></div>
+{% elif res.get('invalid') %}
+  <p class="cont-search__hint">Search using letters, digits, “_” or “-” only.</p>
+{% elif res.get('browse_unavailable') %}
+  <p class="cont-search__hint">Type at least 2 characters to search the exchange.</p>
+{% elif res.get('error') or not res.get('available') %}
+  <div class="portal-msg portal-msg--warning" role="status">
+    The exchange is temporarily unavailable. Please try again in a moment.
+  </div>
+{% elif not res.get('items') %}
+  <p class="cont-search__hint">
+    {% if query %}No items match “{{ query }}”.{% elif category and category != 'all' %}No items in this category right now.{% else %}No listings on the exchange right now.{% endif %}
+  </p>
+{% else %}
+  <p class="cont-search__count">
+    {% if query %}
+      {{ res.total_items }} item{{ '' if res.total_items == 1 else 's' }} matching “{{ query }}”
+    {% else %}
+      {{ res.total_items }} item{{ '' if res.total_items == 1 else 's' }}
+    {% endif %}
+  </p>
+  <ul class="market-list" id="market-list" role="list">
+    {% for it in res['items'] %}{{ row(it) }}{% endfor %}
+  </ul>
+  {% if res.get('has_more') %}
+  <button type="button" class="portal-btn portal-btn--ghost market-loadmore"
+          data-next-page="{{ (res.get('page') or 1) + 1 }}" data-has-more="true">Load more</button>
+  {% endif %}
+  <p class="cont-search__hint">Prices in Solari. Listings refresh about once a minute. Buying is done in-game for now.</p>
+{% endif %}

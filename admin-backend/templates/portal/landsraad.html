@@ -1,0 +1,283 @@
+{# Landsraad — GET /portal/landsraad
+   Two sections:
+     1. LIVE TERM BOARD (public, term-global)  -> ctx.board (routers/portal.py
+        _shape_landsraad_board): {available, term, tiles[], rails[],
+        winner_history[], contested, decided, voting_power_display}
+     2. YOUR REWARDS (session-scoped, re-homed below) -> ctx.rewards
+        (_shape_landsraad_for_render): {available, summary, houses[], board[]}
+   portal_session, portal_csrf_token from base_ctx.
+#}
+{% extends "portal/base.html" %}
+{% set active_nav = "landsraad" %}
+
+{% block title %}Landsraad — Last Sietch Dune Portal{% endblock %}
+
+{% macro faction_rail(rail, voting_power_display) %}
+<aside class="lb-rail lb-rail--{{ rail.slug }}" aria-label="House {{ rail.name }}">
+  <div class="lb-rail__crest">
+    {% if rail.crest %}
+    <img src="/admin/static/img/factions/{{ rail.crest }}.png" alt="" aria-hidden="true" width="56" height="56" loading="lazy">
+    {% else %}
+    <span class="lb-rail__crest-fallback" aria-hidden="true">{{ rail.name[:1] }}</span>
+    {% endif %}
+  </div>
+  <p class="lb-rail__name">House {{ rail.name }}</p>
+  <p class="lb-rail__score mono" aria-label="{{ rail.score }} houses won">{{ rail.score }}</p>
+  <p class="lb-rail__score-label">houses won</p>
+
+  {% if rail.top_guilds %}
+  <div class="lb-rail__contrib">
+    <p class="lb-rail__contrib-head">Top contributors</p>
+    <ol class="lb-rail__guilds">
+      {# Names only — contribution amounts hidden per owner decision 2026-06-12
+         (matches the in-game Top Contributors presentation). #}
+      {% for g in rail.top_guilds %}
+      <li class="lb-rail__guild">
+        <span class="lb-rail__guild-name">{{ g.guild }}</span>
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
+  {% endif %}
+
+  {% if voting_power_display %}
+  <div class="lb-rail__vp">
+    <span class="lb-rail__vp-label">Your voting power</span>
+    <span class="lb-rail__vp-val mono">{{ voting_power_display }}</span>
+  </div>
+  {% endif %}
+</aside>
+{% endmacro %}
+
+{% block content %}
+
+<nav class="portal-breadcrumb" aria-label="Breadcrumb">
+</nav>
+
+<section class="portal-hero portal-hero--landsraad" aria-label="Landsraad">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Last Sietch</span>
+    <p class="portal-hero__title">The Landsraad</p>
+    <p class="portal-hero__sub">
+      Live great-house standings this term — and the rewards waiting for
+      <strong>{{ active_character_name }}</strong> at each house rep.
+    </p>
+  </div>
+</section>
+
+{# ============================ LIVE TERM BOARD ============================ #}
+{% if board and board.available %}
+<article class="portal-card lb">
+  <header class="lb__head">
+    <div class="lb__termline">
+      <h2 class="portal-card__title">
+        Term {{ board.term.term_id }}{% if board.term.test_term %} <span class="lb__testtag">test</span>{% endif %}
+      </h2>
+      {% if board.term.end_utc %}
+      <div class="lb__countdown" data-end-utc="{{ board.term.end_utc }}">
+        <span class="lb__countdown-label">Term ends in</span>
+        <span class="lb__countdown-val mono" id="lb-countdown" aria-live="off">—</span>
+        <time class="lb__countdown-abs" data-utc="{{ board.term.end_utc }}"></time>
+      </div>
+      {% endif %}
+    </div>
+    <p class="portal-card__subtitle">
+      <strong>{{ board.decided }}</strong> of 25 houses decided ·
+      <strong>{{ board.contested }}</strong> still contested.
+      Both great houses race each tile to its goal — first to the goal claims the house.
+    </p>
+  </header>
+
+  <div class="lb__layout">
+    {{ faction_rail(board.rails[0], board.voting_power_display) }}
+
+    <div class="lb-board" role="list" aria-label="Landsraad houses (5 by 5)">
+      {% for t in board.tiles %}
+      <button type="button" role="listitem"
+              class="lb-tile{% if t.winner %} lb-tile--decided lb-tile--{{ t.winner.slug }}{% else %} lb-tile--contested{% endif %}{% if t.sysselraad %} lb-tile--sysselraad{% endif %}"
+              data-tile-index="{{ loop.index0 }}"
+              aria-label="{{ t.name }}{% if t.winner %} — won by House {{ t.winner.name }}{% else %} — contested{% endif %}">
+        {% if t.winner %}<span class="lb-tile__flag" aria-hidden="true"></span>{% endif %}
+        {% if t.sysselraad %}<span class="lb-tile__syss" aria-hidden="true" title="Sysselraad line">◆</span>{% endif %}
+        {% if t.crest %}
+        <img class="lb-tile__crest" src="/admin/static/img/houses/{{ t.crest }}.png" alt="" aria-hidden="true" loading="lazy" width="40" height="40">
+        {% else %}
+        <span class="lb-tile__sigil" aria-hidden="true">{{ t.monogram }}</span>
+        {% endif %}
+        <span class="lb-tile__name">{{ t.short }}</span>
+        <span class="lb-tile__bars" aria-hidden="true">
+          {% for f in t.factions %}
+          <span class="lb-tile__bar lb-tile__bar--{{ f.slug }}{% if f.leading %} is-leading{% endif %}">
+            <span class="lb-tile__bar-fill" style="width: {{ f.pct }}%"></span>
+          </span>
+          {% endfor %}
+        </span>
+      </button>
+      {% endfor %}
+    </div>
+
+    {{ faction_rail(board.rails[1], None) }}
+  </div>
+
+  {% if board.winner_history %}
+  <p class="lb__history">
+    <span class="lb__history-label">Recent terms:</span>
+    {% for slug in board.winner_history %}<span class="lb__history-dot lb__history-dot--{{ slug }}" title="{{ slug|capitalize }}"></span>{% endfor %}
+  </p>
+  {% endif %}
+</article>
+
+{# Data island (CSP-safe: type=application/json is not executed). #}
+<script type="application/json" id="lb-board-data">{{ board.tiles | tojson }}</script>
+
+{# Tile detail drawer (slides in on click; works on all devices). #}
+<div id="lb-drawer-overlay" class="lb-drawer-overlay" hidden></div>
+<aside id="lb-drawer" class="lb-drawer" role="dialog" aria-modal="true" aria-labelledby="lb-drawer-title" hidden>
+  <header class="lb-drawer__header">
+    <h2 id="lb-drawer-title" class="lb-drawer__title">House</h2>
+    <button type="button" id="lb-drawer-close" class="lb-drawer__close" aria-label="Close">×</button>
+  </header>
+  <div id="lb-drawer-body" class="lb-drawer__body"></div>
+</aside>
+
+{% elif board is not none %}
+<article class="portal-card">
+  <div class="portal-msg portal-msg--warning" role="status">
+    The live Landsraad board is temporarily unavailable. Your rewards still load below.
+  </div>
+</article>
+{% endif %}
+
+{# ============================ YOUR REWARDS ============================== #}
+<h2 class="portal-section-title">Your rewards</h2>
+
+{% if rewards_error or rewards is none or not rewards.available %}
+<article class="portal-card">
+  <div class="portal-msg portal-msg--warning" role="status">
+    Live reward data is temporarily unavailable. Please refresh in a minute.
+  </div>
+</article>
+{% elif rewards.summary.total_lines == 0 %}
+<article class="portal-card">
+  <div class="portal-msg portal-msg--info" role="status">
+    No unclaimed Landsraad rewards right now. Complete Landsraad contracts to earn them,
+    then collect at the house reps.
+  </div>
+</article>
+{% else %}
+
+<article class="portal-card">
+  <h2 class="portal-card__title">Summary</h2>
+  <div class="portal-dash__stats">
+    <div class="portal-stat">
+      <span class="portal-stat__label">Solari waiting</span>
+      <span class="portal-stat__value">{{ rewards.summary.total_solari_display }}</span>
+    </div>
+    <div class="portal-stat">
+      <span class="portal-stat__label">Schematics</span>
+      <span class="portal-stat__value">{{ rewards.summary.schematic_lines }}</span>
+    </div>
+    {% if rewards.summary.swatch_lines %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">Swatches</span>
+      <span class="portal-stat__value">{{ rewards.summary.swatch_lines }}</span>
+    </div>
+    {% endif %}
+    {% if rewards.summary.other_lines %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">Other items</span>
+      <span class="portal-stat__value">{{ rewards.summary.other_lines }}</span>
+    </div>
+    {% endif %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">Houses</span>
+      <span class="portal-stat__value">{{ rewards.summary.houses_with_rewards }}</span>
+    </div>
+    {% if rewards.summary.oldest_days is not none %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">Oldest reward</span>
+      <span class="portal-stat__value">
+        {% if rewards.summary.oldest_days == 0 %}today{% else %}{{ rewards.summary.oldest_days }}d ago{% endif %}
+      </span>
+    </div>
+    {% endif %}
+  </div>
+</article>
+
+<article class="portal-card">
+  <h2 class="portal-card__title">Your rewards by house</h2>
+  <p class="portal-card__subtitle">
+    {{ rewards.summary.total_lines }} reward{{ '' if rewards.summary.total_lines == 1 else 's' }}
+    waiting across {{ rewards.summary.houses_with_rewards }}
+    house{{ '' if rewards.summary.houses_with_rewards == 1 else 's' }}.
+    Highlighted houses have rewards to collect. Hover a house for a quick look, or select it for the full list.
+  </p>
+
+  <div class="ls-board" role="list" aria-label="Landsraad houses">
+    {% for h in rewards.board %}
+    <button type="button" role="listitem"
+            class="ls-tile{% if h.has_rewards %} ls-tile--rewards{% else %} ls-tile--empty{% endif %}"
+            data-house-index="{{ loop.index0 }}"
+            aria-label="{{ h.name }}{% if h.has_rewards %}, {{ h.reward_count }} reward{{ '' if h.reward_count == 1 else 's' }} waiting{% else %}, no rewards{% endif %}">
+      {% if h.has_rewards %}<span class="ls-tile__badge" aria-hidden="true">{{ h.reward_count }}</span>{% endif %}
+      {% if h.crest %}
+      <img class="ls-tile__crest" src="/admin/static/img/houses/{{ h.crest }}.png" alt="" aria-hidden="true" loading="lazy" width="48" height="48">
+      {% else %}
+      <span class="ls-tile__sigil" aria-hidden="true">{{ h.monogram }}</span>
+      {% endif %}
+      <span class="ls-tile__name">{{ h.short }}</span>
+    </button>
+    {% endfor %}
+  </div>
+</article>
+
+{# Data island (CSP-safe: type=application/json is not executed). The portal
+   landsraad script reads this to build the hover tooltip + detail drawer. #}
+<script type="application/json" id="ls-board-data">{{ rewards.board | tojson }}</script>
+
+{# Hover tooltip (desktop quick-peek) — positioned + filled by the script. #}
+<div id="ls-tooltip" class="ls-tooltip" role="tooltip" hidden></div>
+
+{# Detail drawer (slides in on click; works on all devices). #}
+<div id="ls-drawer-overlay" class="ls-drawer-overlay" hidden></div>
+<aside id="ls-drawer" class="ls-drawer" role="dialog" aria-modal="true" aria-labelledby="ls-drawer-title" hidden>
+  <header class="ls-drawer__header">
+    <h2 id="ls-drawer-title" class="ls-drawer__title">House</h2>
+    <button type="button" id="ls-drawer-close" class="ls-drawer__close" aria-label="Close">×</button>
+  </header>
+  <div id="ls-drawer-body" class="ls-drawer__body"></div>
+</aside>
+
+<noscript>
+  <article class="portal-card">
+    <h2 class="portal-card__title">By house</h2>
+    {% for h in rewards.board if h.has_rewards %}
+    <details class="portal-landsraad__house">
+      <summary class="portal-landsraad__house-summary">
+        <span class="portal-landsraad__house-head">
+          <span class="portal-landsraad__house-name">{{ h.name }}</span>
+          {% if h.rep_location %}<span class="portal-landsraad__house-rep">{{ h.rep_location }}</span>{% endif %}
+        </span>
+        <span class="portal-landsraad__house-meta">
+          {% if h.solari_display %}<span class="portal-landsraad__solari mono">{{ h.solari_display }} Solari</span>{% endif %}
+        </span>
+      </summary>
+      <ul class="portal-landsraad__items">
+        {% if h.solari_display %}<li class="portal-landsraad__item portal-landsraad__item--solari"><span class="portal-landsraad__item-name">Solari</span><span class="portal-landsraad__item-amount mono">{{ h.solari_display }}</span></li>{% endif %}
+        {% for item in h['items'] %}
+        <li class="portal-landsraad__item"><span class="portal-landsraad__item-name">{{ item.name }}</span>{% if item.amount and item.amount > 1 %}<span class="portal-landsraad__item-amount mono">×{{ item.amount }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endfor %}
+  </article>
+</noscript>
+
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/portal-landsraad.js" defer></script>
+<script src="/admin/static/js/portal-landsraad-board.js?v=20260612a" defer></script>
+{% endblock %}

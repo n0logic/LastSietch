@@ -1,0 +1,186 @@
+{# My Orders — GET /portal/my-orders
+   Context (from routers/portal.py portal_my_orders):
+     active_character_name: str
+     orders = {available, error?, active[], completed[], history[],
+               active_count, completed_count, history_count}
+       active item  : {order_id, revision, template_id, name, icon, price,
+                       price_display, qty, total_display, quality}
+       completed itm: + {completion_type, status_label, status_sub}
+       history item : {template_id, name, icon, price_display, qty,
+                       total_display, status_label, completion_type, bot_trade,
+                       logged_at}
+     portal_session, portal_csrf_token (base_ctx)
+   Read-only mirror of the in-game CHOAM "My Orders" panel. Cancel/Relist land
+   here in a follow-up.
+#}
+{% extends "portal/base.html" %}
+{% set active_nav = "orders" %}
+
+{% block title %}My Orders — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+
+<section class="portal-hero portal-hero--orders" aria-label="My Orders">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Last Sietch</span>
+    <p class="portal-hero__title">My Orders</p>
+    <p class="portal-hero__sub">Your active CHOAM listings, your Completed tab, and recent trades.</p>
+  </div>
+</section>
+
+{% if orders.error or not orders.available %}
+<article class="portal-card">
+  <div class="portal-msg portal-msg--warning" role="status">
+    {% if orders.error == 'no_character' %}
+      We couldn't find a character for your account yet. Log into the server once, then check back.
+    {% else %}
+      Your orders are temporarily unavailable. Please try again in a moment.
+    {% endif %}
+  </div>
+</article>
+{% else %}
+
+<article class="portal-card" data-orders-csrf="{{ portal_csrf_token | default('', true) }}">
+  <div id="orders-msg" class="orders-msg" role="status" aria-live="polite" hidden></div>
+  <div class="orders-tabs" role="tablist" aria-label="Order views">
+    <button type="button" class="orders-tab orders-tab--active" role="tab" aria-selected="true"
+            data-orders-tab="active">Active <span class="orders-tab__count">{{ orders.active_count }}</span></button>
+    <button type="button" class="orders-tab" role="tab" aria-selected="false"
+            data-orders-tab="completed">Completed <span class="orders-tab__count">{{ orders.completed_count }}</span></button>
+    <button type="button" class="orders-tab" role="tab" aria-selected="false"
+            data-orders-tab="history">History <span class="orders-tab__count">{{ orders.history_count }}</span></button>
+  </div>
+
+  {# ---- ACTIVE listings ---- #}
+  <div class="orders-panel" data-orders-panel="active">
+    {% if orders.active %}
+    <ul class="orders-list" role="list">
+      {% for o in orders.active %}
+      <li class="orders-row">
+        <span class="cont-item__icon-wrap">
+          <img class="cont-item__icon" loading="lazy" alt="" data-icon-fallback
+               src="/admin/static/img/dune-icons/{{ o.icon }}.png">
+        </span>
+        <span class="orders-row__name">{{ o.name }}{% if o.quality %}<span class="orders-row__q" title="Quality">Q{{ o.quality }}</span>{% endif %}</span>
+        <span class="orders-row__qty mono" title="Quantity listed">×{{ o.qty }}</span>
+        <span class="orders-row__price mono" title="Price per unit">{{ o.price_display }}<img class="market-solari-ico" src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true"> ea</span>
+        <span class="orders-row__total mono" title="Total ask">{{ o.total_display }}<img class="market-solari-ico" src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true"></span>
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm orders-row__action"
+                data-order-cancel data-order-id="{{ o.order_id }}" data-order-rev="{{ o.revision }}"
+                data-order-name="{{ o.name }}" aria-label="Cancel listing for {{ o.name }}">Cancel</button>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="cont-search__hint">Canceling forfeits the listing fee and moves the item to your Completed tab, where you can relist it.</p>
+    {% else %}
+    <p class="cont-search__hint">You have no active listings on the exchange.</p>
+    {% endif %}
+  </div>
+
+  {# ---- COMPLETED tab ---- #}
+  <div class="orders-panel" data-orders-panel="completed" hidden>
+    {% if orders.completed %}
+    <ul class="orders-list" role="list">
+      {% for o in orders.completed %}
+      <li class="orders-row">
+        <span class="cont-item__icon-wrap">
+          <img class="cont-item__icon" loading="lazy" alt="" data-icon-fallback
+               src="/admin/static/img/dune-icons/{{ o.icon }}.png">
+        </span>
+        <span class="orders-row__name">{{ o.name }}
+          <span class="orders-status orders-status--ct{{ o.completion_type }}">{{ o.status_label }}</span>
+          {% if o.status_sub %}<span class="orders-row__sub">{{ o.status_sub }}</span>{% endif %}
+        </span>
+        <span class="orders-row__qty mono" title="Quantity">×{{ o.qty }}</span>
+        <span class="orders-row__total mono" title="Price per unit">{{ o.price_display }}<img class="market-solari-ico" src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true"> ea</span>
+        {% if o.completion_type == 3 %}
+        <button type="button" class="portal-btn portal-btn--primary portal-btn--sm orders-row__action"
+                data-order-relist data-order-id="{{ o.order_id }}" data-order-rev="{{ o.revision }}"
+                data-order-name="{{ o.name }}" data-order-price="{{ o.price }}"
+                aria-label="Relist {{ o.name }}">Relist</button>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="cont-search__hint">Relist a canceled item below, or pick up purchases and claim sale proceeds from the in-game exchange terminal.</p>
+    {% else %}
+    <p class="cont-search__hint">Your Completed tab is empty.</p>
+    {% endif %}
+  </div>
+
+  {# ---- HISTORY ---- #}
+  <div class="orders-panel" data-orders-panel="history" hidden>
+    {% if orders.history %}
+    <ul class="orders-list" role="list">
+      {% for h in orders.history %}
+      <li class="orders-row">
+        <span class="cont-item__icon-wrap">
+          <img class="cont-item__icon" loading="lazy" alt="" data-icon-fallback
+               src="/admin/static/img/dune-icons/{{ h.icon }}.png">
+        </span>
+        <span class="orders-row__name">{{ h.name }}
+          <span class="orders-status orders-status--ct{{ h.completion_type }}">{{ h.status_label }}</span>
+          {% if h.bot_trade %}<span class="market-badge market-badge--npc" title="Traded with the server market-maker">NPC</span>{% endif %}
+        </span>
+        <span class="orders-row__qty mono" title="Quantity">×{{ h.qty }}</span>
+        <span class="orders-row__total mono" title="Total">{{ h.total_display }}<img class="market-solari-ico" src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true"></span>
+        {% if h.logged_at %}<span class="orders-row__when mono" title="{{ h.logged_at }}">{{ h.logged_at[:10] }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="cont-search__hint">No recent trades yet.</p>
+    {% endif %}
+  </div>
+</article>
+
+{# Relist modal — opened by portal-my-orders.js from a Relist button on a canceled
+   Completed row. POSTs order_id + revision + price + duration to /portal/my-orders/relist. #}
+<div id="relist-modal-overlay" class="ls-modal-overlay" hidden></div>
+<aside id="relist-modal" class="ls-modal" role="dialog" aria-modal="true" aria-labelledby="relist-modal-title" hidden>
+  <header class="ls-modal__header">
+    <h2 id="relist-modal-title" class="ls-modal__title">Relist <span data-relist-name>item</span></h2>
+    <button type="button" id="relist-modal-close" class="ls-modal__close" aria-label="Close">×</button>
+  </header>
+  <div class="ls-modal__body">
+    <label class="sell-modal__field">
+      <span class="sell-modal__label">Price per unit</span>
+      <input type="number" class="cont-search__input" min="1" step="1" inputmode="numeric"
+             data-relist-price aria-label="Price per unit in Solari">
+    </label>
+    <div class="sell-modal__field">
+      <span class="sell-modal__label">Duration</span>
+      <div class="sell-modal__durations" role="group" aria-label="Listing duration">
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm sell-modal__dur" data-relist-dur="1">1 day</button>
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm sell-modal__dur" data-relist-dur="3">3 days</button>
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm sell-modal__dur sell-modal__dur--active" data-relist-dur="7">7 days</button>
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm sell-modal__dur" data-relist-dur="14">14 days</button>
+      </div>
+    </div>
+    <p class="sell-modal__summary">
+      Listing fee: <span class="mono" data-relist-fee>0</span><img class="market-solari-ico" src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true">
+      <span class="sell-modal__from">(from your bank Solari)</span>
+    </p>
+    <p class="sell-modal__msg" id="relist-msg" role="status" aria-live="polite"></p>
+    <div class="sell-modal__actions">
+      <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm" id="relist-cancel">Cancel</button>
+      <button type="button" class="portal-btn portal-btn--primary portal-btn--sm" id="relist-confirm">Relist</button>
+    </div>
+    <div id="relist-result"></div>
+  </div>
+</aside>
+
+<noscript>
+  <article class="portal-card">
+    <div class="portal-msg portal-msg--info" role="status">
+      Enable JavaScript to switch between Active, Completed, and History.
+    </div>
+  </article>
+</noscript>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/portal-my-orders.js?v=20260607" defer></script>
+{% endblock %}

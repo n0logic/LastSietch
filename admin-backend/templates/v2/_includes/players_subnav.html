@@ -1,0 +1,16 @@
+{# Players tab sub-tabs. Active state comes from `nav_path` (set in base.html),
+   not from `current_sub_tab`: the routers behind Bans/Backups/Claims/Grants are
+   not all in this change, and a key nobody updates goes quietly wrong. #}
+<nav class="v2-subnav" aria-label="Players sub-tabs">
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/players/search') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/players/search">Search</a>
+  {% if account_id %}
+  <a class="v2-subnav__tab v2-subnav__tab--active" href="/admin/v2/players/{{ account_id }}">Drilldown</a>
+  {% endif %}
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/players/bans') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/players/bans">Bans</a>
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/players/bases') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/players/bases">Backups</a>
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/players/vault') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/players/vault"{% if nav_path.startswith('/v2/players/vault') %} aria-current="page"{% endif %}>Base Vault</a>
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/players/claims') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/players/claims">Claims</a>
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/players/grants') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/players/grants">Grant Bench</a>
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/social') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/social">Social</a>
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/server/chat') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/server/chat">Chat</a>
+</nav>

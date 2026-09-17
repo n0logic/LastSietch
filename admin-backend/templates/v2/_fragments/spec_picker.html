@@ -1,0 +1,82 @@
+{# Specializations grant picker modal body. Loaded into #wb-picker-body by
+   workbench.js when the "Specializations" tile (opens="spec_picker") is clicked.
+   Pushes custom cart lines: spec_xp / keystone / spec_unlock_track / spec_unlock_all.
+   No grant fires here. #}
+<div class="v2-picker" data-picker="spec" data-aid="{{ aid if aid is not none else '' }}">
+
+  <div class="v2-picker__hd">
+    <h3 class="v2-picker__title">Specializations Grant Picker</h3>
+    <button type="button" class="v2-picker__close" data-action="picker-close"
+            aria-label="close">x</button>
+  </div>
+
+  <div class="msg warning v2-picker__offline">
+    OFFLINE REQUIRED for trait/keystone grants: they write FLevelComponent and are
+    RAM-fragile. Writing while the player is online will be clobbered on the next
+    pawn flush (DD/PvP rezone or pod restart). The server also rejects online
+    targets. Track XP (Max / Set) is online-safe. Verify recipients are offline.
+  </div>
+
+  {% if not state_available %}
+  <div class="msg info v2-picker__statehint">
+    No single-player context: track levels and owned-trait state show "--". The
+    picker still works; add lines and fire as usual.
+  </div>
+  {% endif %}
+
+  <div class="v2-picker__tabs" role="tablist">
+    {% for tr in tracks %}
+    <button type="button"
+            class="v2-picker__tab{% if tr.key == default_track %} is-active{% endif %}"
+            role="tab"
+            data-action="spec-track-tab"
+            data-track="{{ tr.key }}"
+            hx-get="/admin/v2/players/grants/_spec_traits?track={{ tr.key }}{% if aid is not none %}&aid={{ aid }}{% endif %}"
+            hx-target="#spec-traits-mount"
+            hx-swap="innerHTML">
+      {{ tr.label }}
+      <span class="v2-picker__tab-lvl">LVL {{ tr.level if tr.level is not none else '--' }}</span>
+    </button>
+    {% endfor %}
+  </div>
+
+  <div id="spec-traits-mount">
+    {% include "v2/_fragments/_spec_traits.html" %}
+  </div>
+
+  <div class="v2-picker__bulk">
+    <button type="button" class="btn btn-sm" data-action="spec-unlock-all">
+      Unlock all 205 traits (all 5 tracks)
+    </button>
+  </div>
+
+  {# Reset (reset_specs; offline-only, destructive). E3: a single track only
+     DELETEs specialization_tracks (XP/level); "all" also clears purchased
+     keystones via reset_specialization_tracks. #}
+  <div class="v2-spec-section v2-picker__reset">
+    <div class="v2-spec-section__hd">Reset Specializations</div>
+    <div class="v2-spec-xp__manual">
+      <label class="v2-spec-xp__field">
+        <span>Scope</span>
+        <select id="spec-reset-track">
+          <option value="all">All specs (XP + traits)</option>
+          {% for tr in tracks %}
+          <option value="{{ tr.key }}">{{ tr.label }} (track XP/level only)</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="button" class="btn btn-sm btn-stop" data-action="spec-reset">
+        Reset specializations
+      </button>
+    </div>
+    <p class="v2-spec-xp__note">
+      Destructive. "All specs" clears track XP/level AND purchased keystones; a
+      single track clears only that track's XP/level (keystones stay).
+    </p>
+  </div>
+
+  <div class="v2-picker__ft">
+    <span class="v2-picker__cartcount" data-picker-cartcount>Cart: 0 lines</span>
+    <button type="button" class="btn btn-accent" data-action="picker-close">Done</button>
+  </div>
+</div>

@@ -1,0 +1,74 @@
+{# Per-job skill block list + grant/reset actions. Swapped into #skill-blocks-mount
+   by the school tabs. Block ids come ONLY from tags-data.json job_skill_blocks
+   (E1): 3 Skills.Key.<Job>1/2/3 modules + 3 FLAT Skills.Key.Capstone*. Learned
+   state renders only when state_available; otherwise "--" and rows stay addable
+   (grants are idempotent). #}
+<div class="v2-skill-blocks"
+     data-job="{{ job }}"
+     data-job-label="{{ job_label }}"
+     data-state-available="{{ '1' if state_available else '0' }}">
+
+  <div class="v2-skill-blocks__hd">
+    <span class="v2-skill-blocks__job">{{ job_label }}</span>
+    <span class="v2-skill-blocks__state">
+      {% if state_available %}{{ learned_count }} / {{ block_total }} learned{% else %}--{% endif %}
+    </span>
+  </div>
+
+  <div class="v2-spec-section">
+    <div class="v2-spec-section__hd">Grant Full Tree</div>
+    <button type="button" class="btn btn-sm btn-accent"
+            data-action="skill-full-tree"
+            data-job="{{ job }}" data-job-label="{{ job_label }}">
+      Grant full {{ job_label }} tree
+    </button>
+    <p class="v2-spec-xp__note">
+      Unlocks all 6 {{ job_label }} blocks (3 modules + 3 capstones). Bypasses
+      in-game adjacency and avoids the placeholder SpSpent:0 bug.
+    </p>
+  </div>
+
+  <div class="v2-spec-section">
+    <div class="v2-spec-section__hd">Individual Blocks</div>
+    <ul class="v2-skill-list">
+      {% for b in blocks %}
+      <li class="v2-skill-item{% if b.learned %} is-learned{% endif %}"
+          data-block="{{ b.block }}" data-label="{{ b.label }}">
+        <span class="v2-skill-item__state">
+          {% if not state_available %}<span class="v2-spec-state v2-spec-state--unknown">--</span>
+          {% elif b.learned %}<span class="v2-spec-state v2-spec-state--owned">learned</span>
+          {% else %}<span class="v2-spec-state v2-spec-state--avail">not learned</span>{% endif %}
+        </span>
+        <span class="v2-skill-item__label">
+          {{ b.label }}{% if b.is_capstone %} <span class="v2-skill-item__tag">capstone</span>{% endif %}
+          <code class="v2-skill-item__id">{{ b.block }}</code>
+        </span>
+        <button type="button" class="btn btn-xs v2-skill-add"
+                data-action="skill-block-add"
+                data-block="{{ b.block }}" data-label="{{ b.label }}">+ add</button>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div class="v2-spec-section">
+    <div class="v2-spec-section__hd">Reset</div>
+    <button type="button" class="btn btn-sm btn-stop"
+            data-action="skill-reset"
+            data-job="{{ job }}" data-job-label="{{ job_label }}">
+      Reset {{ job_label }} tree
+    </button>
+    <p class="v2-spec-xp__note">
+      Destructive: nukes all {{ job_label }} ModuleData. The backend refuses if
+      {{ job_label }} is the player's starter class (guard active).
+    </p>
+  </div>
+
+  <div class="v2-spec-section">
+    <div class="v2-spec-section__hd">Starter Class</div>
+    <button type="button" class="btn btn-sm btn-ghost" disabled
+            title="set_starter_class is disabled: actor-31 wipe pattern unvalidated">
+      Set {{ job_label }} as starter class (disabled)
+    </button>
+  </div>
+</div>

@@ -1,0 +1,14 @@
+{# WITHDRAW / DEPOSIT result — POST /portal/storage/{withdraw,deposit}
+   Rendered into the Storage Manager transfer result slot by portal-storage.js.
+   Context: ok (bool), message (str), bank_display (str|None) #}
+<div class="market-buy-result {{ 'market-buy-result--ok' if ok else 'market-buy-result--err' }}"
+     role="status" aria-live="polite">
+  <p class="market-buy-result__msg">{{ message }}</p>
+  {% if ok and bank_display %}
+  <p class="market-buy-result__bank">
+    Bank balance:
+    <span class="mono">{{ bank_display }}</span><img class="market-solari-ico"
+         src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true">
+  </p>
+  {% endif %}
+</div>

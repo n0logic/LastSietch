@@ -1,0 +1,36 @@
+{# VC4 Leaderboards — weekly PvP / Deaths / Pilots top-N tables.
+   Data source: aggregator d.leaderboards.{week,pvp,deaths,pilots}.
+   JS hydrator: renderLeaderboardsFromAgg (top-N slice client-side; the
+   telemetry-api returns the full ranked list per board). #}
+<div class="monitor-panel span-12" id="panel-leaderboards" data-source="leaderboard_pvp,leaderboard_deaths,leaderboard_pilots">
+  <div class="monitor-panel__header">
+    <span class="monitor-panel__title">Leaderboards · <span id="lb-week">current week</span></span>
+    <span class="monitor-panel__indicator" id="panel-leaderboards-indicator"></span>
+  </div>
+  <div class="monitor-panel__body">
+    <div class="lb-grid">
+      <section class="lb-board" aria-labelledby="lb-pvp-title">
+        <h3 class="lb-board__title" id="lb-pvp-title">PvP Champ · kills</h3>
+        <ol class="lb-list" id="lb-pvp-list">
+          <li class="lb-empty" id="lb-pvp-empty">no kills this week</li>
+        </ol>
+      </section>
+      <section class="lb-board" aria-labelledby="lb-deaths-title">
+        <h3 class="lb-board__title" id="lb-deaths-title">Most Deaths · K/D</h3>
+        <ol class="lb-list" id="lb-deaths-list">
+          <li class="lb-empty" id="lb-deaths-empty">no deaths recorded</li>
+        </ol>
+      </section>
+      <section class="lb-board" aria-labelledby="lb-pilots-title">
+        <h3 class="lb-board__title" id="lb-pilots-title">Pilot of the Week · km</h3>
+        <ol class="lb-list" id="lb-pilots-list">
+          <li class="lb-empty" id="lb-pilots-empty">no flights logged</li>
+        </ol>
+      </section>
+    </div>
+  </div>
+  <div class="monitor-panel__footer">
+    <span class="monitor-panel__ts" data-ts="0" id="panel-leaderboards-ts">refreshed —</span>
+    <span class="monitor-panel__stale" id="panel-leaderboards-stale" hidden>leaderboard feed unavailable</span>
+  </div>
+</div>

@@ -1,0 +1,67 @@
+{% set sources = bases.sources if bases.sources is defined else [] %}
+{% set total_actors = bases.total_actors if bases.total_actors is defined else 0 %}
+
+{% if not bases.available %}
+  <div class="empty-state empty-state--loading-failed">
+    <p class="empty-state__headline">Bases unavailable</p>
+    <p class="empty-state__body">The relay couldn't reach the base-backup tables. Try again in a moment.</p>
+    <div class="empty-state__actions">
+      <button type="button" class="btn btn-sm"
+              hx-get="/admin/api/dune/v2/players/_bases"
+              hx-target="#v2-bases-body" hx-swap="innerHTML">Retry</button>
+    </div>
+  </div>
+{% elif sources %}
+  <div class="v2-bases__summary card-title">
+    {{ sources|length }} base backup{{ '' if sources|length == 1 else 's' }}
+    &middot; {{ total_actors }} linked actor{{ '' if total_actors == 1 else 's' }}
+  </div>
+  <div style="overflow-x: auto;">
+    <table class="table table--compact table--zebra v2-bases-table">
+      <thead>
+        <tr>
+          <th scope="col">Base name</th>
+          <th scope="col">Owner</th>
+          <th scope="col">Actors</th>
+          <th scope="col">Totem</th>
+          <th scope="col" class="v2-bases-table__action-col"><span class="sr-only">Detail</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in sources %}
+          <tr class="v2-bases-row"
+              data-search="{{ ((s.name or '') ~ ' ' ~ (s.owner_name or '') ~ ' ' ~ (s.owner_account_id or '') ~ ' ' ~ (s.id or ''))|lower }}">
+            <td class="v2-bases-table__name">
+              {{ s.name or '(unnamed backup)' }}
+              <span class="v2-bases-table__id">#{{ s.id }}</span>
+            </td>
+            <td>
+              {{ s.owner_name or 'Unknown owner' }}
+              {% if s.owner_account_id %}<span class="v2-bases-table__acct">#{{ s.owner_account_id }}</span>{% endif %}
+            </td>
+            <td class="v2-bases-table__count">{{ s.linked_actor_count or 0 }}</td>
+            <td class="v2-bases-table__totem">
+              {% if s.totem_actor_id %}{{ s.totem_actor_id }}{% else %}<span class="v2-bases-table__missing">no totem</span>{% endif %}
+            </td>
+            <td class="v2-bases-table__action-col">
+              <button type="button" class="btn btn-sm" data-bases-open
+                      hx-get="/admin/api/dune/v2/players/bases/{{ s.id }}/_detail"
+                      hx-target="#v2-bases-drawer-body" hx-swap="innerHTML">Details</button>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="empty-state empty-state--zero-results" id="v2-bases-no-match" hidden>
+    <p class="empty-state__headline">No matching bases</p>
+    <p class="empty-state__body">No base backup matches your filter.</p>
+  </div>
+{% else %}
+  <div class="empty-state empty-state--zero-results">
+    <p class="empty-state__headline">No base backups saved</p>
+    <p class="empty-state__body">
+      Saved base backups (from the in-game Base Backup Tool or a G20/G21 grant) will appear here.
+    </p>
+  </div>
+{% endif %}

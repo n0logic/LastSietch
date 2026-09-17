@@ -1,0 +1,399 @@
+{
+  "_meta": {
+    "source": "vehicle_modules counts + dune-give-item-catalog template_ids; RocketAmmo verified in live dune.items",
+    "quality_note": "vehicle parts quality_level 0 (tier-based, no rank)"
+  },
+  "packages": {
+    "buggy_mk6": {
+      "display": "Buggy (Mk6, combat)",
+      "vehicle": "Buggy",
+      "note": "Full Mk6 buggy: chassis, F/R hull, utility rear, engine, PSU, 4 treads, booster, rocket launcher + 250 rockets.",
+      "slots": 13,
+      "items": [
+        {
+          "template_id": "BuggyChassis_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Buggy Chassis Mk6"
+        },
+        {
+          "template_id": "BuggyHullFront_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Buggy Hull Mk6"
+        },
+        {
+          "template_id": "BuggyHullBack_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Buggy Rear Mk6"
+        },
+        {
+          "template_id": "BuggyHullBackExtra_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Buggy Utility Rear Mk6"
+        },
+        {
+          "template_id": "BuggyEngine_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Buggy Engine Mk6"
+        },
+        {
+          "template_id": "BuggyGenerator_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Buggy PSU Mk6"
+        },
+        {
+          "template_id": "BuggyLocomotion_6",
+          "count": 4,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Buggy Tread Mk6"
+        },
+        {
+          "template_id": "BuggyBoost_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Buggy Booster Mk6"
+        },
+        {
+          "template_id": "BuggyLauncher_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Buggy Rocket Launcher Mk6"
+        },
+        {
+          "template_id": "RocketAmmo",
+          "count": 1,
+          "stack_size": 250,
+          "quality": 0,
+          "name": "Rocket"
+        }
+      ]
+    },
+    "scout_ornithopter_mk6": {
+      "display": "Scout Ornithopter (Mk6)",
+      "vehicle": "OrnithopterLight",
+      "note": "Light scout 'thopter: chassis, cockpit, hull, engine, generator, 4 wings, thruster, rocket launcher.",
+      "slots": 11,
+      "items": [
+        {
+          "template_id": "OrnithopterLightChassis_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Scout Ornithopter Chassis Mk6"
+        },
+        {
+          "template_id": "OrnithopterLightHullFront_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Scout Ornithopter Cockpit Mk6"
+        },
+        {
+          "template_id": "OrnithopterLightHullBack_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Scout Ornithopter Hull Mk6"
+        },
+        {
+          "template_id": "OrnithopterLightEngine_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Scout Ornithopter Engine Mk6"
+        },
+        {
+          "template_id": "OrnithopterLightGenerator_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Scout Ornithopter Generator Mk6"
+        },
+        {
+          "template_id": "OrnithopterLightLocomotion_6",
+          "count": 4,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Scout Ornithopter Wing Mk6"
+        },
+        {
+          "template_id": "OrnithopterLightBoost_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Scout Ornithopter Thruster Mk6"
+        },
+        {
+          "template_id": "OrnithopterLightLauncher_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Scout Ornithopter Rocket Launcher Mk6"
+        }
+      ]
+    },
+    "assault_ornithopter_mk6": {
+      "display": "Assault Ornithopter (Mk6)",
+      "vehicle": "OrnithopterMedium",
+      "note": "Medium assault 'thopter: chassis, cockpit, cabin, tail, engine, generator, 6 wings, thruster, rocket launcher.",
+      "slots": 14,
+      "items": [
+        {
+          "template_id": "OrnithopterMediumChassis_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Assault Ornithopter Chassis Mk6"
+        },
+        {
+          "template_id": "OrnithopterMediumHullFront_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Assault Ornithopter Cockpit Mk6"
+        },
+        {
+          "template_id": "OrnithopterMediumHull_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Assault Ornithopter Cabin Mk6"
+        },
+        {
+          "template_id": "OrnithopterMediumHullBack_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Assault Ornithopter Tail Mk6"
+        },
+        {
+          "template_id": "OrnithopterMediumEngine_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Assault Ornithopter Engine Mk6"
+        },
+        {
+          "template_id": "OrnithopterMediumGenerator_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Assault Ornithopter Generator Mk6"
+        },
+        {
+          "template_id": "OrnithopterMediumLocomotion_6",
+          "count": 6,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Assault Ornithopter Wing Mk6"
+        },
+        {
+          "template_id": "OrnithopterMediumBoost_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Assault Ornithopter Thruster Mk6"
+        },
+        {
+          "template_id": "OrnithopterMediumLauncher_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Assault Ornithopter Rocket Launcher Mk6"
+        }
+      ]
+    },
+    "carrier_mk6": {
+      "display": "Carrier Ornithopter (Mk6)",
+      "vehicle": "OrnithopterTransport",
+      "note": "Transport carrier: chassis, main hull, 2 side hull, 2 tail hull, engine, generator, 8 wings, thruster + Carrier Cargo Container.",
+      "slots": 18,
+      "items": [
+        {
+          "template_id": "OrnithopterTransportChassis_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Carrier Ornithopter Chassis Mk6"
+        },
+        {
+          "template_id": "OrnithopterTransportHull_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Carrier Ornithopter Main Hull Mk6"
+        },
+        {
+          "template_id": "OrnithopterTransportHullFront_6",
+          "count": 2,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Carrier Ornithopter Side Hull Mk6"
+        },
+        {
+          "template_id": "OrnithopterTransportHullBack_6",
+          "count": 2,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Carrier Ornithopter Tail Hull Mk6"
+        },
+        {
+          "template_id": "OrnithopterTransportEngine_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Carrier Ornithopter Engine Mk6"
+        },
+        {
+          "template_id": "OrnithopterTransportGenerator_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Carrier Ornithopter Generator Mk6"
+        },
+        {
+          "template_id": "OrnithopterTransportLocomotion_6",
+          "count": 8,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Carrier Ornithopter Wing Mk6"
+        },
+        {
+          "template_id": "OrnithopterTransportBoost_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Carrier Ornithopter Thruster Mk6"
+        },
+        {
+          "template_id": "ContainerVehicle",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Carrier Ornithopter Cargo Container"
+        }
+      ]
+    },
+    "sandbike_mk6": {
+      "display": "Sandbike (Mk6)",
+      "vehicle": "Sandbike",
+      "note": "Sandbike: chassis, hull, engine, PSU, 3 treads, booster.",
+      "slots": 8,
+      "items": [
+        {
+          "template_id": "SandbikeChassis_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandbike Chassis Mk6"
+        },
+        {
+          "template_id": "SandbikeHull_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandbike Hull Mk6"
+        },
+        {
+          "template_id": "SandbikeEngine_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandbike Engine Mk6"
+        },
+        {
+          "template_id": "SandbikeGenerator_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandbike PSU Mk6"
+        },
+        {
+          "template_id": "SandbikeLocomotion_6",
+          "count": 3,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandbike Tread Mk6"
+        },
+        {
+          "template_id": "SandbikeBoost_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandbike Booster Mk6"
+        }
+      ]
+    },
+    "sandcrawler_mk6": {
+      "display": "Sandcrawler (Mk6)",
+      "vehicle": "Sandcrawler",
+      "note": "Sandcrawler harvester: chassis, cabin, engine, PSU, 2 treads, centrifuge, vacuum.",
+      "slots": 8,
+      "items": [
+        {
+          "template_id": "SandcrawlerChassis_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandcrawler Chassis Mk6"
+        },
+        {
+          "template_id": "SandcrawlerHull_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandcrawler Cabin Mk6"
+        },
+        {
+          "template_id": "SandcrawlerEngine_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandcrawler Engine Mk6"
+        },
+        {
+          "template_id": "SandcrawlerGenerator_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandcrawler PSU Mk6"
+        },
+        {
+          "template_id": "SandcrawlerLocomotion_6",
+          "count": 2,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandcrawler Tread Mk6"
+        },
+        {
+          "template_id": "SandcrawlerSpiceContainer_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandcrawler Centrifuge Mk6"
+        },
+        {
+          "template_id": "SandcrawlerSpiceHeader_6",
+          "count": 1,
+          "stack_size": 1,
+          "quality": 0,
+          "name": "Sandcrawler Vacuum Mk6"
+        }
+      ]
+    }
+  }
+}

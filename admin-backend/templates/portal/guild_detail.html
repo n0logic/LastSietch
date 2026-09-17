@@ -1,0 +1,166 @@
+{# Guild detail — GET /portal/guilds/{guild_id}
+   Context (from routers/portal.py portal_guild_detail):
+     active_character_name, guild | None, guild_missing, guilds_error,
+     can_edit: bool, guilds_data, portal_session, portal_csrf_token
+   guild: {guild_id, guild_name, faction_name, faction_slug, member_count,
+     members[{char_name, role_id, role_name}], leaders[], officers[], contacts[],
+     in_game_description, blurb, description, contact_note, recruiting,
+     contrib_overall, contrib_session, rank_overall, rank_session}
+#}
+{% extends "portal/base.html" %}
+{% set active_nav = "guilds" %}
+
+{% block title %}{{ guild.guild_name if guild else "Guild" }} — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+
+<nav class="portal-breadcrumb" aria-label="Breadcrumb">
+  <a href="/portal/guilds" class="portal-breadcrumb__link">&larr; All guilds</a>
+</nav>
+
+{% if guilds_error %}
+<article class="portal-card">
+  <div class="portal-msg portal-msg--warning" role="status">
+    Live guild data is temporarily unavailable. Please refresh in a minute.
+  </div>
+</article>
+{% elif guild_missing or guild is none %}
+<article class="portal-card">
+  <div class="portal-msg portal-msg--info" role="status">
+    That guild could not be found. <a href="/portal/guilds">Back to all guilds</a>.
+  </div>
+</article>
+{% else %}
+
+{% if request.query_params.get('saved') %}
+<div class="portal-msg portal-msg--success" role="status">Recruitment settings saved.</div>
+{% elif request.query_params.get('err') %}
+<div class="portal-msg portal-msg--error" role="status">Could not save. Please try again.</div>
+{% endif %}
+
+<section class="portal-hero gd-faction--{{ guild.faction_slug }}" aria-label="{{ guild.guild_name }}">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">{{ guild.faction_name }}</span>
+    <p class="portal-hero__title">
+      {{ guild.guild_name }}
+      {% if guild.recruiting %}<span class="portal-pill gd-pill--recruiting">Recruiting</span>{% endif %}
+    </p>
+    <p class="portal-hero__sub">
+      {{ guild.member_count }} member{{ '' if guild.member_count == 1 else 's' }}.
+      {% if guild.contrib_overall > 0 %}{{ "{:,}".format(guild.contrib_overall | int) }} Landsraad contributed.{% endif %}
+    </p>
+  </div>
+</section>
+
+{# ---- About ---- #}
+<article class="portal-card">
+  <h2 class="portal-card__title">About</h2>
+  {% if guild.description %}
+  <p class="gd-about">{{ guild.description }}</p>
+  {% else %}
+  <div class="portal-msg portal-msg--info" role="status">
+    This guild hasn't written a description yet.
+  </div>
+  {% endif %}
+</article>
+
+{# ---- How to join / contact (only meaningful when recruiting, but always useful) ---- #}
+<article class="portal-card">
+  <h2 class="portal-card__title">How to join</h2>
+  {% if guild.recruiting %}
+  <p class="portal-card__subtitle">Reach out in-game or on Discord — the actual invite happens in-game.</p>
+  {% else %}
+  <p class="portal-card__subtitle">This guild isn't actively recruiting, but you can still reach out.</p>
+  {% endif %}
+  <div class="portal-dash__stats">
+    {% if guild.contacts %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">Contact in-game</span>
+      <span class="portal-stat__value">{{ guild.contacts | join(", ") }}</span>
+    </div>
+    {% endif %}
+    {% if guild.contact_note %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">More</span>
+      <span class="portal-stat__value">{{ guild.contact_note }}</span>
+    </div>
+    {% endif %}
+  </div>
+</article>
+
+{# ---- Standing ---- #}
+<article class="portal-card">
+  <h2 class="portal-card__title">Landsraad standing</h2>
+  <div class="portal-dash__stats">
+    <div class="portal-stat">
+      <span class="portal-stat__label">Overall rank</span>
+      <span class="portal-stat__value">{% if guild.rank_overall %}#{{ guild.rank_overall }}{% else %}—{% endif %}</span>
+    </div>
+    <div class="portal-stat">
+      <span class="portal-stat__label">Overall contributed</span>
+      <span class="portal-stat__value mono">{{ "{:,}".format(guild.contrib_overall | int) }}</span>
+    </div>
+    <div class="portal-stat">
+      <span class="portal-stat__label">This session rank</span>
+      <span class="portal-stat__value">{% if guild.rank_session %}#{{ guild.rank_session }}{% else %}—{% endif %}</span>
+    </div>
+    <div class="portal-stat">
+      <span class="portal-stat__label">This session</span>
+      <span class="portal-stat__value mono">{{ "{:,}".format(guild.contrib_session | int) }}</span>
+    </div>
+  </div>
+</article>
+
+{# ---- Roster ---- #}
+<article class="portal-card">
+  <h2 class="portal-card__title">Roster</h2>
+  <p class="portal-card__subtitle">Members seen on this server. Some members may not appear until they log in here.</p>
+  <ul class="gd-roster">
+    {% for m in guild.members %}
+    <li class="gd-roster__row">
+      <span class="gd-roster__name">{{ m.char_name or "Unknown" }}</span>
+      <span class="portal-pill gd-pill--role{{ m.role_id }}">{{ m.role_name }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</article>
+
+{# ---- Recruitment editor (Leaders / Officers only) ---- #}
+{% if can_edit %}
+<article class="portal-card gd-editcard">
+  <h2 class="portal-card__title">Manage recruitment</h2>
+  <p class="portal-card__subtitle">
+    You're a Leader/Officer of this guild. Toggle recruiting and write a short pitch — it shows on the
+    recruitment board for every player.
+  </p>
+  <form method="post" action="/portal/guilds/recruiting" class="gd-editform" data-portal-csrf-form>
+    <input type="hidden" name="csrf_token" value="{{ portal_csrf_token | default('', true) }}">
+    <input type="hidden" name="guild_id" value="{{ guild.guild_id }}">
+
+    <label class="gd-editform__toggle">
+      <input type="checkbox" name="recruiting" value="1" {% if guild.recruiting %}checked{% endif %}>
+      <span>List this guild as <strong>recruiting</strong></span>
+    </label>
+
+    <label class="gd-editform__field">
+      <span class="gd-editform__label">About / pitch <span class="gd-editform__hint">(playstyle, RP, timezone — up to 600 chars)</span></span>
+      <textarea name="blurb" rows="4" maxlength="600" class="gd-editform__textarea"
+                placeholder="e.g. Casual PvE + base-building guild, NA evenings. Roleplay-friendly. New players welcome.">{{ guild.blurb }}</textarea>
+    </label>
+
+    <label class="gd-editform__field">
+      <span class="gd-editform__label">Extra contact <span class="gd-editform__hint">(optional — Discord invite, etc.)</span></span>
+      <input type="text" name="contact_note" maxlength="200" class="gd-editform__input"
+             value="{{ guild.contact_note }}" placeholder="discord.gg/yourguild">
+    </label>
+
+    <div class="gd-editform__actions">
+      <button type="submit" class="portal-btn portal-btn--primary" data-portal-action="save-recruiting">Save</button>
+    </div>
+  </form>
+</article>
+{% endif %}
+
+{% endif %}
+
+{% endblock %}

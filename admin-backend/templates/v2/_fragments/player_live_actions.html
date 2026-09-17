@@ -1,0 +1,215 @@
+{# "Live Actions" subtab — drives the NON-destructive native server-command
+   path (give-item / award-xp / teleport / refill-water) at an ONLINE player
+   via POST /admin/api/dune/v2/player/{aid}/_<action>. Each card defaults to
+   dry-run preview; apply requires a typed confirm token. The online flag is
+   advisory (greys the cards out); the publisher refuses Offline --send
+   authoritatively. Destructive verbs are intentionally absent — the relay
+   allow-list does not route them. #}
+{% set la = live_actions if live_actions is defined else {} %}
+{% set is_online = la.is_online if la.is_online is defined else False %}
+{% set player_name = la.player_name if la.player_name is defined else ('account #' ~ account_id) %}
+
+<div class="v2-live-actions"
+     id="v2-live-actions"
+     data-account-id="{{ account_id }}"
+     data-online="{{ '1' if is_online else '0' }}">
+
+  {% if not is_online %}
+    <div class="empty-state empty-state--offline" role="status">
+      <p class="empty-state__headline">{{ player_name }} is offline</p>
+      <p class="empty-state__body">
+        Live actions publish over RMQ to an online player and have no effect while
+        they are offline. Use the offline DB grant (<strong>Grants</strong> tab)
+        instead.
+      </p>
+    </div>
+  {% endif %}
+
+  <div class="v2-live-actions__grid {% if not is_online %}is-disabled{% endif %}"
+       {% if not is_online %}aria-disabled="true"{% endif %}>
+
+    {# ── Rescue teleport ── #}
+    <section class="card v2-live-action" data-action="rescue_teleport" data-confirm="RESCUE">
+      <header class="card__header">
+        <h2 class="card__title">Rescue Teleport</h2>
+        <p class="card__subtitle">Move this player to chosen world coordinates.</p>
+      </header>
+      <div class="card__body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="la-tp-x-{{ account_id }}">X</label>
+            <input type="number" step="any" id="la-tp-x-{{ account_id }}" data-field="x"
+                   autocomplete="off" {% if not is_online %}disabled{% endif %}>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="la-tp-y-{{ account_id }}">Y</label>
+            <input type="number" step="any" id="la-tp-y-{{ account_id }}" data-field="y"
+                   autocomplete="off" {% if not is_online %}disabled{% endif %}>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="la-tp-z-{{ account_id }}">Z</label>
+            <input type="number" step="any" id="la-tp-z-{{ account_id }}" data-field="z"
+                   autocomplete="off" {% if not is_online %}disabled{% endif %}>
+          </div>
+        </div>
+        <label class="form-check">
+          <input type="checkbox" data-field="exact" {% if not is_online %}disabled{% endif %}>
+          Exact coords (skip safe-ground snap)
+        </label>
+        <div class="form-group">
+          <label class="form-label" for="la-tp-reason-{{ account_id }}">Reason</label>
+          <input type="text" id="la-tp-reason-{{ account_id }}" data-field="reason"
+                 maxlength="200" autocomplete="off"
+                 placeholder="Audit reason" {% if not is_online %}disabled{% endif %}>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="la-tp-confirm-{{ account_id }}">Type RESCUE to apply</label>
+          <input type="text" id="la-tp-confirm-{{ account_id }}" data-field="confirm"
+                 spellcheck="false" autocomplete="off"
+                 placeholder="RESCUE" {% if not is_online %}disabled{% endif %}>
+        </div>
+        <div class="v2-live-action__msg msg" data-role="msg"></div>
+        <div class="btn-group">
+          <button type="button" class="btn btn-sm" data-role="dry-run"
+                  {% if not is_online %}disabled{% endif %}>Preview (dry-run)</button>
+          <button type="button" class="btn btn-sm btn-accent" data-role="apply"
+                  {% if not is_online %}disabled{% endif %}>Teleport</button>
+        </div>
+      </div>
+    </section>
+
+    {# ── Give item ── #}
+    <section class="card v2-live-action" data-action="give_item" data-confirm="GIVE">
+      <header class="card__header">
+        <h2 class="card__title">Give Item</h2>
+        <p class="card__subtitle">Spawn an item template into the player's backpack.</p>
+      </header>
+      <div class="card__body">
+        <div class="form-group la-typeahead-group">
+          <label class="form-label" for="la-gi-item-{{ account_id }}">Item template</label>
+          <input type="text" id="la-gi-item-{{ account_id }}" data-field="item"
+                 data-role="item-input" role="combobox" aria-expanded="false"
+                 aria-autocomplete="list" aria-controls="la-gi-results-{{ account_id }}"
+                 maxlength="200" autocomplete="off" spellcheck="false"
+                 placeholder="Search by name, e.g. Granite Stone" {% if not is_online %}disabled{% endif %}>
+          <div class="la-typeahead" id="la-gi-results-{{ account_id }}"
+               data-role="item-results" role="listbox" hidden></div>
+          <p class="la-typeahead__resolved" data-role="item-resolved" hidden></p>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="la-gi-qty-{{ account_id }}">Qty (1–1000)</label>
+            <input type="number" min="1" max="1000" step="1" value="1"
+                   id="la-gi-qty-{{ account_id }}" data-field="qty"
+                   autocomplete="off" {% if not is_online %}disabled{% endif %}>
+            <p class="form-hint" data-role="qty-hint" hidden></p>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="la-gi-dur-{{ account_id }}">Durability (0–1)</label>
+            <input type="number" min="0" max="1" step="0.05" value="1"
+                   id="la-gi-dur-{{ account_id }}" data-field="durability"
+                   autocomplete="off" {% if not is_online %}disabled{% endif %}>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="la-gi-reason-{{ account_id }}">Reason</label>
+          <input type="text" id="la-gi-reason-{{ account_id }}" data-field="reason"
+                 maxlength="200" autocomplete="off"
+                 placeholder="Audit reason" {% if not is_online %}disabled{% endif %}>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="la-gi-confirm-{{ account_id }}">Type GIVE to apply</label>
+          <input type="text" id="la-gi-confirm-{{ account_id }}" data-field="confirm"
+                 spellcheck="false" autocomplete="off"
+                 placeholder="GIVE" {% if not is_online %}disabled{% endif %}>
+        </div>
+        <div class="v2-live-action__msg msg" data-role="msg"></div>
+        <div class="btn-group">
+          <button type="button" class="btn btn-sm" data-role="dry-run"
+                  {% if not is_online %}disabled{% endif %}>Preview (dry-run)</button>
+          <button type="button" class="btn btn-sm btn-accent" data-role="apply"
+                  {% if not is_online %}disabled{% endif %}>Give</button>
+        </div>
+      </div>
+    </section>
+
+    {# ── Award XP ── #}
+    <section class="card v2-live-action" data-action="award_xp" data-confirm="XP">
+      <header class="card__header">
+        <h2 class="card__title">Award XP</h2>
+        <p class="card__subtitle">Grant experience in one progression category.</p>
+      </header>
+      <div class="card__body">
+        <div class="form-group">
+          <label class="form-label" for="la-xp-cat-{{ account_id }}">Category</label>
+          <input type="text" id="la-xp-cat-{{ account_id }}" data-field="category"
+                 value="Combat" maxlength="200" autocomplete="off" spellcheck="false"
+                 placeholder="Combat" {% if not is_online %}disabled{% endif %}>
+          <p class="form-hint">The live server ignores this field — experience applies to
+            character progression regardless. Left as <code>Combat</code> by convention.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="la-xp-exp-{{ account_id }}">Experience (1–10,000,000)</label>
+          <input type="number" min="1" max="10000000" step="1"
+                 id="la-xp-exp-{{ account_id }}" data-field="experience"
+                 autocomplete="off" {% if not is_online %}disabled{% endif %}>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="la-xp-reason-{{ account_id }}">Reason</label>
+          <input type="text" id="la-xp-reason-{{ account_id }}" data-field="reason"
+                 maxlength="200" autocomplete="off"
+                 placeholder="Audit reason" {% if not is_online %}disabled{% endif %}>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="la-xp-confirm-{{ account_id }}">Type XP to apply</label>
+          <input type="text" id="la-xp-confirm-{{ account_id }}" data-field="confirm"
+                 spellcheck="false" autocomplete="off"
+                 placeholder="XP" {% if not is_online %}disabled{% endif %}>
+        </div>
+        <div class="v2-live-action__msg msg" data-role="msg"></div>
+        <div class="btn-group">
+          <button type="button" class="btn btn-sm" data-role="dry-run"
+                  {% if not is_online %}disabled{% endif %}>Preview (dry-run)</button>
+          <button type="button" class="btn btn-sm btn-accent" data-role="apply"
+                  {% if not is_online %}disabled{% endif %}>Award</button>
+        </div>
+      </div>
+    </section>
+
+    {# ── Refill water ── #}
+    <section class="card v2-live-action" data-action="refill_water" data-confirm="WATER">
+      <header class="card__header">
+        <h2 class="card__title">Refill Water</h2>
+        <p class="card__subtitle">Top up the player's water reserve.</p>
+      </header>
+      <div class="card__body">
+        <div class="form-group">
+          <label class="form-label" for="la-wt-amt-{{ account_id }}">Water amount (1–100)</label>
+          <input type="number" min="1" max="100" step="1" value="100"
+                 id="la-wt-amt-{{ account_id }}" data-field="water_amount"
+                 autocomplete="off" {% if not is_online %}disabled{% endif %}>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="la-wt-reason-{{ account_id }}">Reason</label>
+          <input type="text" id="la-wt-reason-{{ account_id }}" data-field="reason"
+                 maxlength="200" autocomplete="off"
+                 placeholder="Audit reason" {% if not is_online %}disabled{% endif %}>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="la-wt-confirm-{{ account_id }}">Type WATER to apply</label>
+          <input type="text" id="la-wt-confirm-{{ account_id }}" data-field="confirm"
+                 spellcheck="false" autocomplete="off"
+                 placeholder="WATER" {% if not is_online %}disabled{% endif %}>
+        </div>
+        <div class="v2-live-action__msg msg" data-role="msg"></div>
+        <div class="btn-group">
+          <button type="button" class="btn btn-sm" data-role="dry-run"
+                  {% if not is_online %}disabled{% endif %}>Preview (dry-run)</button>
+          <button type="button" class="btn btn-sm btn-accent" data-role="apply"
+                  {% if not is_online %}disabled{% endif %}>Refill</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>

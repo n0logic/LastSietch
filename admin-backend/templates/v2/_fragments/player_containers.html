@@ -1,0 +1,92 @@
+{% set payload = containers if containers is defined else {} %}
+{% set rows = payload.containers if payload.containers is defined else [] %}
+{% set count = payload.count if payload.count is defined else (rows|length) %}
+{% set available = payload.available if payload.available is defined else False %}
+
+<div class="v2-player-containers">
+
+  {% if not available %}
+    <div class="empty-state empty-state--loading-failed">
+      <p class="empty-state__headline">Containers unavailable</p>
+      <p class="empty-state__body">The relay couldn't reach the game-side container helper. Try again in a moment.</p>
+      <div class="empty-state__actions">
+        <button type="button" class="btn btn-sm"
+                hx-get="/admin/api/dune/v2/player/{{ account_id }}/_containers"
+                hx-target="#player-subtab-body"
+                hx-swap="innerHTML"
+                hx-indicator="#v2-player-subtab-loading">Retry</button>
+      </div>
+    </div>
+  {% elif rows %}
+    {% set ns = namespace(total=0) %}
+    {% for c in rows %}{% set ns.total = ns.total + (c.item_count or 0) %}{% endfor %}
+    {% set map_count = rows | map(attribute='map') | select | unique | list | length %}
+    <div class="v2-player-containers__summary">
+      <span class="card-title v2-player-containers__count">{{ count }} container{{ '' if count == 1 else 's' }}</span>
+      <span class="v2-player-containers__summary-stat">{{ "{:,}".format(ns.total) }} item{{ '' if ns.total == 1 else 's' }}</span>
+      {% if map_count %}<span class="v2-player-containers__summary-stat">{{ map_count }} map{{ '' if map_count == 1 else 's' }}</span>{% endif %}
+    </div>
+    <div class="v2-player-containers__filter-row">
+      <input type="search" class="v2-container-filter" autocomplete="off"
+             placeholder="Filter by name, class, or map…" aria-label="Filter containers">
+      <span class="v2-container-filter-count" aria-live="polite"></span>
+    </div>
+    <div class="v2-player-containers__layout">
+      <div class="v2-player-containers__master">
+        <div style="overflow-x: auto;">
+          <table class="table table--compact v2-player-containers__table" data-sortable="true">
+            <thead>
+              <tr>
+                <th data-sort-key="id" data-sort-type="number" aria-sort="ascending">
+                  <button type="button" class="v2-player-containers__sort-btn">ID <span class="v2-player-containers__sort-arrow">▲</span></button>
+                </th>
+                <th data-sort-key="name" aria-sort="none">
+                  <button type="button" class="v2-player-containers__sort-btn">Name <span class="v2-player-containers__sort-arrow"></span></button>
+                </th>
+                <th>Class</th>
+                <th>Map</th>
+                <th data-sort-key="items" data-sort-type="number" aria-sort="none">
+                  <button type="button" class="v2-player-containers__sort-btn">Items <span class="v2-player-containers__sort-arrow"></span></button>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in rows %}
+                <tr data-container-id="{{ c.id }}"
+                    tabindex="0"
+                    role="button"
+                    data-filter="{{ ((c.name or '') ~ ' ' ~ (c.label or c.class or '') ~ ' ' ~ (c.map or '') ~ ' ' ~ (c.id|string))|lower }}"
+                    aria-label="View items in container {{ c.name or c.id }}"
+                    hx-get="/admin/api/dune/v2/player/{{ account_id }}/_container/{{ c.id }}/_items"
+                    hx-target="#v2-container-items-pane"
+                    hx-swap="innerHTML"
+                    hx-indicator="#v2-container-items-loading"
+                    hx-trigger="click, keydown[key=='Enter'] from:closest tr">
+                  <td class="v2-player-containers__id" data-sort-id="{{ c.id }}">{{ c.id }}</td>
+                  <td data-sort-name="{{ c.name or '' }}">{{ c.name or '—' }}</td>
+                  <td>{{ c.label or c.class or '—' }}</td>
+                  <td>{{ c.map or '—' }}</td>
+                  <td class="v2-player-containers__items" data-sort-items="{{ c.item_count or 0 }}">{{ c.item_count if c.item_count is not none else 0 }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="v2-player-containers__detail" id="v2-container-items-pane" aria-live="polite">
+        <div class="empty-state">
+          <p class="empty-state__headline">Select a container</p>
+          <p class="empty-state__body">Pick any container on the left to view its contents.</p>
+        </div>
+      </div>
+    </div>
+    <span id="v2-container-items-loading" class="htmx-indicator" aria-live="polite">loading…</span>
+  {% else %}
+    <div class="empty-state empty-state--zero-results">
+      <p class="empty-state__headline">No containers</p>
+      <p class="empty-state__body">Account #{{ account_id }} owns no spice silos or generic containers.</p>
+    </div>
+  {% endif %}
+
+</div>

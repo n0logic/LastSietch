@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — Last Sietch Admin</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon.ico">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin/static/css/design-system.css?v=20260612a">
+<link rel="stylesheet" href="/admin/static/css/v2/landing.css?v=20260611b">
+<script src="/admin/static/js/landing.js" defer></script>
+</head>
+<body class="admin-page">
+
+<header class="v2-landing__header">
+  <div class="v2-landing__brand">
+    <span class="v2-header__env v2-header__env--prod">prod</span>
+    <span class="v2-landing__title">root@sietch:~/admin</span>
+  </div>
+  <div class="v2-header__user">
+    {% include "v2/_includes/header_user_menu.html" %}
+  </div>
+</header>
+
+<main class="v2-landing">
+
+  <!-- Infra card: Proxmox cluster -->
+  <section class="card v2-landing__infra" id="infra-banner" role="region" aria-label="Proxmox Cluster Infrastructure Status">
+    <div class="v2-landing__infra-head">
+      <div class="v2-landing__infra-label">
+        <span class="v2-landing__dot is-healthy" id="infra-dot" role="img" aria-label="Infrastructure status: healthy"></span>
+        Proxmox Cluster
+      </div>
+      <span class="v2-landing__refresh">refreshes every 30s</span>
+    </div>
+
+    <dl class="v2-landing__stats">
+      <div class="v2-landing__stat">
+        <dt>VPS CPU</dt>
+        <dd class="v2-landing__stat-value" id="stat-cpu">---</dd>
+        <span class="v2-landing__stat-sub" id="stat-cpu-free" aria-hidden="true"></span>
+      </div>
+      <div class="v2-landing__stat">
+        <dt>VPS RAM</dt>
+        <dd class="v2-landing__stat-value" id="stat-ram">---</dd>
+        <span class="v2-landing__stat-sub" id="stat-ram-free"></span>
+      </div>
+      <div class="v2-landing__stat">
+        <dt>VPS Storage</dt>
+        <dd class="v2-landing__stat-value" id="stat-disk">---</dd>
+        <span class="v2-landing__stat-sub" id="stat-disk-free"></span>
+      </div>
+      <div class="v2-landing__stat">
+        <dt>VPS Uptime</dt>
+        <dd class="v2-landing__stat-value" id="stat-uptime">---</dd>
+        <span class="v2-landing__stat-sub" aria-hidden="true"></span>
+      </div>
+    </dl>
+
+    <div class="v2-landing__spark" id="infra-spark" data-has-data="false">
+      <svg viewBox="0 0 200 46" preserveAspectRatio="none" aria-hidden="true">
+        <polyline class="v2-landing__spark-fill" id="infra-spark-fill" points=""></polyline>
+        <polyline class="v2-landing__spark-line" id="infra-spark-line" points=""></polyline>
+      </svg>
+      <span class="v2-landing__spark-empty">Collecting CPU history…</span>
+      <span class="v2-landing__spark-label">CPU load · live</span>
+    </div>
+
+    <div class="v2-landing__infra-foot">
+      <span id="infra-vms">VMs Running: ---</span>
+      <span class="v2-landing__infra-loc" id="infra-location">Proxmox</span>
+    </div>
+  </section>
+
+  <!-- Infra card: Dune VPS (k3s) -->
+  <section class="card v2-landing__infra" id="dune-infra-banner" role="region" aria-label="Dune VPS Infrastructure Status">
+    <div class="v2-landing__infra-head">
+      <div class="v2-landing__infra-label">
+        <span class="v2-landing__dot is-healthy" id="dune-infra-dot" role="img" aria-label="Dune VPS status: healthy"></span>
+        Dune VPS
+      </div>
+      <span class="v2-landing__refresh">refreshes every 30s</span>
+    </div>
+
+    <dl class="v2-landing__stats">
+      <div class="v2-landing__stat">
+        <dt>VPS CPU</dt>
+        <dd class="v2-landing__stat-value" id="dune-stat-cpu">---</dd>
+        <span class="v2-landing__stat-sub" id="dune-stat-cpu-free" aria-hidden="true"></span>
+      </div>
+      <div class="v2-landing__stat">
+        <dt>VPS RAM</dt>
+        <dd class="v2-landing__stat-value" id="dune-stat-ram">---</dd>
+        <span class="v2-landing__stat-sub" id="dune-stat-ram-free"></span>
+      </div>
+      <div class="v2-landing__stat">
+        <dt>VPS Storage</dt>
+        <dd class="v2-landing__stat-value" id="dune-stat-disk">---</dd>
+        <span class="v2-landing__stat-sub" id="dune-stat-disk-free"></span>
+      </div>
+      <div class="v2-landing__stat">
+        <dt>VPS Uptime</dt>
+        <dd class="v2-landing__stat-value" id="dune-stat-uptime">---</dd>
+        <span class="v2-landing__stat-sub" aria-hidden="true"></span>
+      </div>
+    </dl>
+
+    <div class="v2-landing__spark" id="dune-spark" data-has-data="false">
+      <svg viewBox="0 0 200 46" preserveAspectRatio="none" aria-hidden="true">
+        <polyline class="v2-landing__spark-fill" id="dune-spark-fill" points=""></polyline>
+        <polyline class="v2-landing__spark-line" id="dune-spark-line" points=""></polyline>
+      </svg>
+      <span class="v2-landing__spark-empty">Collecting CPU history…</span>
+      <span class="v2-landing__spark-label">CPU load · live</span>
+    </div>
+
+    <div class="v2-landing__infra-foot">
+      <span id="dune-infra-pods">Game pods: ---</span>
+      <span class="v2-landing__infra-loc" id="dune-infra-location">Debian / k3s</span>
+    </div>
+  </section>
+
+  <!-- Game cards (injected by landing.js) -->
+  <div class="v2-landing__games" id="game-grid" aria-label="Game Servers"></div>
+
+</main>
+
+</body>
+</html>

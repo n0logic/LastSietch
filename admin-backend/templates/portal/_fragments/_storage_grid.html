@@ -1,0 +1,59 @@
+{# Shared Storage Manager grid macros (imported by storage.html + storage_items.html).
+   storage_grid(rows, max_count): a 5-column slot grid keyed by position_index,
+   sized to max_count (vertical scroll via CSS). Special max_count values:
+     None / older snapshot w/o position_index -> sequential item render
+     -1 (unlimited)                            -> sequential item render
+     0  (no slots)                             -> a "no slots" note
+   To keep the DOM light for very large caps (bank inv30 = 500), empty slots are
+   padded only up to a cap; larger containers render the occupied slot range only
+   (every item still shows at its real slot). Read-only this phase (no drag-drop). #}
+
+{% macro storage_tile(it, slot) %}
+<div class="storage-slot storage-slot--filled" role="listitem" tabindex="0"
+     data-item-id="{{ it.id }}"
+     data-template-id="{{ it.template_id }}"
+     data-name="{{ it.name }}"
+     data-stack="{{ it.stack_size or 1 }}"
+     {% if it.tradeable is defined and not it.tradeable %}data-tradeable="0"{% endif %}
+     data-slot="{{ it.position_index if it.position_index is not none else slot }}"
+     title="{{ it.name }}{% if it.stack_size and it.stack_size > 1 %} ×{{ it.stack_size }}{% endif %}{% if it.quality and it.quality > 0 %} · Q{{ it.quality }}{% endif %}">
+  <span class="storage-slot__thumb">
+    <img class="storage-slot__icon" loading="lazy" alt="" data-icon-fallback
+         src="/admin/static/img/dune-icons/{{ it.icon }}.png">
+    {% if it.stack_size and it.stack_size > 1 %}<span class="storage-slot__qty mono">{{ it.stack_size }}</span>{% endif %}
+    {% if it.quality and it.quality > 0 %}<span class="storage-slot__grade quality-tier-{{ it.quality }}" aria-hidden="true">{{ it.quality }}</span>{% endif %}
+  </span>
+  <span class="storage-slot__name">{{ it.name }}</span>
+</div>
+{% endmacro %}
+
+{% macro storage_grid(rows, max_count) %}
+  {% set rows = rows or [] %}
+  {% set unindexed = rows | selectattr('position_index', 'none') | list | length %}
+  {% set slotted = (max_count is not none and max_count > 0 and unindexed == 0) %}
+  {% if max_count == 0 %}
+    <p class="storage-grid__note">This container holds no item slots.</p>
+  {% elif slotted %}
+    {% set ns = namespace(map={}, last=-1) %}
+    {% for it in rows %}
+      {% set _ = ns.map.update({it.position_index: it}) %}
+      {% if it.position_index > ns.last %}{% set ns.last = it.position_index %}{% endif %}
+    {% endfor %}
+    {% set cap = 60 %}
+    {% set slot_count = max_count if max_count <= cap else (ns.last + 1) %}
+    <div class="storage-grid" role="list" aria-label="Storage slots">
+      {% for i in range(slot_count) %}
+        {% set it = ns.map.get(i) %}
+        {% if it %}{{ storage_tile(it, i) }}{% else %}
+        <div class="storage-slot storage-slot--empty" role="listitem" aria-label="Empty slot {{ i + 1 }}"></div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% elif rows %}
+    <div class="storage-grid" role="list" aria-label="Storage items">
+      {% for it in rows %}{{ storage_tile(it, loop.index0) }}{% endfor %}
+    </div>
+  {% else %}
+    <p class="storage-grid__note">This container is empty.</p>
+  {% endif %}
+{% endmacro %}

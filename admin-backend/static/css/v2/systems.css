@@ -1,0 +1,516 @@
+/* ============================================================================
+ * Admin wave 1, Set B: Systems & Health, Economy, Social.
+ *
+ * Design bar: amber owns the chrome; Ibad blue is reserved for a value that was
+ * genuinely polled live this second. A number read out of a config module or a
+ * file on disk is static and stays neutral, however fresh it looks. That
+ * honesty rule is the whole point of having two colours.
+ *
+ * Tokens come from design-system.css. --sys-ibad is added locally because the
+ * live/static colour rule is this page set's own; the display face is NOT, and
+ * is taken from --font-display.
+ * ============================================================================ */
+
+.v2-sys {
+  /* Ibad blue, matched to the portal's --ls-ibad so the two surfaces agree. */
+  --sys-ibad: #3fb6c9;
+  --sys-ibad-glow: rgba(63, 182, 201, 0.24);
+  /* The display face. This file used to declare the Saira stack itself and
+     claim the shell had already loaded the font. It had not, until 2026-09-04:
+     only Live Map, which loaded the font per page, ever rendered in it. One
+     token now, defined where the font is loaded. */
+  --sys-font-display: var(--font-display);
+
+  padding: var(--space-4) var(--space-6);
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+/* --- Page header ----------------------------------------------------------- */
+
+.v2-sys__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.v2-sys__title {
+  font-family: var(--sys-font-display);
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text);
+  margin: 0 0 var(--space-2);
+}
+
+.v2-sys__title::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 0.8em;
+  margin-right: var(--space-3);
+  vertical-align: baseline;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.v2-sys__subtitle {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin: 0;
+  max-width: 84ch;
+}
+
+.v2-sys__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.v2-sys__poll {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.v2-sys__poll[data-state="live"] { color: var(--sys-ibad); }
+.v2-sys__poll[data-state="error"] { color: var(--red); }
+
+/* --- Grid + card shell ----------------------------------------------------- */
+
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: var(--space-5);
+}
+
+.sys-span-3  { grid-column: span 3; }
+.sys-span-4  { grid-column: span 4; }
+.sys-span-5  { grid-column: span 5; }
+.sys-span-6  { grid-column: span 6; }
+.sys-span-8  { grid-column: span 8; }
+.sys-span-12 { grid-column: span 12; }
+
+@media (max-width: 1100px) {
+  .sys-span-3, .sys-span-4, .sys-span-5 { grid-column: span 6; }
+  .sys-span-8 { grid-column: span 12; }
+}
+
+@media (max-width: 720px) {
+  .v2-sys { padding: var(--space-3); }
+  .v2-sys__header { flex-direction: column; align-items: flex-start; }
+  .v2-sys__meta { align-items: flex-start; }
+  .sys-grid { gap: var(--space-4); }
+  .sys-span-3, .sys-span-4, .sys-span-5,
+  .sys-span-6, .sys-span-8 { grid-column: span 12; }
+}
+
+.sys-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 140px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.sys-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sys-card__title {
+  font-family: var(--sys-font-display);
+  font-size: var(--text-md);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+.sys-card__note {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sys-card__body {
+  padding: var(--space-4);
+  flex: 1;
+  min-width: 0;
+}
+
+.sys-card__caption {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.sys-card__body > .sys-card__caption:last-child { margin-bottom: 0; }
+
+/* Source state. A card that lost its source says so in place; it never renders
+   a stale number as if it were current. */
+.sys-state {
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sys-state[data-state="live"] {
+  border-color: var(--sys-ibad);
+  color: var(--sys-ibad);
+  box-shadow: 0 0 0 1px var(--sys-ibad-glow);
+}
+
+.sys-state[data-state="static"] {
+  border-color: var(--border-strong);
+  color: var(--text-muted);
+}
+
+.sys-state[data-state="error"] {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.sys-error {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-sm);
+  background: var(--error-bg);
+  color: var(--text);
+  font-size: var(--text-xs);
+  word-break: break-word;
+}
+
+.sys-empty {
+  margin: 0;
+  padding: var(--space-4) 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+/* --- Values ---------------------------------------------------------------- */
+
+.sys-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.sys-stat {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  background: var(--bg-deep);
+}
+
+.sys-stat__value {
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+/* The ONLY thing that earns Ibad: a value this poll just fetched. */
+.sys-stat__value--live { color: var(--sys-ibad); }
+
+/* A short identifier reads as a value, not as a headline number. */
+.sys-stat__value--text {
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+.sys-stat__value--warn { color: var(--yellow); }
+.sys-stat__value--bad  { color: var(--red); }
+
+.sys-stat__label {
+  margin-top: var(--space-1);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* --- Tables ---------------------------------------------------------------- */
+
+/* Cards stay comparable in height and the pager below stays reachable: a long
+   table scrolls inside its own card rather than stretching the whole row. */
+.sys-table-wrap {
+  overflow-x: auto;
+  max-height: 26rem;
+  overflow-y: auto;
+}
+
+.sys-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+}
+
+.sys-table th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.sys-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+
+.sys-table tr:last-child td { border-bottom: none; }
+
+.sys-table__num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.sys-table__muted { color: var(--text-muted); }
+
+.sys-table__wrap-cell {
+  max-width: 40ch;
+  overflow-wrap: anywhere;
+}
+
+/* --- Pills ----------------------------------------------------------------- */
+
+.sys-pill {
+  display: inline-block;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sys-pill--on {
+  border-color: var(--accent);
+  color: var(--accent-bright);
+  background: var(--accent-glow);
+}
+
+.sys-pill--off { border-color: var(--border-strong); color: var(--text-muted); }
+.sys-pill--good { border-color: var(--green); color: var(--green); }
+.sys-pill--warn { border-color: var(--yellow); color: var(--yellow); }
+.sys-pill--bad  { border-color: var(--red); color: var(--red); }
+.sys-pill--absent { border-color: var(--border); color: var(--text-muted); font-style: italic; }
+
+.sys-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* --- Pagination ------------------------------------------------------------ */
+
+.sys-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.sys-pager__btn {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: var(--space-1) var(--space-3);
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.sys-pager__btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.sys-pager__btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* --- Sparkline bars (claims by day, gift volume) --------------------------- */
+
+.sys-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 72px;
+  margin-bottom: var(--space-2);
+}
+
+.sys-bars__bar {
+  flex: 1;
+  min-width: 4px;
+  background: var(--accent-soft);
+  border-radius: 1px 1px 0 0;
+}
+
+.sys-bars__bar:last-child { background: var(--accent-bright); }
+
+.sys-bars__axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+/* --- Flag boards (admin wave 2 write levers) ------------------------------- */
+
+/* Amber chrome throughout. The only colour that carries meaning here is the
+   danger tone on a control that takes a live player feature away, and the
+   warning tone on the one row that darks this panel's own actions. */
+
+.sys-chip {
+  display: inline-block;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sys-btn {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: var(--space-1) var(--space-3);
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sys-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.sys-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.sys-btn--danger { color: var(--red); border-color: var(--red); }
+.sys-btn--danger:hover:not(:disabled) {
+  border-color: var(--red);
+  background: transparent;
+  text-decoration: underline;
+}
+
+.sys-table__warn { color: var(--yellow); }
+
+/* The confirm panel opens inside the row's own cell, so the flag being changed
+   is never more than one line away from the sentence naming what it costs. */
+.sys-confirm {
+  display: block;
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-glow);
+  min-width: 22rem;
+  white-space: normal;
+}
+
+.sys-confirm__head {
+  margin: 0 0 var(--space-2);
+  font-family: var(--sys-font-display);
+  font-size: var(--text-sm);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.sys-confirm__impact {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--yellow);
+}
+
+.sys-confirm__ack {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.sys-confirm__field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sys-confirm__input {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-deep);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  width: 8rem;
+}
+
+.sys-confirm__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.sys-confirm__status {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  min-height: 1em;
+}

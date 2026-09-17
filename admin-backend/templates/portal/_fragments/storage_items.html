@@ -1,0 +1,30 @@
+{# RIGHT-panel grid — GET /portal/storage/{id}/items
+   Rendered into the Storage Manager's right panel by portal-storage.js.
+   Read-only this phase (no drag-drop).
+   Context:
+     container_items = {available, error, stale, items[], total_count, page, ...}
+       items: [{id, template_id, name, icon, stack_size, quality, position_index}]
+     container_id, max_slots (int|-1|0|None), type_label (str)
+#}
+{% import "portal/_fragments/_storage_grid.html" as grid %}
+{% set ci = container_items if container_items is defined else {} %}
+{% set rows = ci.get('items', []) if ci else [] %}
+{% set available = ci.get('available', False) if ci else False %}
+{% set total = ci.get('total_count', rows|length) if ci else 0 %}
+{% set stale = ci.get('stale', False) if ci else False %}
+
+{% if not available %}
+  <div class="portal-msg portal-msg--warning" role="status">
+    Couldn't load this container's contents right now. Please try again in a moment.
+  </div>
+{% else %}
+  <div class="storage-panel__caption">
+    <span class="storage-panel__count">{{ total }} item{{ '' if total == 1 else 's' }}</span>
+    {% if max_slots is not none and max_slots > 0 %}<span class="storage-panel__slots">{{ total }} / {{ max_slots }} slots</span>
+    {% elif max_slots == -1 %}<span class="storage-panel__slots">unlimited slots</span>{% endif %}
+    {% if stale %}<span class="cont-items__stale" title="Served from cache">cached</span>{% endif %}
+  </div>
+  <div class="storage-grid-scroll" data-container-id="{{ container_id }}">
+    {{ grid.storage_grid(rows, max_slots) }}
+  </div>
+{% endif %}

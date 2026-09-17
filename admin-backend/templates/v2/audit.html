@@ -1,0 +1,111 @@
+{% extends "v2/base.html" %}
+{% block title %}Audit{% endblock %}
+{% block extra_css %}
+{# The admin edge sends no Cache-Control, so the ?v= key IS the cache-bust
+   mechanism. Bump it in the same commit as any content change to audit.css. #}
+<link rel="stylesheet" href="/admin/static/css/v2/audit.css?v=20260903c">
+{% endblock %}
+{% block content %}
+<main class="v2-audit" id="v2-audit">
+
+  <header>
+    <div class="card-title">Audit log</div>
+    <span id="v2-audit-loading" class="htmx-indicator" aria-live="polite">loading...</span>
+  </header>
+
+  <form id="audit-filter"
+        class="v2-audit__filter-bar"
+        hx-get="/admin/api/dune/v2/audit-fragment"
+        hx-trigger="change, keyup changed delay:300ms from:#audit-search"
+        hx-target="#v2-audit-body-wrap"
+        hx-swap="innerHTML"
+        hx-include="this"
+        hx-indicator="#v2-audit-loading"
+        hx-push-url="true"
+        hx-sync="this:replace">
+      <div class="v2-audit__filter-field v2-audit__filter-field--wide">
+        <label for="audit-search">Search</label>
+        <input id="audit-search" name="search" type="search" autocomplete="off"
+               placeholder="target, IP, details"
+               value="{{ initial_filters.search if initial_filters else '' }}">
+      </div>
+      <div class="v2-audit__filter-field">
+        <label for="filter-user">User</label>
+        <select id="filter-user" name="username">
+          <option value="">All users</option>
+          {% for u in users %}
+            <option value="{{ u.username }}" {% if initial_filters and initial_filters.username == u.username %}selected{% endif %}>{{ u.username }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="v2-audit__filter-field">
+        <label for="filter-action">Action</label>
+        {# Every option below comes from routers/v2.py AUDIT_ACTION_GROUPS, which
+           a test holds equal to the set of action literals the code writes. A
+           hand-kept list here drifted to 28 of 90 without anything saying so. #}
+        <select id="filter-action" name="action">
+          <option value="">All actions</option>
+          {% for label, actions in action_groups %}
+            <optgroup label="{{ label }}">
+              {% for a in actions %}
+                <option value="{{ a }}" {% if initial_filters and initial_filters.action == a %}selected{% endif %}>{{ a }}</option>
+              {% endfor %}
+            </optgroup>
+          {% endfor %}
+          {% if action_prefixes %}
+            <optgroup label="Families (prefix match)">
+              {% for p in action_prefixes %}
+                <option value="{{ p }}*" {% if initial_filters and initial_filters.action == p ~ '*' %}selected{% endif %}>{{ p }}*</option>
+              {% endfor %}
+            </optgroup>
+          {% endif %}
+        </select>
+      </div>
+      <div class="v2-audit__filter-field">
+        <label for="filter-success">Outcome</label>
+        <select id="filter-success" name="success">
+          <option value="">Any outcome</option>
+          <option value="1" {% if initial_filters and initial_filters.success == '1' %}selected{% endif %}>Success only</option>
+          <option value="0" {% if initial_filters and initial_filters.success == '0' %}selected{% endif %}>Failures only</option>
+        </select>
+      </div>
+      <div class="v2-audit__filter-field">
+        <label for="filter-date-from">From (UTC)</label>
+        <input id="filter-date-from" name="date_from" type="date"
+               value="{{ initial_filters.date_from if initial_filters else '' }}">
+      </div>
+      <div class="v2-audit__filter-field">
+        <label for="filter-date-to">To (UTC)</label>
+        <input id="filter-date-to" name="date_to" type="date"
+               value="{{ initial_filters.date_to if initial_filters else '' }}">
+      </div>
+      {# Always 1. Changing a filter must land on the first page of the NEW
+         result set; page 7 of the old one is usually empty and reads as "no
+         matches". The pagination buttons carry their own page number. #}
+      <input type="hidden" name="page" value="1">
+      <div class="v2-audit__filter-actions">
+        <button type="button" class="btn btn-sm"
+                hx-get="/admin/api/dune/v2/audit-fragment"
+                hx-include="#audit-filter"
+                hx-target="#v2-audit-body-wrap"
+                hx-swap="innerHTML"
+                hx-indicator="#v2-audit-loading">Refresh</button>
+        {# A link, not type="reset". The server renders the current filters as
+           the field values, so a form reset would restore the filtered state it
+           was asked to clear. #}
+        <a class="btn btn-sm" href="/admin/v2/audit">Reset</a>
+      </div>
+  </form>
+
+  {# No hx-trigger="load" here. The server already rendered the first page of
+     rows into this wrapper; re-fetching them on load ran the 10000-row read and
+     the 500-grant relay call a second time on every single visit. The form and
+     the pagination buttons are what swap this from here on. #}
+  <div id="v2-audit-body-wrap" class="v2-audit__table-wrap">
+    {% if initial_entries is defined %}
+      {% include "v2/_fragments/audit_rows.html" %}
+    {% endif %}
+  </div>
+
+</main>
+{% endblock %}

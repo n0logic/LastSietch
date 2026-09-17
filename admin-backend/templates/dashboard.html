@@ -1,0 +1,921 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="container">
+  <div style="margin-bottom:1rem;">
+    <a href="/admin/" style="font-family:var(--font-mono); font-size:0.95rem; color:var(--text-muted); text-decoration:none;"
+       onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">&larr; All Servers</a>
+  </div>
+  <!-- Pending Config Banner -->
+  <div id="config-banner" style="display:none; background:rgba(241,196,15,0.1); border:1px solid var(--yellow); border-radius:8px; padding:1rem 1.5rem; margin-bottom:1.5rem; font-family:var(--font-mono); font-size:0.8rem;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+      <span style="color:var(--yellow); font-weight:600;">Config changes pending restart</span>
+      <span style="color:var(--text-muted); font-size:0.7rem;" id="config-banner-meta"></span>
+    </div>
+    <div id="config-banner-changes" style="color:var(--text-muted); font-size:0.75rem;"></div>
+  </div>
+
+  <div class="grid">
+    <!-- VM Status -->
+    <div class="card">
+      <div class="card-title">Virtual Machine</div>
+      <div class="stat-value status-unknown" id="vm-status">---</div>
+      <div class="stat-label" id="vm-label">---</div>
+      <div class="stat-label" id="vm-specs" style="margin-top:0.25rem; font-family:var(--font-mono); font-size:0.65rem; color:var(--text-muted);"></div>
+      <div class="btn-group">
+        <button class="btn btn-start" onclick="vmAction('start', 'Start the VM?')">Start VM</button>
+        <button class="btn btn-stop" onclick="vmAction('stop', 'Shut down the VM? This will stop the game server.')">Stop VM</button>
+        <button class="btn btn-stop" onclick="vmAction('reset', 'Hard reset the VM? Active players will be disconnected.')">Reset VM</button>
+      </div>
+    </div>
+
+    <!-- Server Status -->
+    <div class="card">
+      <div class="card-title" id="server-card-title">Game Server</div>
+      <div class="stat-value status-unknown" id="conan-status">---</div>
+      <div class="stat-label" id="conan-detail">PID: --- | RAM: ---</div>
+      <div class="stat-label" id="conan-extra" style="margin-top:0.25rem; font-family:var(--font-mono); font-size:0.65rem; color:var(--text-muted);"></div>
+      <div id="mem-stats" class="stat-label">VM: --- &middot; Proc: --- &middot; 1h avg: --- &middot; 7d avg: ---</div>
+      <svg id="mem-spark" width="100%" height="40" viewBox="0 0 200 40" preserveAspectRatio="none" style="margin-top:0.5rem;"></svg>
+      <div id="mem-collecting" class="form-hint" style="display:none;">Collecting samples &mdash; sparkline fills as data arrives.</div>
+      <div class="btn-group" id="server-controls">
+        <button class="btn btn-start" onclick="conanAction('start', 'Start the server?')">Start Server</button>
+        <button class="btn btn-stop" onclick="showTimedAction('stop')">Stop Server</button>
+        <button class="btn btn-stop" onclick="showTimedAction('restart')">Restart</button>
+      </div>
+      <!-- Pending operation display -->
+      <div id="pending-op" style="display:none; margin-top: 1rem;">
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+          <div style="flex:1;">
+            <div style="font-family:var(--font-mono); font-size:0.85rem; color:var(--yellow);" id="pending-label">---</div>
+            <div style="background:var(--border); border-radius:3px; height:6px; margin-top:0.5rem; overflow:hidden;">
+              <div id="pending-bar" style="background:var(--yellow); height:100%; width:0%; transition:width 1s linear;"></div>
+            </div>
+          </div>
+          <button class="btn btn-stop btn-sm" onclick="cancelScheduled()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Save Data -->
+    <div class="card">
+      <div class="card-title" id="savedata-title">Save Data</div>
+      <div class="stat-value" id="gamedb-size" style="font-size: 1.5rem;">---</div>
+      <div class="stat-label" id="gamedb-modified">Last modified: ---</div>
+    </div>
+
+    <!-- Live Players -->
+    <div class="card">
+      <div class="card-title">Live Server</div>
+      <div class="stat-value" id="live-players" style="font-size: 1.5rem;">---</div>
+      <div class="stat-label" id="live-detail">Players online</div>
+    </div>
+
+    <!-- Server Broadcast (hidden for games without RCON) -->
+    <div class="card full-width" id="broadcast-card" style="display:none;">
+      <div class="card-title">Server Broadcast</div>
+      <div style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+          <label for="broadcast-msg">Message to all players</label>
+          <input type="text" id="broadcast-msg" placeholder="e.g. Server restarting in 15 minutes..." maxlength="500">
+        </div>
+        <button class="btn btn-accent" onclick="sendBroadcast()" id="broadcast-btn">Send Broadcast</button>
+      </div>
+      <div class="form-hint" style="margin-top: 0.5rem;">Max 500 characters. Appears as an in-game notification to all connected players.</div>
+    </div>
+
+    {% if user.role == 'admin' %}
+    <!-- Steam Update (admin-only; hidden by JS unless game has update config) -->
+    <div class="card full-width" id="update-card" style="display:none;">
+      <div class="card-title">Steam Update</div>
+      <div id="update-availability" style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted); margin-bottom:0.5rem;">
+        Checking buildwatch...
+      </div>
+      <div id="update-status-summary" style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted); margin-bottom:0.75rem;">
+        No update has run.
+      </div>
+      <div class="btn-group" id="update-controls">
+        <button class="btn btn-accent" id="run-update-btn" onclick="runUpdate()">Run Steam Update</button>
+        <button class="btn" onclick="refreshUpdateStatus(); refreshUpdateAvailability()">Refresh Status</button>
+      </div>
+      <div id="update-phases" style="margin-top:0.75rem; display:none;">
+        <div class="form-hint" style="margin-bottom:0.5rem;">Phase progress (polled every 3s):</div>
+        <div id="update-phase-list" style="font-family:var(--font-mono); font-size:0.75rem; line-height:1.5;"></div>
+        <div id="update-error" style="color:var(--red); font-family:var(--font-mono); font-size:0.75rem; margin-top:0.5rem; display:none; white-space:pre-wrap;"></div>
+      </div>
+      <div id="update-history-wrap" style="margin-top:1rem; padding-top:0.75rem; border-top:1px solid var(--border);">
+        <div class="form-hint" style="margin-bottom:0.4rem;">Recent updates:</div>
+        <div id="update-history-list" style="font-family:var(--font-mono); font-size:0.75rem; line-height:1.7;">Loading...</div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ZFS Snapshots -->
+    <div class="card full-width">
+      <div class="card-title">ZFS Snapshots</div>
+      <div class="btn-group" style="margin-top: 0; margin-bottom: 1rem;">
+        <button class="btn btn-accent" onclick="createSnapshot()">Create Snapshot</button>
+        <button class="btn" onclick="refreshSnapshots()">Refresh</button>
+        <button class="btn" id="show-all-snaps" style="display:none;" onclick="showAllSnapshots()">Show All</button>
+      </div>
+      <div id="snapshot-list"></div>
+      <div style="margin-top:1rem; padding-top:0.75rem; border-top:1px solid var(--border);">
+        <div class="card-title" style="margin-bottom:0.5rem;">Auto-Snapshot Schedule</div>
+        <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+          <select id="snap-schedule" style="width:auto; min-width:180px;">
+            <option value="off">Disabled</option>
+            <option value="weekly">Weekly (Sunday 3:00 AM)</option>
+            <option value="daily">Daily (3:00 AM)</option>
+            <option value="twice">Twice Daily (3:00 AM / 3:00 PM)</option>
+            <option value="6h">Every 6 Hours</option>
+          </select>
+          <label style="font-size:0.7rem; color:var(--text-muted); display:flex; align-items:center; gap:0.3rem;">
+            Keep <input type="number" id="snap-retention" value="10" min="3" max="100" style="width:60px; font-size:0.75rem;"> snapshots
+          </label>
+          <button class="btn btn-accent btn-sm" onclick="saveSnapSchedule()">Save Schedule</button>
+          <span class="stat-label" id="snap-schedule-status" style="font-size:0.7rem;"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Activity Log -->
+    <div class="card full-width">
+      <div class="card-title">Activity Log</div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Timed Action Modal -->
+<div class="confirm-overlay" id="timed-overlay">
+  <div class="confirm-dialog" style="max-width:450px;">
+    <p id="timed-title" style="margin-bottom:0.5rem; font-weight:600;">Stop Server</p>
+    <p id="timed-desc" style="font-size:0.8rem; color:var(--text-muted); margin-bottom:1.5rem;">Choose when to execute:</p>
+    <div class="btn-group" style="justify-content:center; flex-direction:column; gap:0.5rem;">
+      <button class="btn btn-stop" id="timed-now" style="width:100%;">Immediately</button>
+      <button class="btn btn-accent" id="timed-1m" style="width:100%;">1 Minute Countdown</button>
+      <button class="btn btn-accent" id="timed-5m" style="width:100%;">5 Minute Countdown</button>
+    </div>
+    <div style="margin-top:1rem;">
+      <button class="btn" onclick="closeTimedModal()" style="width:100%;">Cancel</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('nav-dashboard').classList.add('active');
+var GAME = '{{ game_id }}';
+var GAME_META = null;  // filled by loadGameMeta()
+
+function escHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function log(msg, type, timestamp) {
+  var el = document.getElementById('log');
+  var ts = timestamp || new Date().toLocaleTimeString();
+  var entry = document.createElement('div');
+  entry.className = 'log-entry ' + (type || 'info');
+  entry.textContent = '[' + ts + '] ' + msg;
+  el.insertBefore(entry, el.firstChild);
+  while (el.children.length > 50) el.removeChild(el.lastChild);
+}
+
+function fmtMB(n) {
+  if (n == null) return '---';
+  if (n < 1000) return Math.round(n) + ' MB';
+  return (n / 1024).toFixed(1) + ' GB';
+}
+
+var memCache = { avg7d: null, peak7d: null };
+
+function renderSparkline(points) {
+  var svg = document.getElementById('mem-spark');
+  svg.innerHTML = '';
+  if (!points || points.length < 2) return;
+  var values = points.map(function(p) { return p.proc_mb || 0; });
+  var max = Math.max.apply(null, values);
+  var min = Math.min.apply(null, values);
+  var range = max - min || 1;
+  var w = 200, h = 40;
+  var coords = values.map(function(v, i) {
+    var x = (i / (values.length - 1)) * w;
+    var y = h - ((v - min) / range) * h;
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+  var poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  poly.setAttribute('points', coords);
+  poly.setAttribute('fill', 'none');
+  poly.setAttribute('stroke', 'var(--accent)');
+  poly.setAttribute('stroke-width', '1.5');
+  poly.setAttribute('vector-effect', 'non-scaling-stroke');
+  svg.appendChild(poly);
+}
+
+function renderMemTile(d1h) {
+  var statsEl = document.getElementById('mem-stats');
+  var sparkEl = document.getElementById('mem-spark');
+  var collEl = document.getElementById('mem-collecting');
+  if (!d1h || (d1h.samples_count != null && d1h.samples_count < 6)) {
+    statsEl.style.display = 'none';
+    sparkEl.style.display = 'none';
+    collEl.style.display = '';
+    return;
+  }
+  statsEl.style.display = '';
+  sparkEl.style.display = '';
+  collEl.style.display = 'none';
+
+  var vmStr = (d1h.avg_vm_used_mb != null && d1h.vm_total_mb != null)
+    ? fmtMB(d1h.avg_vm_used_mb) + '/' + fmtMB(d1h.vm_total_mb)
+    : '---';
+  var procStr = d1h.avg_proc_mb != null ? fmtMB(d1h.avg_proc_mb) : '---';
+  var avg1h = d1h.avg_proc_mb != null ? fmtMB(d1h.avg_proc_mb) : '---';
+  if (d1h.peak_proc_mb != null) avg1h += ' (peak ' + fmtMB(d1h.peak_proc_mb) + ')';
+  var avg7d = '---';
+  if (memCache.avg7d != null) {
+    avg7d = fmtMB(memCache.avg7d);
+    if (memCache.peak7d != null) avg7d += ' (peak ' + fmtMB(memCache.peak7d) + ')';
+  }
+  statsEl.textContent = 'VM: ' + vmStr + ' · Proc: ' + procStr +
+    ' · 1h avg: ' + avg1h + ' · 7d avg: ' + avg7d;
+  renderSparkline(d1h.points || []);
+}
+
+function refreshMemory() {
+  apiCall('GET', '/admin/api/games/' + GAME + '/server/metrics?window=1h').then(function(d) {
+    renderMemTile(d);
+  }).catch(function() {});
+}
+
+function refreshMemory7d() {
+  apiCall('GET', '/admin/api/games/' + GAME + '/server/metrics?window=7d').then(function(d) {
+    if (d) {
+      memCache.avg7d = d.avg_proc_mb != null ? d.avg_proc_mb : null;
+      memCache.peak7d = d.peak_proc_mb != null ? d.peak_proc_mb : null;
+    }
+  }).catch(function() {});
+}
+
+function refreshStatus() {
+  apiCall('GET', '/admin/api/games/' + GAME + '/vm/status').then(function(d) {
+    var el = document.getElementById('vm-status');
+    el.textContent = d.status.toUpperCase();
+    el.className = 'stat-value ' + (d.status === 'running' ? 'status-running' : 'status-stopped');
+    var specs = [];
+    if (d.cores) specs.push(d.cores + ' vCPU');
+    if (d.memory_gb) specs.push(d.memory_gb + ' GB RAM');
+    if (d.cpu_type) specs.push(d.cpu_type);
+    document.getElementById('vm-specs').textContent = specs.length ? specs.join(' // ') : '';
+  }).catch(function() {
+    document.getElementById('vm-status').textContent = 'ERROR';
+    document.getElementById('vm-status').className = 'stat-value status-stopped';
+  });
+
+  var extraInfo = { uptime: null, map: null };
+
+  function renderExtra() {
+    var parts = [];
+    if (extraInfo.uptime) parts.push('Uptime: ' + extraInfo.uptime);
+    if (extraInfo.map) parts.push(extraInfo.map);
+    document.getElementById('conan-extra').textContent = parts.join(' // ');
+  }
+
+  apiCall('GET', '/admin/api/games/' + GAME + '/server/status').then(function(d) {
+    var el = document.getElementById('conan-status');
+    el.textContent = d.running ? 'RUNNING' : 'STOPPED';
+    el.className = 'stat-value ' + (d.running ? 'status-running' : 'status-stopped');
+    var detail = 'PID: ' + (d.pid || '---') + ' | RAM: ' + (d.memory_mb ? fmtMB(d.memory_mb) : '---');
+    if (d.vm_used_mb != null && d.vm_total_mb != null) {
+      detail += ' / VM: ' + fmtMB(d.vm_used_mb) + '/' + fmtMB(d.vm_total_mb);
+    }
+    document.getElementById('conan-detail').textContent = detail;
+    extraInfo.uptime = d.uptime;
+    renderExtra();
+  }).catch(function() {
+    document.getElementById('conan-status').textContent = 'ERROR';
+    document.getElementById('conan-status').className = 'stat-value status-stopped';
+  });
+
+  apiCall('GET', '/admin/api/games/' + GAME + '/savedata').then(function(d) {
+    document.getElementById('gamedb-size').textContent = d.size_mb ? d.size_mb + ' MB' : '---';
+    document.getElementById('gamedb-modified').textContent = 'Last modified: ' + (d.last_modified || '---');
+  }).catch(function() {});
+
+  fetch('/status.json').then(function(r) { return r.json(); }).then(function(d) {
+    var server = d.servers && d.servers[GAME];
+    if (server && server.online) {
+      var players = typeof server.players !== 'undefined' ? server.players : '?';
+      var maxPlayers = typeof server.maxPlayers !== 'undefined' ? server.maxPlayers : '?';
+      document.getElementById('live-players').textContent = players + '/' + maxPlayers;
+      document.getElementById('live-detail').textContent = 'Players online';
+      extraInfo.map = server.map || null;
+      renderExtra();
+    } else if (server) {
+      document.getElementById('live-players').textContent = 'OFFLINE';
+      document.getElementById('live-detail').textContent = 'Server not responding';
+    } else {
+      document.getElementById('live-players').textContent = '---';
+      document.getElementById('live-detail').textContent = 'No live status available';
+    }
+  }).catch(function() {
+    document.getElementById('live-players').textContent = '---';
+  });
+
+  checkPending();
+  checkConfigPending();
+}
+
+function checkConfigPending() {
+  apiCall('GET', '/admin/api/games/' + GAME + '/config/pending').then(function(d) {
+    var el = document.getElementById('config-banner');
+    if (d.pending && d.changes && Object.keys(d.changes).length > 0) {
+      el.style.display = '';
+      var when = d.changed_at ? new Date(d.changed_at).toLocaleString() : '';
+      document.getElementById('config-banner-meta').textContent = 'by ' + (d.changed_by || '?') + (when ? ' at ' + when : '');
+      var lines = Object.keys(d.changes).map(function(key) {
+        var c = d.changes[key];
+        return '<div style="padding:0.15rem 0;">' + escHtml(key) + ': <span style="color:var(--red); text-decoration:line-through;">' + escHtml(String(c.old)) + '</span> → <span style="color:var(--green);">' + escHtml(String(c.new)) + '</span></div>';
+      });
+      document.getElementById('config-banner-changes').innerHTML = lines.join('');
+    } else {
+      el.style.display = 'none';
+    }
+  }).catch(function() {});
+}
+
+var snapshotData = [];
+var showAllSnaps = false;
+var SNAP_LIMIT = 5;
+
+function renderSnapshots() {
+  var el = document.getElementById('snapshot-list');
+  if (snapshotData.length === 0) {
+    el.innerHTML = '<div class="snapshot-item">No snapshots found</div>';
+    document.getElementById('show-all-snaps').style.display = 'none';
+    return;
+  }
+  var reversed = snapshotData.slice().reverse();
+  var visible = showAllSnaps ? reversed : reversed.slice(0, SNAP_LIMIT);
+  el.innerHTML = visible.map(function(s, i) {
+    var name = s.name.split('@')[1] || s.name;
+    var isLatest = i === 0;
+    var safeName = escHtml(s.name).replace(/'/g, "&#39;");
+    var safLabel = escHtml(name).replace(/'/g, "&#39;");
+    return '<div class="snapshot-item" style="display:flex; justify-content:space-between; align-items:center;">'
+      + '<span>' + escHtml(name) + ' &mdash; ' + escHtml(s.creation) + ' (' + escHtml(s.used) + ')' + (isLatest ? ' <span style="color:var(--green); font-size:0.65rem;">LATEST</span>' : '') + '</span>'
+      + '<div style="display:flex; gap:0.4rem; flex-shrink:0;">'
+      + '<button class="btn btn-stop btn-sm" onclick="restoreSnapshot(\'' + safeName + '\', ' + !isLatest + ')">Restore</button>'
+      + '<button class="btn btn-sm" style="border-color:var(--text-muted); color:var(--text-muted); font-size:0.6rem;" onclick="deleteSnapshot(\'' + safeName + '\', \'' + safLabel + '\')">Delete</button>'
+      + '</div></div>';
+  }).join('');
+  var btn = document.getElementById('show-all-snaps');
+  if (snapshotData.length > SNAP_LIMIT) {
+    btn.style.display = '';
+    btn.textContent = showAllSnaps ? 'Show Less' : 'Show All (' + snapshotData.length + ')';
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+function showAllSnapshots() {
+  showAllSnaps = !showAllSnaps;
+  renderSnapshots();
+}
+
+function refreshSnapshots() {
+  apiCall('GET', '/admin/api/games/' + GAME + '/zfs/snapshots').then(function(d) {
+    snapshotData = d.snapshots || [];
+    renderSnapshots();
+  }).catch(function() {
+    document.getElementById('snapshot-list').innerHTML = '<div class="snapshot-item">Failed to load snapshots</div>';
+  });
+}
+
+function restoreSnapshot(snapName, hasNewer) {
+  var label = snapName.split('@')[1] || snapName;
+  var warning = 'RESTORE snapshot "' + label + '"?\n\nThis will:\n• Stop the VM and game server\n• Roll back the disk to this snapshot\n• Restart the VM\n\nALL DATA SINCE THIS SNAPSHOT WILL BE LOST.';
+  if (hasNewer) {
+    warning += '\n\nAll newer snapshots will also be destroyed.';
+  }
+  showConfirm(warning, function() {
+    log('Restoring snapshot: ' + label + '...', 'info');
+    setTransitionalStatus('vm-status', 'RESTORING...', 'status-unknown');
+    setTransitionalStatus('conan-status', 'RESTORING...', 'status-unknown');
+    document.getElementById('conan-detail').textContent = 'Rolling back to ' + label + '...';
+    apiCall('POST', '/admin/api/games/' + GAME + '/zfs/restore', { snapshot: snapName }).then(function(d) {
+      var msg = 'Restored to ' + label;
+      if (d.newer_destroyed && d.newer_destroyed.length > 0) {
+        msg += ' (' + d.newer_destroyed.length + ' newer snapshot(s) removed)';
+      }
+      log(msg, 'success');
+      setTransitionalStatus('conan-status', 'STARTING...', 'status-unknown');
+      document.getElementById('conan-detail').textContent = 'VM restarting after restore...';
+      pollUntilChanged('conan-status', 'STARTING...', 24);
+      refreshSnapshots();
+      checkConfigPending();
+    }).catch(function(e) {
+      log('Restore failed: ' + e.message, 'error');
+      refreshStatus();
+    });
+  });
+}
+
+function deleteSnapshot(fullName, label) {
+  showConfirm('Delete snapshot "' + label + '"?\n\nThis cannot be undone.', function() {
+    log('Deleting snapshot: ' + label + '...', 'info');
+    apiCall('POST', '/admin/api/games/' + GAME + '/zfs/delete', { snapshot: fullName }).then(function(d) {
+      log('Snapshot deleted: ' + label, 'success');
+      refreshSnapshots();
+    }).catch(function(e) {
+      log('Delete failed: ' + e.message, 'error');
+    });
+  });
+}
+
+function loadSnapSchedule() {
+  apiCall('GET', '/admin/api/games/' + GAME + '/zfs/schedule').then(function(d) {
+    document.getElementById('snap-schedule').value = d.schedule || 'off';
+    if (d.retention) document.getElementById('snap-retention').value = d.retention;
+    var labels = { off: 'Disabled', weekly: 'Weekly (Sun 3 AM)', daily: 'Daily 3:00 AM', twice: 'Twice daily', '6h': 'Every 6 hours', custom: 'Custom' };
+    document.getElementById('snap-schedule-status').textContent = labels[d.schedule] || d.schedule;
+  }).catch(function() {});
+}
+
+function saveSnapSchedule() {
+  var val = document.getElementById('snap-schedule').value;
+  var ret = parseInt(document.getElementById('snap-retention').value) || 10;
+  if (ret < 3) ret = 3;
+  if (ret > 100) ret = 100;
+  apiCall('POST', '/admin/api/games/' + GAME + '/zfs/schedule', { schedule: val, retention: ret }).then(function(d) {
+    var labels = { off: 'Disabled', weekly: 'Weekly (Sun 3 AM)', daily: 'Daily 3:00 AM', twice: 'Twice daily', '6h': 'Every 6 hours' };
+    document.getElementById('snap-schedule-status').textContent = 'Saved: ' + (labels[val] || val);
+    document.getElementById('snap-schedule-status').style.color = 'var(--green)';
+    setTimeout(function() { document.getElementById('snap-schedule-status').style.color = ''; }, 3000);
+    log('Snapshot schedule set: ' + (labels[val] || val) + ', keep ' + ret, 'success');
+  }).catch(function(e) {
+    log('Failed to set schedule: ' + e.message, 'error');
+  });
+}
+
+function createSnapshot() {
+  log('Creating ZFS snapshot...', 'info');
+  apiCall('POST', '/admin/api/games/' + GAME + '/zfs/snapshot').then(function(d) {
+    log('Snapshot created: ' + d.snapshot, 'success');
+    refreshSnapshots();
+  }).catch(function(e) {
+    log('Failed to create snapshot: ' + e.message, 'error');
+  });
+}
+
+function sendBroadcast() {
+  var msg = document.getElementById('broadcast-msg').value.trim();
+  if (!msg) { alert('Enter a message to broadcast.'); return; }
+  showConfirm('Send this to all players?\n\n"' + msg + '"', function() {
+    var btn = document.getElementById('broadcast-btn');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    log('Broadcasting: ' + msg, 'info');
+    apiCall('POST', '/admin/api/games/' + GAME + '/server/broadcast', { message: msg }).then(function(d) {
+      log('Broadcast sent: ' + (d.response || 'OK'), 'success');
+      document.getElementById('broadcast-msg').value = '';
+    }).catch(function(e) {
+      log('Broadcast failed: ' + e.message, 'error');
+    }).finally(function() {
+      btn.disabled = false;
+      btn.textContent = 'Send Broadcast';
+    });
+  });
+}
+
+function setTransitionalStatus(target, label, className) {
+  var el = document.getElementById(target);
+  el.textContent = label;
+  el.className = 'stat-value ' + className;
+}
+
+// Poll rapidly after an action until state changes, then resume normal interval
+function pollUntilChanged(target, expectedState, maxPolls) {
+  var polls = 0;
+  var poll = function() {
+    if (polls++ >= (maxPolls || 12)) { refreshStatus(); return; }
+    setTimeout(function() {
+      refreshStatus();
+      var el = document.getElementById(target);
+      var text = el.textContent;
+      if (text === expectedState) poll();  // keep polling until it changes
+    }, 5000);
+  };
+  poll();
+}
+
+function vmAction(action, message) {
+  showConfirm(message, function() {
+    log('VM ' + action + '...', 'info');
+    if (action === 'stop') setTransitionalStatus('vm-status', 'STOPPING...', 'status-unknown');
+    else if (action === 'reset') setTransitionalStatus('vm-status', 'RESETTING...', 'status-unknown');
+    apiCall('POST', '/admin/api/games/' + GAME + '/vm/' + action).then(function(d) {
+      log('VM ' + action + ' — ' + (d.result || 'done'), 'success');
+      pollUntilChanged('vm-status', action === 'start' ? 'STOPPED' : 'RUNNING', 12);
+    }).catch(function(e) {
+      log('VM ' + action + ' failed: ' + e.message, 'error');
+      refreshStatus();
+    });
+  });
+}
+
+function conanAction(action, message) {
+  showConfirm(message, function() {
+    log('Server ' + action + '...', 'info');
+    if (action === 'stop') setTransitionalStatus('conan-status', 'STOPPING...', 'status-unknown');
+    else if (action === 'restart') setTransitionalStatus('conan-status', 'RESTARTING...', 'status-unknown');
+    apiCall('POST', '/admin/api/games/' + GAME + '/server/' + action).then(function(d) {
+      log('Server ' + action + ' — ' + (d.result || 'done'), 'success');
+      if (action === 'restart') {
+        setTransitionalStatus('conan-status', 'STARTING...', 'status-unknown');
+        document.getElementById('conan-detail').textContent = 'Waiting for server to come online...';
+      }
+      // Poll every 5s until state matches expected
+      pollUntilChanged('conan-status', action === 'start' ? 'STOPPED' : (action === 'stop' ? 'RUNNING' : 'STARTING...'), 12);
+      checkConfigPending();
+    }).catch(function(e) {
+      log('Server ' + action + ' failed: ' + e.message, 'error');
+      refreshStatus();
+    });
+  });
+}
+
+// --- Timed Operations ---
+
+var currentTimedAction = null;
+
+function showTimedAction(action) {
+  currentTimedAction = action;
+  var label = action === 'stop' ? 'Stop Server' : 'Restart Server';
+  document.getElementById('timed-title').textContent = label;
+  document.getElementById('timed-overlay').classList.add('active');
+
+  document.getElementById('timed-now').onclick = function() {
+    closeTimedModal();
+    conanAction(action, label + ' immediately? Active players will be disconnected.');
+  };
+  document.getElementById('timed-1m').onclick = function() {
+    closeTimedModal();
+    scheduleAction(action, 1);
+  };
+  document.getElementById('timed-5m').onclick = function() {
+    closeTimedModal();
+    scheduleAction(action, 5);
+  };
+}
+
+function closeTimedModal() {
+  document.getElementById('timed-overlay').classList.remove('active');
+  currentTimedAction = null;
+}
+
+function scheduleAction(action, minutes) {
+  var endpoint = action === 'stop' ? 'scheduled-stop' : 'scheduled-restart';
+  log('Scheduling ' + action + ' in ' + minutes + ' min...', 'info');
+  apiCall('POST', '/admin/api/games/' + GAME + '/server/' + endpoint, { delay_minutes: minutes }).then(function(d) {
+    log('Scheduled: ' + action + ' in ' + minutes + ' min (countdown broadcasts active)', 'success');
+    checkPending();
+  }).catch(function(e) {
+    log('Schedule failed: ' + e.message, 'error');
+  });
+}
+
+function cancelScheduled() {
+  apiCall('POST', '/admin/api/games/' + GAME + '/server/cancel-scheduled').then(function(d) {
+    log('Scheduled ' + (d.action || 'operation') + ' cancelled', 'success');
+    document.getElementById('pending-op').style.display = 'none';
+    document.getElementById('server-controls').style.display = '';
+  }).catch(function(e) {
+    log('Cancel failed: ' + e.message, 'error');
+  });
+}
+
+var lastPendingState = false;
+
+function checkPending() {
+  apiCall('GET', '/admin/api/games/' + GAME + '/server/pending').then(function(d) {
+    var el = document.getElementById('pending-op');
+    if (d.pending) {
+      lastPendingState = true;
+      el.style.display = '';
+      document.getElementById('server-controls').style.display = 'none';
+      var min = Math.floor(d.remaining / 60);
+      var sec = d.remaining % 60;
+      var timeStr = min > 0 ? min + 'm ' + sec + 's' : sec + 's';
+      document.getElementById('pending-label').textContent =
+        d.action.toUpperCase() + ' in ' + timeStr + ' (by ' + d.started_by + ')';
+      var pct = Math.max(0, 100 - (d.remaining / d.delay * 100));
+      document.getElementById('pending-bar').style.width = pct + '%';
+
+      // When close to executing, show transitional state
+      if (d.remaining <= 2) {
+        var label = d.action === 'restart' ? 'RESTARTING...' : 'STOPPING...';
+        setTransitionalStatus('conan-status', label, 'status-unknown');
+        document.getElementById('conan-detail').textContent = 'Executing scheduled ' + d.action + '...';
+      }
+    } else {
+      el.style.display = 'none';
+      document.getElementById('server-controls').style.display = '';
+      // If we just transitioned from pending → done, the action executed
+      if (lastPendingState) {
+        lastPendingState = false;
+        setTransitionalStatus('conan-status', 'STARTING...', 'status-unknown');
+        document.getElementById('conan-detail').textContent = 'Waiting for server to come online...';
+        pollUntilChanged('conan-status', 'STARTING...', 12);
+        checkConfigPending();
+      }
+    }
+  }).catch(function() {});
+}
+
+// Load audit log entries if admin
+{% if user.role == 'admin' %}
+apiCall('GET', '/admin/api/audit?limit=15').then(function(d) {
+  var entries = d.entries || d;
+  if (Array.isArray(entries)) {
+    // Entries are newest-first from API; reverse so oldest gets prepended first, newest ends up on top
+    entries.slice().reverse().forEach(function(e) {
+      var type = e.success === false ? 'error' : 'info';
+      var ts = null;
+      if (e.timestamp) {
+        var dt = new Date(e.timestamp + 'Z');
+        var mm = dt.getMonth()+1; var dd = dt.getDate(); var yyyy = dt.getFullYear();
+        ts = (mm<10?'0':'') + mm + '/' + (dd<10?'0':'') + dd + '/' + yyyy + ' ' + dt.toLocaleTimeString();
+      }
+      log(e.username + ' — ' + e.action + (e.target ? ' → ' + e.target : '') + (e.details ? ' (' + e.details + ')' : ''), type, ts);
+    });
+  }
+}).catch(function() {});
+{% endif %}
+
+function loadGameMeta() {
+  return apiCall('GET', '/admin/api/games/' + GAME).then(function(meta) {
+    GAME_META = meta || {};
+    document.title = (meta.display_name || GAME) + ' — Last Sietch Admin';
+    var title = document.getElementById('server-card-title');
+    if (title) title.textContent = (meta.display_name || 'Game') + ' Server';
+    var vmLabel = document.getElementById('vm-label');
+    if (vmLabel) vmLabel.textContent = 'VMID ' + (meta.vmid || '---');
+    // Broadcast card: only for RCON-capable games
+    var bcast = document.getElementById('broadcast-card');
+    if (bcast) bcast.style.display = meta.supports_rcon ? '' : 'none';
+    // Savedata card label
+    var svLabel = document.getElementById('savedata-title');
+    if (svLabel) svLabel.textContent = meta.has_save_dir ? 'Save Data (directory)' : 'Save Data';
+    // Steam Update card: admin-only (Jinja-gated), shown only when game has update config
+    var updateCard = document.getElementById('update-card');
+    if (updateCard && meta.has_update) {
+      updateCard.style.display = '';
+      refreshUpdateStatus();
+      refreshUpdateAvailability();
+      refreshUpdateHistory();
+    }
+  }).catch(function() {});
+}
+
+// Auto-clear stale terminal jobs from the phase view after this many seconds.
+var UPDATE_STALE_AFTER_SEC = 300;  // 5 min
+
+function isJobStale(job) {
+  if (!job || job.status === 'running' || !job.finished_at) return false;
+  // job.finished_at is ISO8601 from datetime.now(timezone.utc).isoformat() so it parses correctly
+  var elapsed = (Date.now() - new Date(job.finished_at).getTime()) / 1000;
+  return elapsed > UPDATE_STALE_AFTER_SEC;
+}
+
+function scheduleStaleHide(job) {
+  if (staleHideTimer) { clearTimeout(staleHideTimer); staleHideTimer = null; }
+  if (!job || !job.finished_at) return;
+  var elapsed = (Date.now() - new Date(job.finished_at).getTime()) / 1000;
+  var remaining = (UPDATE_STALE_AFTER_SEC - elapsed) * 1000;
+  if (remaining <= 0) { renderUpdateJob(job); return; }
+  staleHideTimer = setTimeout(function() {
+    refreshUpdateStatus();  // re-fetches and re-renders; isJobStale will now hide
+  }, remaining + 500);  // small buffer so we cross the threshold cleanly
+}
+
+function refreshUpdateHistory() {
+  var listEl = document.getElementById('update-history-list');
+  if (!listEl) return;
+  apiCall('GET', '/admin/api/games/' + GAME + '/server/update/history').then(function(d) {
+    var entries = d.history || [];
+    if (entries.length === 0) {
+      listEl.innerHTML = '<div class="form-hint">No update history yet.</div>';
+      return;
+    }
+    var rows = entries.map(function(e) {
+      var ts = e.timestamp ? new Date(e.timestamp + 'Z').toLocaleString() : '?';
+      var dur = e.duration_s ? ' (' + e.duration_s + 's)' : '';
+      var icon, color, detail;
+      if (e.action === 'update_completed') {
+        icon = '✓';
+        color = 'var(--green)';
+        detail = 'build ' + (e.buildid || '?') + dur;
+      } else {
+        icon = '✗';
+        color = 'var(--red)';
+        detail = 'failed' + (e.phase ? ' at ' + e.phase : '');
+      }
+      return '<div style="padding:0.1rem 0; color:' + color + ';">'
+        + icon + ' ' + escHtml(ts) + ' &mdash; ' + escHtml(detail)
+        + ' &mdash; by ' + escHtml(e.username || '?')
+        + '</div>';
+    });
+    listEl.innerHTML = rows.join('');
+  }).catch(function() {
+    listEl.innerHTML = '<div class="form-hint">Failed to load history.</div>';
+  });
+}
+
+function refreshUpdateAvailability() {
+  var el = document.getElementById('update-availability');
+  if (!el) return;
+  apiCall('GET', '/admin/api/games/' + GAME + '/server/update-available').then(function(d) {
+    var btn = document.getElementById('run-update-btn');
+    if (d.available === true) {
+      el.innerHTML = 'Update available - <span style="color:var(--text);">build ' + escHtml(d.installed || '?') + '</span> &rarr; <span style="color:var(--green);">' + escHtml(d.latest || '?') + '</span>';
+      el.style.color = 'var(--yellow)';
+      el.style.fontWeight = '600';
+      if (btn && !btn.disabled) btn.classList.add('btn-stop');  // visually emphasize
+    } else if (d.available === false) {
+      el.textContent = 'Up to date - build ' + (d.installed || '?');
+      el.style.color = 'var(--green)';
+      el.style.fontWeight = '';
+      if (btn) btn.classList.remove('btn-stop');
+    } else {
+      var note = d.installed
+        ? 'Buildwatch data unavailable (installed: ' + d.installed + ')'
+        : 'Buildwatch and installed-buildid both unavailable';
+      el.textContent = note;
+      el.style.color = 'var(--text-muted)';
+      el.style.fontWeight = '';
+      if (btn) btn.classList.remove('btn-stop');
+    }
+  }).catch(function() {
+    el.textContent = 'Buildwatch check failed';
+    el.style.color = 'var(--text-muted)';
+    el.style.fontWeight = '';
+  });
+}
+
+// --- Steam Update ---
+
+var updatePollTimer = null;
+
+function runUpdate() {
+  var gameLabel = (GAME_META && GAME_META.display_name) || GAME;
+  var msg = 'Run Steam Update for ' + gameLabel + '?\n\n'
+    + 'This will:\n'
+    + '  - Snapshot the VM disk (pre)\n'
+    + '  - Backup config files\n'
+    + '  - Stop the server\n'
+    + '  - Run SteamCMD app_update (can take several minutes)\n'
+    + '  - Verify config integrity (auto-restore if drift)\n'
+    + '  - Start the server and wait for ready\n'
+    + '  - Snapshot the VM disk (post)\n'
+    + '  - Announce on Discord (start and finish)\n\n'
+    + 'Players will be disconnected.';
+  showConfirm(msg, function() {
+    var btn = document.getElementById('run-update-btn');
+    btn.disabled = true;
+    btn.textContent = 'Starting...';
+    log('Steam update kicked off for ' + gameLabel, 'info');
+    apiCall('POST', '/admin/api/games/' + GAME + '/server/update').then(function(d) {
+      var jid = (d && d.job && d.job.job_id) || '?';
+      log('Steam update started: job_id=' + jid, 'success');
+      startUpdatePolling();
+    }).catch(function(e) {
+      log('Steam update failed to start: ' + e.message, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Run Steam Update';
+    });
+  });
+}
+
+function startUpdatePolling() {
+  if (updatePollTimer) clearInterval(updatePollTimer);
+  refreshUpdateStatus();
+  updatePollTimer = setInterval(refreshUpdateStatus, 3000);
+}
+
+function stopUpdatePolling() {
+  if (updatePollTimer) { clearInterval(updatePollTimer); updatePollTimer = null; }
+}
+
+function refreshUpdateStatus() {
+  apiCall('GET', '/admin/api/games/' + GAME + '/server/update/status').then(function(d) {
+    renderUpdateJob(d.job);
+  }).catch(function() {});
+}
+
+var staleHideTimer = null;
+
+function renderUpdateJob(job) {
+  var btn = document.getElementById('run-update-btn');
+  var summary = document.getElementById('update-status-summary');
+  var phasesEl = document.getElementById('update-phases');
+  var listEl = document.getElementById('update-phase-list');
+  var errEl = document.getElementById('update-error');
+  if (!btn || !summary) return;
+
+  // No job at all, or terminal job older than 5 min — collapse the inline view.
+  // History table below stays as the persistent record.
+  if (!job || isJobStale(job)) {
+    summary.style.display = 'none';
+    phasesEl.style.display = 'none';
+    errEl.style.display = 'none';
+    btn.disabled = false;
+    btn.textContent = 'Run Steam Update';
+    return;
+  }
+
+  summary.style.display = '';
+  phasesEl.style.display = '';
+
+  if (job.status === 'running') {
+    summary.textContent = 'RUNNING — phase: ' + (job.current_phase || '?') + ' (started by ' + job.started_by + ')';
+    summary.style.color = 'var(--yellow)';
+    btn.disabled = true;
+    btn.textContent = 'Update in progress...';
+    errEl.style.display = 'none';
+    if (!updatePollTimer) startUpdatePolling();
+  } else if (job.status === 'completed') {
+    summary.textContent = 'COMPLETED — build ' + (job.new_buildid || '?') + ' (started by ' + job.started_by + ')';
+    summary.style.color = 'var(--green)';
+    btn.disabled = false;
+    btn.textContent = 'Run Steam Update';
+    errEl.style.display = 'none';
+    stopUpdatePolling();
+    // Refresh availability + history so the new state shows immediately.
+    setTimeout(refreshUpdateAvailability, 1000);
+    setTimeout(refreshUpdateAvailability, 65000);  // bust the relay's 60s installed-buildid cache
+    setTimeout(refreshUpdateHistory, 1500);
+    scheduleStaleHide(job);
+  } else if (job.status === 'failed') {
+    summary.textContent = 'FAILED at phase ' + (job.current_phase || '?') + ' (started by ' + job.started_by + ')';
+    summary.style.color = 'var(--red)';
+    btn.disabled = false;
+    btn.textContent = 'Run Steam Update';
+    if (job.error) {
+      errEl.style.display = '';
+      errEl.textContent = 'Error: ' + job.error;
+    }
+    stopUpdatePolling();
+    setTimeout(refreshUpdateHistory, 1500);
+    scheduleStaleHide(job);
+  }
+
+  var rows = (job.phases || []).map(function(p) {
+    var icon = p.status === 'ok' ? '✓' : (p.status === 'failed' ? '✗' : '·');
+    var color = p.status === 'ok' ? 'var(--green)' : (p.status === 'failed' ? 'var(--red)' : 'var(--yellow)');
+    var label = '';
+    if (p.started_at) {
+      var s = new Date(p.started_at);
+      label = s.toLocaleTimeString();
+      if (p.finished_at) {
+        var f = new Date(p.finished_at);
+        var dur = Math.max(0, Math.round((f - s) / 1000));
+        label += ' (' + dur + 's)';
+      } else {
+        label += ' (running...)';
+      }
+    }
+    var err = p.error ? ' — ' + escHtml(p.error) : '';
+    return '<div style="padding:0.1rem 0; color:' + color + ';">'
+      + icon + ' ' + escHtml(p.name) + ' — ' + escHtml(label) + err
+      + '</div>';
+  });
+  listEl.innerHTML = rows.join('') || '<div class="form-hint">No phases yet.</div>';
+}
+
+loadGameMeta();
+refreshStatus();
+refreshSnapshots();
+loadSnapSchedule();
+refreshMemory();
+refreshMemory7d();
+setInterval(refreshStatus, 30000);
+setInterval(refreshMemory, 60000);
+setInterval(refreshMemory7d, 300000);
+// Poll pending ops every 5s for smooth countdown display
+setInterval(checkPending, 5000);
+// Buildwatch only polls Steam every 15 min, so 5 min refresh on the badge is generous
+setInterval(function() {
+  var card = document.getElementById('update-card');
+  if (card && card.style.display !== 'none') refreshUpdateAvailability();
+}, 300000);
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeTimedModal();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,107 @@
+{# Import a Solido to your character — GET /portal/solido/import.
+   Context (routers/solido.py solido_import_page): is_linked, characters
+   (list of {account_id, character_name, online}), import_cap, solido_site.
+   The POST /portal/solido/import is session + CSRF gated and self-scoped. #}
+{% extends "portal/base.html" %}
+
+{% block title %}Import a Solido — Last Sietch{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/admin/static/css/portal/portal-solido.css?v={{ solido_css_v }}">
+{% endblock %}
+
+{% block content %}
+<section class="solido-import" data-solido-import>
+  <a class="solido-detail__back" href="/portal/solido">&larr; Back to the market</a>
+  <h1 class="solido-import__title">Import a Solido to your character</h1>
+  <p class="solido-import__lede">
+    Turn a Solido blueprint into a new Solido tool in your CHOAM bank or
+    backpack. Use a design from
+    <a href="{{ solido_site }}" target="_blank" rel="noopener">dune.layout.tools</a>,
+    one shared on our market, or a <code>.json</code> file you saved.
+  </p>
+
+  {% if not is_linked %}
+    <p class="solido-import__notice">
+      Link your character first to import blueprints.
+      <a href="/portal/account">Link a character</a>.
+    </p>
+  {% else %}
+  <input type="hidden" data-csrf value="{{ portal_csrf_token | default('', true) }}">
+
+  <form class="solido-import__form" data-import-form>
+
+    {% if characters|length > 1 %}
+    <fieldset class="solido-import__field">
+      <legend>Character</legend>
+      {% for c in characters %}
+      <label class="solido-import__radio">
+        <input type="radio" name="account_id" value="{{ c.account_id }}"
+               data-online="{{ '1' if c.online else '0' }}"
+               {% if loop.first %}checked{% endif %}>
+        <span>{{ c.character_name }}</span>
+        <span class="solido-import__status {{ 'is-online' if c.online else 'is-offline' }}">
+          {{ 'Online' if c.online else 'Offline' }}</span>
+      </label>
+      {% endfor %}
+    </fieldset>
+    {% else %}
+      {% set c = characters[0] %}
+      <input type="hidden" name="account_id" value="{{ c.account_id }}"
+             data-online="{{ '1' if c.online else '0' }}">
+      <p class="solido-import__who">
+        Importing for <strong>{{ c.character_name }}</strong>
+        <span class="solido-import__status {{ 'is-online' if c.online else 'is-offline' }}">
+          {{ 'Online' if c.online else 'Offline' }}</span>
+      </p>
+    {% endif %}
+
+    <fieldset class="solido-import__field">
+      <legend>Blueprint source</legend>
+      <div data-public-upload>
+        <label class="solido-import__radio">
+          <input type="radio" name="source_type" value="public" checked>
+          Public market link or UUID</label>
+        <input type="text" name="link" class="solido-import__input" data-src="public"
+               placeholder="https://dune.layout.tools/… or a blueprint UUID"
+               autocomplete="off" spellcheck="false">
+        <label class="solido-import__radio">
+          <input type="radio" name="source_type" value="upload">
+          Upload a .json file</label>
+        <input type="file" name="blueprint_file" class="solido-import__input"
+               data-src="upload" accept="application/json,.json" hidden>
+      </div>
+      <div class="solido-import__private" data-private hidden>
+        <input type="hidden" name="publish_id" value="">
+        <p>Importing market listing: <strong data-private-title>…</strong></p>
+      </div>
+    </fieldset>
+
+    <fieldset class="solido-import__field">
+      <legend>Deliver to</legend>
+      <label class="solido-import__radio">
+        <input type="radio" name="delivery" value="bank" checked>
+        CHOAM bank <em>(works while online)</em></label>
+      <label class="solido-import__radio" data-backpack>
+        <input type="radio" name="delivery" value="backpack">
+        Backpack <em data-backpack-note>(log out of the game first)</em></label>
+    </fieldset>
+
+    <button type="submit" class="portal-btn portal-btn--primary" data-import-submit>
+      Import to my character</button>
+    <p class="solido-import__result" data-import-result role="status" aria-live="polite"></p>
+    <p class="solido-import__cap">Up to {{ import_cap }} imports per day.</p>
+  </form>
+  {% endif %}
+</section>
+
+<footer class="solido-credit">
+  <p>Blueprints use the Solido format
+     (<a href="{{ solido_site }}" rel="noopener" target="_blank">dune.layout.tools</a>,
+     by icehunter). Imported designs arrive as an empty Solido tool you place in-game.</p>
+</footer>
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/portal-solido.js?v={{ solido_js_v }}" defer></script>
+{% endblock %}

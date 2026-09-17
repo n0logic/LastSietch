@@ -1,0 +1,58 @@
+{% set rows = players if players is defined else [] %}
+{% if rows %}
+  <ul class="char-card-grid" role="list">
+    {% for p in rows %}
+      {% set status_lc = (p.online_status or '')|string|lower %}
+      {% set is_online = status_lc == 'online' or p.online_status == True or p.is_online %}
+      {% set is_grace = p.in_grace_period %}
+      <li>
+        <a class="char-card char-card--mini"
+           href="/admin/v2/players/{{ p.account_id }}"
+           data-account-id="{{ p.account_id }}"
+           aria-label="Open the detailed view for {{ p.name or p.character_name or 'character' }} (account {{ p.account_id }})">
+          <span class="char-card__portrait" aria-hidden="true">
+            <span class="char-card__portrait-glyph">{{ (p.name or p.character_name or '?')[0]|upper }}</span>
+            {% if is_grace %}
+              <span class="status-dot status-dot--grace char-card__dot" aria-hidden="true"></span>
+            {% elif is_online %}
+              <span class="status-dot status-dot--online char-card__dot" aria-hidden="true"></span>
+            {% else %}
+              <span class="status-dot status-dot--offline char-card__dot" aria-hidden="true"></span>
+            {% endif %}
+          </span>
+          <span class="char-card__meta">
+            <span class="char-card__name">{{ p.name or p.character_name or '—' }}</span>
+            <span class="char-card__sub">
+              <span class="char-card__acct">#{{ p.account_id }}</span>
+              {% if is_grace %}
+                <span class="status-badge status-badge--grace">grace</span>
+              {% elif is_online %}
+                <span class="status-badge status-badge--online">online</span>
+              {% else %}
+                <span class="status-badge status-badge--offline">offline</span>
+              {% endif %}
+            </span>
+            <span class="char-card__hint">
+              {% if p.last_login_iso %}
+                <time datetime="{{ p.last_login_iso }}">{{ p.last_login_display or p.last_login_iso }}</time>
+              {% elif p.last_login_time %}
+                {{ p.last_login_time }}
+              {% else %}
+                never
+              {% endif %}
+            </span>
+          </span>
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <div class="empty-state empty-state--zero-results">
+    <p class="empty-state__headline">No players match your filter</p>
+    <p class="empty-state__body">Try clearing the search or unchecking "Online only".</p>
+    <div class="empty-state__actions">
+      <button type="reset" form="player-picker-filter" class="btn btn-sm"
+              onclick="setTimeout(function(){ htmx.trigger('#player-picker-filter', 'change'); }, 0);">Reset filters</button>
+    </div>
+  </div>
+{% endif %}

@@ -1,0 +1,185 @@
+/* ============================================================================
+ * Admin > Players > Chat.
+ *
+ * Lifted out of an inline <style> in chat.html, which is why every token in it
+ * was a guess: --muted does not exist (--text-muted does), the --bg fallback
+ * was not the value of --bg, and the green and amber literals were near-misses
+ * for --green and --accent. A fallback that ALWAYS fires is not a fallback, it
+ * is a colour nobody chose, so there are none here: every colour is a token.
+ * ========================================================================= */
+
+.v2-chat {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4) var(--space-8);
+}
+
+.v2-chat__title {
+  margin: 0 0 var(--space-1);
+}
+
+.v2-chat__subtitle {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-5);
+}
+
+.v2-chat .card {
+  padding: var(--space-5);
+}
+
+/* The live lever. It sits first on the page and wears the one amber edge, so
+   the scope that actually publishes is the one the eye lands on. Scoped with
+   body.admin-page: the shared .card rule sets the `border` shorthand at that
+   specificity, and a bare class here would be overridden by it. */
+body.admin-page .v2-chat__card--primary {
+  border-left: 2px solid var(--accent);
+}
+
+.v2-chat__badge {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+.v2-chat .scope-group {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.v2-chat .scope-group label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  transition: border-color var(--motion-fast) var(--ease-in-out);
+}
+
+.v2-chat .scope-group label:hover {
+  border-color: var(--border-strong);
+}
+
+/* A disabled scope is greyed and unclickable, not merely labelled. Map and
+   server-wide chat have never published, and a radio you can select is a
+   promise the backend does not keep. */
+.v2-chat .scope-group label.is-disabled,
+.v2-chat .scope-group label.is-disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.55;
+  border-color: var(--border-subtle);
+}
+
+.v2-chat__scope-reason {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.v2-chat textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 90px;
+  resize: vertical;
+}
+
+.v2-chat .char-count {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.v2-chat__warn {
+  font-size: var(--text-xs);
+  color: var(--accent);
+  margin: var(--space-1) 0 0;
+}
+
+.v2-chat__results {
+  margin-top: var(--space-4);
+}
+
+.v2-chat__result {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.v2-chat__result--ok {
+  border-left: 3px solid var(--green);
+}
+
+.v2-chat__result--fail {
+  border-left: 3px solid var(--red);
+}
+
+.v2-chat__result-detail {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: var(--space-1);
+}
+
+.chat-picker {
+  position: relative;
+}
+
+.chat-suggest {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+.chat-suggest-item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.chat-suggest-item:hover,
+.chat-suggest-item:focus {
+  background: var(--accent-glow);
+  outline: none;
+}
+
+.chat-suggest-item code {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}
+
+.chat-picked {
+  font-size: var(--text-xs);
+  color: var(--green);
+  margin: var(--space-1) 0 0;
+}

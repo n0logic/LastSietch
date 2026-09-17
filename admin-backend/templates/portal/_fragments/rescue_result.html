@@ -1,0 +1,8 @@
+{# Self-rescue result — POST /portal/rescue
+   Rendered into the map page's #map-rescue-result by portal.js.
+   Context: ok (bool), message (str), cooldown_seconds (int) #}
+<div class="rescue-result {{ 'rescue-result--ok' if ok else 'rescue-result--err' }}"
+     role="status" aria-live="polite"
+     {% if cooldown_seconds and cooldown_seconds > 0 %}data-rescue-cooldown="{{ cooldown_seconds }}"{% endif %}>
+  <p class="rescue-result__msg">{{ message }}</p>
+</div>

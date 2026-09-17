@@ -1,0 +1,39 @@
+{
+ "factions": {
+  "atreides": "atreides",
+  "harkonnen": "harkonnen"
+ },
+ "banners": {
+  "atreides": "atreides-banner",
+  "harkonnen": "harkonnen-banner"
+ },
+ "houses": {
+  "alexin": "alexin",
+  "argosaz": "argosaz",
+  "dyvetz": "dyvetz",
+  "ecaz": "ecaz",
+  "hagal": "hagal",
+  "hurata": "hurata",
+  "imota": "imota",
+  "kenola": "kenola",
+  "lindaren": "lindaren",
+  "maros": "maros",
+  "mikarrol": "mikarrol",
+  "moritani": "moritani",
+  "mutelli": "mutelli",
+  "novebruns": "novebruns",
+  "richese": "richese",
+  "sor": "sor",
+  "spinette": "spinette",
+  "taligari": "taligari",
+  "thorvald": "thorvald",
+  "tseida": "tseida",
+  "varota": "varota",
+  "vernius": "vernius",
+  "wallach": "wallach",
+  "wayku": "wayku",
+  "wydras": "wydras",
+  "mikkarol": "mikarrol"
+ },
+ "_join": "board house key = strip 'da_house' prefix, then look up in houses{} (mikkarol->mikarrol aliased)"
+}

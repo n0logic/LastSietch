@@ -1,0 +1,58 @@
+{# Systems & Health > Monitor.
+
+   The page body for the Monitor sub-tab. base.html renders the tab bar and,
+   for this path, the Systems & Health sub-nav (Health | Monitor); the old
+   four-entry server sub-nav named in this comment (Monitor | CVars | Settings
+   | Updates) has not existed since wave 1, and neither have the two routes it
+   pointed at.
+
+   The five P1 panels lay out in a 12-column grid. Each panel is a fragment
+   include with stable DOM IDs; JS hydrates them from the aggregator JSON at
+   /admin/api/dune/v2/server-monitor on a visibility-gated 10s poll. First
+   paint shows "loading" empty states: the aggregator is fetched client-side
+   per design Q6 (low route-handler latency, one render path).
+#}
+{% extends "v2/base.html" %}
+{% block title %}Systems & Health · Monitor{% endblock %}
+{% block extra_css %}
+{# The admin edge sends no Cache-Control, so the ?v= key IS the cache bust. #}
+<link rel="stylesheet" href="/admin/static/css/v2/monitor.css?v=20260904a">
+{% endblock %}
+{% block content %}
+<main class="v2-monitor" id="v2-monitor"
+      data-aggregator-url="/admin/api/dune/v2/server-monitor"
+      data-poll-interval="10000">
+
+  <header class="v2-monitor__header">
+    <div>
+      <h1 class="v2-monitor__title">Systems &amp; Health · Monitor</h1>
+      <p class="v2-monitor__subtitle">
+        Live battlegroup health, presence trend, world counters, action stream and
+        Funcom intel on one 10-second poll, with per-source error isolation.
+      </p>
+    </div>
+    <div class="v2-monitor__meta">
+      <span class="v2-monitor__refresh" id="v2-monitor-refresh-state" aria-live="polite">idle</span>
+      <span class="v2-monitor__refresh-ts" id="v2-monitor-refresh-ts" data-ts="0">refreshed --</span>
+    </div>
+  </header>
+
+  <section class="monitor-grid" aria-label="Server monitor panels">
+    {% include "v2/_fragments/monitor_hero.html" %}
+    {% include "v2/_fragments/monitor_presence.html" %}
+    {% include "v2/_fragments/monitor_world_counters.html" %}
+    {% include "v2/_fragments/monitor_action_stream.html" %}
+    {% include "v2/_fragments/monitor_funcom_intel.html" %}
+    {# VC4 Leaderboards: weekly PvP / Deaths / Pilots top-N from telemetry-api. #}
+    {% include "v2/_fragments/monitor_leaderboards.html" %}
+    {# W6 Spice-spawn toggle (VC2 P2): boolean is_spawning_active per field type. #}
+    {% include "v2/_fragments/spice_summary.html" %}
+  </section>
+
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/v2-monitor.js?v=20260904a" defer></script>
+<script src="/admin/static/js/v2/spice.js?v=20260904a" defer></script>
+{% endblock %}

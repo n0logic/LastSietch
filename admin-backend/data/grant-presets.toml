@@ -1,0 +1,57 @@
+# VC3 v1.1 — Curated grant preset library.
+#
+# Three real-world presets:
+#   1. level_200_kit   — Max-out preset. Mirrors the first live max-out batch of 2026-05-27
+#                        (grant_ids 50-59). Faction selector at fire-time.
+#   2. welcome_pack    — Modest newcomer boost (online-safe currency only).
+#   3. event_bonus     — Small buff for event days.
+#
+# ops_json uses `{{name}}` placeholders for templated values. Currently
+# wired templates: {{faction}} (string), {{faction_id}} (numeric, derived
+# from faction by the backend: atreides=1, harkonnen=2).
+
+[[preset]]
+name = "level_200_kit"
+display = "Level 200 Kit"
+description = "Max-out preset — Lvl 200 char, all 5 spec tracks @ 2000 XP, Ch3 progression complete, faction rank 19. Pick Atreides or Harkonnen at fire-time."
+operator_role = "admin"
+reversible = false
+parameters = [
+  { name = "faction", label = "Faction", type = "choice", choices = ["atreides", "harkonnen"] },
+]
+ops = [
+  { grant_type = "char_xp",            detail = { amount = 344440, force_wipe_points_ack = false } },
+  { grant_type = "intel",              detail = { amount = 2000 } },
+  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", level = 0, track_type = "Crafting"    } },
+  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", level = 0, track_type = "Gathering"   } },
+  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", level = 0, track_type = "Exploration" } },
+  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", level = 0, track_type = "Combat"      } },
+  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", level = 0, track_type = "Sabotage"    } },
+  { grant_type = "faction_rep",        detail = { mode = "set", amount = 11975, faction_id = "{{faction_id}}" } },
+  { grant_type = "progression_preset", detail = { preset = "rank19_eligible", faction = "{{faction}}" } },
+]
+
+[[preset]]
+name = "welcome_pack"
+display = "Welcome Pack"
+description = "Sietch welcome package — modest Solari + scrip + intel for newcomers. Online-safe currency only."
+operator_role = "admin"
+reversible = false
+parameters = []
+ops = [
+  { grant_type = "solari_currency", detail = { mode = "add", amount = 500, target = "balance" } },
+  { grant_type = "house_scrip",     detail = { mode = "add", amount = 100 } },
+  { grant_type = "intel",           detail = { amount = 50 } },
+]
+
+[[preset]]
+name = "event_bonus"
+display = "Event Bonus"
+description = "Small buff for event days — Solari + intel."
+operator_role = "admin"
+reversible = false
+parameters = []
+ops = [
+  { grant_type = "solari_currency", detail = { mode = "add", amount = 1000, target = "balance" } },
+  { grant_type = "intel",           detail = { amount = 50 } },
+]

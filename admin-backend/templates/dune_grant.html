@@ -1,0 +1,2815 @@
+{% extends "base.html" %}
+{% block title %}Grant Progression{% endblock %}
+{% block content %}
+<style>
+/* P5 grant picker — tabbed pill UI replacing the flat <select> dropdown */
+.grant-picker { margin-top: 0.25rem; }
+.grant-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+.grant-tab {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  line-height: 1.1;
+}
+.grant-tab:hover { border-color: var(--accent); color: var(--text); }
+.grant-tab.active {
+  background: rgba(212, 137, 28, 0.16);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.grant-tab-count {
+  font-size: 0.65rem;
+  background: var(--border);
+  color: var(--text-muted);
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.grant-tab.active .grant-tab-count {
+  background: var(--accent);
+  color: var(--bg);
+}
+.grant-search {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 0.75rem;
+}
+.grant-search:focus { outline: none; border-color: var(--accent); }
+.grant-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.55rem;
+  margin-bottom: 0.5rem;
+}
+.grant-card {
+  text-align: left;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.7rem 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.1s, background 0.1s, box-shadow 0.1s;
+  font-family: var(--font-sans);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.grant-card:hover {
+  border-color: var(--accent);
+  background: rgba(212, 137, 28, 0.05);
+}
+.grant-card.selected {
+  border-color: var(--accent);
+  background: rgba(212, 137, 28, 0.16);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.grant-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+.grant-card-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.25;
+  flex: 1;
+}
+.grant-card-id {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding-top: 0.1rem;
+}
+.grant-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.grant-badge {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.grant-badge-online {
+  background: rgba(0, 255, 65, 0.10);
+  color: var(--green);
+  border: 1px solid rgba(0, 255, 65, 0.35);
+}
+.grant-badge-offline {
+  background: rgba(241, 196, 15, 0.10);
+  color: var(--yellow);
+  border: 1px solid rgba(241, 196, 15, 0.35);
+}
+.grant-badge-high {
+  background: rgba(192, 57, 43, 0.18);
+  color: var(--red);
+  border: 1px solid rgba(192, 57, 43, 0.45);
+}
+.grant-badge-cat {
+  background: rgba(212, 137, 28, 0.10);
+  color: var(--accent);
+  border: 1px solid rgba(212, 137, 28, 0.35);
+}
+
+/* Grant bench item rows (bank G29, container G30, single item).
+   The row lays out on two lines so the search box always gets a full-width
+   column: grid children default to min-width:auto and base.html gives every
+   input width:100%, so a number input's intrinsic width used to blow the
+   old `1fr 110px 140px auto` grid and squeeze the picker down to a stub.
+   Every child here carries min-width:0 so that cannot happen again. */
+.gb-item-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+}
+.gb-item-row > * { min-width: 0; }
+.gb-row-ctl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 190px) auto;
+  gap: 0.6rem;
+  align-items: end;
+}
+.gb-row-ctl > * { min-width: 0; }
+.gb-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-bottom: 0.3rem;
+}
+.gb-picker { min-width: 0; }
+.gb-picker input[type="text"] { min-width: 0; }
+.gb-list {
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  background: var(--bg);
+}
+.gb-opt {
+  padding: 0.45rem 0.85rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+.gb-opt:hover, .gb-opt.active { background: var(--accent-glow); }
+.gb-opt-meta { color: var(--text-muted); font-size: 0.68rem; }
+.gb-opt-flat { cursor: default; color: var(--text-muted); }
+.gb-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.4rem 0; }
+.gb-chip {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.22rem 0.6rem;
+  cursor: pointer;
+  line-height: 1.1;
+}
+.gb-chip:hover { border-color: var(--accent); color: var(--text); }
+.gb-chip.active {
+  background: rgba(212, 137, 28, 0.16);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.gb-grade { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.gb-grade-pill {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  line-height: 1.1;
+}
+.gb-grade-pill:hover { border-color: var(--accent); color: var(--text); }
+.gb-grade-pill.active {
+  background: rgba(212, 137, 28, 0.16);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.gb-grade[data-locked="1"] .gb-grade-pill { cursor: not-allowed; opacity: 0.4; }
+.gb-grade[data-locked="1"] .gb-grade-pill.active { opacity: 1; }
+.gb-grade-hint { margin-top: 0.3rem; }
+.gb-stack { display: flex; gap: 0.35rem; align-items: center; min-width: 0; }
+.gb-stack input { min-width: 0; }
+.gb-max {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  padding: 0.3rem 0.5rem;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.gb-max:hover { border-color: var(--accent); color: var(--accent); }
+.gb-remove {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 0.35rem 0.65rem;
+  height: fit-content;
+  color: var(--red);
+  border: 1px solid var(--red);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+.gb-tag {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  margin-left: 0.4rem;
+  white-space: nowrap;
+}
+</style>
+<div class="container">
+  <div style="margin-bottom:1rem;">
+    <a href="/admin/dashboard/dune" style="font-family:var(--font-mono); font-size:0.95rem; color:var(--text-muted); text-decoration:none;"
+       onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">&larr; Dune Dashboard</a>
+  </div>
+
+  <div id="grant-msg" class="msg"></div>
+
+  <!-- Step 1 — Player picker -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div class="card-title">Step 1 &mdash; Select Player</div>
+    <div class="form-group" style="margin-bottom:0.5rem;">
+      <label for="player-search">Character (online and offline)</label>
+      <input type="text" id="player-search" autocomplete="off" spellcheck="false"
+             placeholder="Type to search characters..." oninput="filterPlayers()" onfocus="openPlayerList()">
+      <div id="player-list" style="display:none; max-height:240px; overflow-y:auto; border:1px solid var(--border); border-top:none; border-radius:0 0 4px 4px; background:var(--bg);"></div>
+      <div class="form-hint">No free-text names &mdash; pick a character from the list. Offline characters are included.</div>
+    </div>
+    <div id="player-selected" style="display:none; margin-top:0.75rem; padding:0.6rem 0.85rem; border:1px solid var(--accent); border-radius:4px; font-family:var(--font-mono); font-size:0.8rem;"></div>
+  </div>
+
+  <!-- Step 2 — Grant-type selector (P5: tabbed pill picker) -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div class="card-title">Step 2 &mdash; Grant Type &amp; Details</div>
+    <div class="form-group">
+      <label>Grant type</label>
+      <div class="grant-picker">
+        <div class="grant-tabs" id="grant-tabs" role="tablist"></div>
+        <input type="text" id="grant-search" class="grant-search"
+               placeholder="Search grants by name or id…"
+               oninput="filterGrantCards()" autocomplete="off" spellcheck="false">
+        <div class="grant-cards" id="grant-cards" role="tabpanel" aria-live="polite"></div>
+      </div>
+      <!-- Hidden select keeps existing onGrantTypeChange() handler intact -->
+      <select id="grant-type" onchange="onGrantTypeChange()" style="display:none;">
+        <option value="">&mdash; Select a grant type &mdash;</option>
+      </select>
+      <div class="form-hint" id="grant-type-hint"></div>
+    </div>
+    <div id="grant-inputs"></div>
+  </div>
+
+  <!-- Step 3 — Preview -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+      <div class="card-title" style="margin-bottom:0;">Step 3 &mdash; Preview</div>
+      <button class="btn btn-sm" id="preview-btn" onclick="buildPreview()">Build Preview</button>
+    </div>
+    <div id="preview-gate" class="msg"></div>
+    <div id="preview-wrap">
+      <div class="form-hint">Select a player and grant details, then build the preview.</div>
+    </div>
+  </div>
+
+  <!-- Step 4 — Confirm + Apply -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div class="card-title">Step 4 &mdash; Confirm &amp; Apply</div>
+    <div class="form-hint" style="margin-bottom:1rem;">
+      Every grant is audit-logged. Tabular grants apply while the player is online; RAM-fragile grants require the player to be offline.
+    </div>
+    <div class="form-group" id="live-delivery-wrap" hidden style="margin-bottom:1rem;">
+      <label class="form-check">
+        <input type="checkbox" id="live-delivery-cb" onchange="applyPreviewGate()" />
+        Deliver live now via RMQ (player is online)
+      </label>
+      <div class="form-hint">
+        Pushes this grant in-world instantly through the native server-command path
+        instead of waiting for the player to log off. Available for base items
+        (quality 0) and character XP only; graded items must be granted offline.
+      </div>
+    </div>
+    <div class="btn-group" style="margin-top:0;">
+      <button class="btn btn-accent" id="apply-btn" onclick="applyGrant()" disabled>Apply Grant</button>
+    </div>
+    <div class="log" id="grant-log" style="display:none;"></div>
+  </div>
+
+  <!-- Recent Grants -->
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div class="card-title" style="margin-bottom:0;">Recent Grants</div>
+      <button class="btn btn-sm" onclick="toggleRecent()" id="recent-toggle">Show</button>
+    </div>
+    <div id="recent-panel" style="display:none; margin-top:1rem;">
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Admin</th>
+              <th>Player</th>
+              <th>Grant</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="recent-tbody"></tbody>
+        </table>
+      </div>
+      <div id="recent-empty" style="text-align:center; color:var(--text-muted); font-family:var(--font-mono); font-size:0.8rem; padding:1rem;">No grants yet</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Typed-Confirmation Dialog (high-value grants) -->
+<div class="confirm-overlay" id="typed-overlay">
+  <div class="confirm-dialog" style="text-align:left; max-width:440px;">
+    <p id="typed-message" style="text-align:center;">Confirm high-value grant</p>
+    <div class="form-group">
+      <input type="text" id="typed-input" autocomplete="off" spellcheck="false" placeholder="Type to confirm">
+    </div>
+    <div class="btn-group" style="justify-content:center;">
+      <button class="btn btn-accent" id="typed-confirm">Confirm Grant</button>
+      <button class="btn" onclick="closeTypedConfirm()">Cancel</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('nav-dashboard').classList.add('active');
+
+/* ── State ── */
+var catalog = null;            // full catalog JSON
+var grantTypeById = {};        // id -> grant_type def
+var keystoneCatalog = null;    // {keystones: [...], tracks: [...]} or null until loaded
+var bbSources = null;          // G21 base-backup sources list, lazy-loaded
+var players = [];              // [{account_id, name, online_status, last_login_time, in_grace_period}]
+var activeHouses = [];         // current term's active Landsraad house names
+var selectedPlayer = null;     // chosen player object
+var selectedType = null;       // chosen grant_type def
+var idempotencyKey = null;     // UUIDv4, set when preview built
+var previewDetail = null;      // detail{} captured at preview
+var previewBlocked = false;    // online + requires_offline gate
+var applying = false;          // Apply debounce (idempotency Layer 1)
+
+/* ── Helpers ── */
+function escHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = (s == null) ? '' : s;
+  return d.innerHTML;
+}
+
+/* textContent-to-innerHTML does NOT escape the double quote, so escHtml is only
+ * safe between tags. Anything written INSIDE an attribute value goes through
+ * this one instead (same shape as static/js/landing.js). */
+function escAttr(s) {
+  return String((s == null) ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function uuidv4() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = (window.crypto && crypto.getRandomValues)
+      ? crypto.getRandomValues(new Uint8Array(1))[0] & 15
+      : Math.floor(Math.random() * 16);
+    var v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+function isOnline(p) {
+  return p && String(p.online_status || '').toLowerCase() === 'online';
+}
+
+function presenceDot(online) {
+  var color = online ? 'var(--green)' : 'var(--text-muted)';
+  var label = online ? 'Online' : 'Offline';
+  return '<span style="color:' + color + ';">&#9679;</span> '
+    + '<span style="color:' + color + ';">' + label + '</span>';
+}
+
+var grantLog = document.getElementById('grant-log');
+function log(msg, type) {
+  grantLog.style.display = '';
+  var entry = document.createElement('div');
+  entry.className = 'log-entry' + (type ? ' ' + type : '');
+  entry.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+  grantLog.appendChild(entry);
+  grantLog.scrollTop = grantLog.scrollHeight;
+}
+
+/* ── Step 1 — Player picker ── */
+function loadPlayers() {
+  apiCall('GET', '/admin/api/dune/grant/players').then(function(d) {
+    activeHouses = d.active_houses || [];
+    players = (d.players || d || []).slice();
+    players.sort(function(a, b) {
+      var ao = isOnline(a) ? 0 : 1, bo = isOnline(b) ? 0 : 1;
+      if (ao !== bo) return ao - bo;
+      return String(a.name || '').toLowerCase() < String(b.name || '').toLowerCase() ? -1 : 1;
+    });
+    renderPlayerList(players);
+  }).catch(function(e) {
+    document.getElementById('player-list').style.display = '';
+    document.getElementById('player-list').innerHTML =
+      '<div style="padding:0.6rem 0.85rem; color:var(--red); font-family:var(--font-mono); font-size:0.78rem;">Failed to load players: '
+      + escHtml(e.message || 'error') + '</div>';
+  });
+}
+
+function renderPlayerList(list) {
+  var el = document.getElementById('player-list');
+  if (!list.length) {
+    el.innerHTML = '<div style="padding:0.6rem 0.85rem; color:var(--text-muted); font-family:var(--font-mono); font-size:0.78rem;">No matching characters</div>';
+    return;
+  }
+  el.innerHTML = list.map(function(p, i) {
+    var online = isOnline(p);
+    return '<div class="player-opt" data-idx="' + i + '" onclick="pickPlayer(' + p.account_id + ')" '
+      + 'style="padding:0.5rem 0.85rem; cursor:pointer; border-bottom:1px solid var(--border); font-family:var(--font-mono); font-size:0.8rem; display:flex; justify-content:space-between; gap:1rem;" '
+      + 'onmouseover="this.style.background=\'var(--accent-glow)\'" onmouseout="this.style.background=\'\'">'
+      + '<span>' + escHtml(p.name || ('account ' + p.account_id)) + '</span>'
+      + '<span style="white-space:nowrap;">' + presenceDot(online) + '</span>'
+      + '</div>';
+  }).join('');
+}
+
+function openPlayerList() {
+  document.getElementById('player-list').style.display = '';
+}
+
+function filterPlayers() {
+  openPlayerList();
+  var q = document.getElementById('player-search').value.trim().toLowerCase();
+  if (!q) { renderPlayerList(players); return; }
+  renderPlayerList(players.filter(function(p) {
+    return String(p.name || '').toLowerCase().indexOf(q) >= 0
+        || String(p.account_id).indexOf(q) >= 0;
+  }));
+}
+
+function pickPlayer(accountId) {
+  var p = players.filter(function(x) { return x.account_id === accountId; })[0];
+  if (!p) return;
+  selectedPlayer = p;
+  document.getElementById('player-list').style.display = 'none';
+  document.getElementById('player-search').value = p.name || ('account ' + accountId);
+  var online = isOnline(p);
+  var grace = p.in_grace_period ? ' &middot; <span style="color:var(--yellow);">in reconnect grace</span>' : '';
+  document.getElementById('player-selected').style.display = '';
+  document.getElementById('player-selected').innerHTML =
+    'Selected: <strong>' + escHtml(p.name || ('account ' + accountId)) + '</strong> '
+    + '<span style="color:var(--text-muted);">(account ' + accountId + ')</span> &mdash; '
+    + presenceDot(online) + grace;
+  invalidatePreview();
+  // G21 — when the active form is a bb_ grant, refresh the slot warning so
+  // the yellow/red band tracks the newly-picked recipient.
+  refreshBbSlotWarning();
+  // G30 — refresh the container target list for the newly-picked recipient.
+  if (selectedType && selectedType.id === 'container_items_batch') loadContTargets();
+}
+
+document.addEventListener('click', function(e) {
+  var grp = document.getElementById('player-search');
+  var lst = document.getElementById('player-list');
+  if (e.target !== grp && !lst.contains(e.target)) lst.style.display = 'none';
+});
+
+/* ── Step 2 — Grant-type selector + type-switched inputs ──
+ * P5 (2026-05-25): tabbed pill picker replaces the flat dropdown.
+ * The hidden <select id="grant-type"> remains in DOM and is set programmatically
+ * so onGrantTypeChange() and all downstream code keep working unchanged.
+ */
+var GRANT_CATEGORIES = [
+  ['Currency',              'Currency'],
+  ['Items',                 'Items & Recipes'],
+  ['Character Progression', 'Character Progression'],
+  ['Faction Progression',   'Faction Progression'],
+  ['Progression-Resets',    'Progression — Resets'],
+  ['Bases',                 'Bases & Blueprints'],
+  ['Utility',               'Player Utility'],
+];
+var activeGrantCategory = null;
+
+function loadCatalog() {
+  apiCall('GET', '/admin/api/dune/grant/catalog').then(function(d) {
+    catalog = d;
+    var sel = document.getElementById('grant-type');
+    (catalog.grant_types || []).forEach(function(gt) {
+      grantTypeById[gt.id] = gt;
+      var opt = document.createElement('option');
+      opt.value = gt.id;
+      opt.textContent = gt.label + '  [' + gt.id + ']';
+      sel.appendChild(opt);
+    });
+    renderGrantPicker();
+  }).catch(function(e) {
+    showMsg('grant-msg', 'Failed to load grant catalog: ' + (e.message || 'error'), 'error');
+  });
+}
+
+function renderGrantPicker() {
+  var grouped = {};
+  (catalog.grant_types || []).forEach(function(gt) {
+    var cat = gt.category || 'Uncategorized';
+    (grouped[cat] = grouped[cat] || []).push(gt);
+  });
+  var tabBar = document.getElementById('grant-tabs');
+  if (!tabBar) return;
+  tabBar.innerHTML = '';
+  var firstActive = null;
+  GRANT_CATEGORIES.forEach(function(pair) {
+    var catId = pair[0], catLabel = pair[1];
+    var grants = grouped[catId] || [];
+    if (!grants.length) return;
+    if (!firstActive) firstActive = catId;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'grant-tab';
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('data-category', catId);
+    btn.innerHTML = escHtml(catLabel)
+      + ' <span class="grant-tab-count">' + grants.length + '</span>';
+    btn.addEventListener('click', function() { switchGrantTab(catId); });
+    tabBar.appendChild(btn);
+  });
+  // Surface any uncategorized entries as a trailing tab so they're not lost.
+  if (grouped['Uncategorized'] && grouped['Uncategorized'].length) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'grant-tab';
+    btn.setAttribute('data-category', 'Uncategorized');
+    btn.innerHTML = 'Uncategorized <span class="grant-tab-count">' + grouped['Uncategorized'].length + '</span>';
+    btn.addEventListener('click', function() { switchGrantTab('Uncategorized'); });
+    tabBar.appendChild(btn);
+    if (!firstActive) firstActive = 'Uncategorized';
+  }
+  if (firstActive) switchGrantTab(firstActive);
+}
+
+function switchGrantTab(catId) {
+  activeGrantCategory = catId;
+  document.querySelectorAll('.grant-tab').forEach(function(b) {
+    var match = b.getAttribute('data-category') === catId;
+    b.classList.toggle('active', match);
+    b.setAttribute('aria-selected', match ? 'true' : 'false');
+  });
+  // Clear search when changing tabs — keeps the cards predictable.
+  var searchBox = document.getElementById('grant-search');
+  if (searchBox) searchBox.value = '';
+  renderGrantCards();
+}
+
+function renderGrantCards() {
+  var container = document.getElementById('grant-cards');
+  if (!container) return;
+  container.innerHTML = '';
+  var searchBox = document.getElementById('grant-search');
+  var q = searchBox ? searchBox.value.trim().toLowerCase() : '';
+  var selId = document.getElementById('grant-type').value;
+  var matches = (catalog.grant_types || []).filter(function(gt) {
+    var cat = gt.category || 'Uncategorized';
+    // When searching, ignore the active tab and search across ALL grants.
+    if (q) {
+      var hay = (gt.id + ' ' + (gt.label || '')).toLowerCase();
+      return hay.indexOf(q) !== -1;
+    }
+    return cat === activeGrantCategory;
+  });
+  if (!matches.length) {
+    container.innerHTML = '<div class="form-hint" style="grid-column:1/-1;">'
+      + (q ? 'No grants match "' + escHtml(q) + '".' : 'No grants in this category.')
+      + '</div>';
+    return;
+  }
+  matches.forEach(function(gt) {
+    var card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'grant-card';
+    card.setAttribute('data-grant-id', gt.id);
+    if (selId === gt.id) card.classList.add('selected');
+    card.addEventListener('click', function() { selectGrantCard(gt.id); });
+    var badges = '';
+    badges += gt.requires_offline
+      ? '<span class="grant-badge grant-badge-offline" title="Player must be offline + post-logout grace">Offline only</span>'
+      : '<span class="grant-badge grant-badge-online" title="Applies while player is online">Online-safe</span>';
+    if (gt.high_value) {
+      badges += '<span class="grant-badge grant-badge-high" title="High-value grant — review carefully before applying">High value</span>';
+    }
+    // When searching across categories, surface the source category as a third pill.
+    if (q && gt.category) {
+      badges += '<span class="grant-badge grant-badge-cat">' + escHtml(gt.category) + '</span>';
+    }
+    card.innerHTML =
+        '<div class="grant-card-header">'
+      +   '<div class="grant-card-label">' + escHtml(gt.label || gt.id) + '</div>'
+      +   '<div class="grant-card-id">' + escHtml(gt.id) + '</div>'
+      + '</div>'
+      + '<div class="grant-card-badges">' + badges + '</div>';
+    container.appendChild(card);
+  });
+}
+
+function filterGrantCards() {
+  // Re-render the current view with the new search filter applied.
+  renderGrantCards();
+}
+
+function selectGrantCard(gtId) {
+  var sel = document.getElementById('grant-type');
+  sel.value = gtId;
+  document.querySelectorAll('.grant-card').forEach(function(c) {
+    c.classList.toggle('selected', c.getAttribute('data-grant-id') === gtId);
+  });
+  // Fire the existing handler — populates Step 2 inputs + sets selectedType.
+  onGrantTypeChange();
+}
+
+function loadKeystoneCatalog() {
+  if (keystoneCatalog) return Promise.resolve(keystoneCatalog);
+  return apiCall('GET', '/admin/api/dune/grant/keystones').then(function(d) {
+    keystoneCatalog = d;
+    return d;
+  });
+}
+
+// Render the keystone <select> grouped by track. SP-bonus nodes first within
+// each track. Called from the keystone form section after the markup lands.
+function populateKeystoneSelect() {
+  var sel = document.getElementById('gi-keystone-select');
+  if (!sel) return;
+  loadKeystoneCatalog().then(function(d) {
+    sel.innerHTML = '';
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '— select a keystone —';
+    sel.appendChild(placeholder);
+    var byTrack = {};
+    (d.keystones || []).forEach(function(k) {
+      (byTrack[k.track] = byTrack[k.track] || []).push(k);
+    });
+    (d.tracks || Object.keys(byTrack)).forEach(function(track) {
+      var group = document.createElement('optgroup');
+      var spInTrack = (byTrack[track] || []).filter(function(k){return k.sp_bonus>0;}).length;
+      group.label = track + ' (' + (byTrack[track] || []).length + ' keystones'
+        + (spInTrack > 0 ? ', ' + spInTrack + ' with SP bonus' : '') + ')';
+      (byTrack[track] || []).forEach(function(k) {
+        var opt = document.createElement('option');
+        opt.value = String(k.keystone_id);
+        var label = k.friendly_name;
+        if (k.sp_bonus > 0) {
+          label += '  — +' + k.sp_bonus + ' SP';
+        }
+        if (k.node_total > 1) {
+          label += '  (node ' + k.node_index + ' of ' + k.node_total + ')';
+        }
+        label += '  [id ' + k.keystone_id + ']';
+        opt.textContent = label;
+        group.appendChild(opt);
+      });
+      sel.appendChild(group);
+    });
+  }).catch(function(e) {
+    sel.innerHTML = '<option value="">— failed to load keystone catalog: '
+      + escHtml(e.message || 'error') + ' —</option>';
+  });
+}
+
+/* G21 — load + render the saved-base sources dropdown shared by bb_handoff
+ * and bb_clone. Cached on first call until reload. */
+function loadBbSources() {
+  if (bbSources) return Promise.resolve(bbSources);
+  return apiCall('GET', '/admin/api/dune/bb/available-sources').then(function(d) {
+    bbSources = d;
+    return d;
+  });
+}
+
+function populateBbSources() {
+  var sel = document.getElementById('gi-bb-source');
+  if (!sel) return;
+  loadBbSources().then(function(d) {
+    sel.innerHTML = '';
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '— select a source backup —';
+    sel.appendChild(placeholder);
+    var list = (d && d.sources) || [];
+    if (!list.length) {
+      sel.innerHTML = '<option value="">— no saved bases available (admin must save one in-game first) —</option>';
+      return;
+    }
+    list.forEach(function(s) {
+      var opt = document.createElement('option');
+      opt.value = String(s.id);
+      var label = (s.name || ('backup ' + s.id)) + '  [id ' + s.id + ']';
+      if (s.linked_actor_count != null) {
+        label += '  (' + s.linked_actor_count + ' actors)';
+      }
+      if (s.owner_name) {
+        label += '  owner: ' + s.owner_name + ' (acct ' + (s.owner_account_id != null ? s.owner_account_id : '?') + ')';
+      } else if (s.player_id != null) {
+        label += '  owner=ctrl#' + s.player_id;
+      }
+      opt.textContent = label;
+      sel.appendChild(opt);
+    });
+  }).catch(function(e) {
+    sel.innerHTML = '<option value="">— failed to load source backups: '
+      + escHtml(e.message || 'error') + ' —</option>';
+  });
+}
+
+/* G21 — query the recipient's current base_backups count and render a yellow
+ * (2) or red (3) warning band on the form. Idempotent; called when the user
+ * picks a new player or switches to a bb_ grant type. */
+function refreshBbSlotWarning() {
+  var warn = document.getElementById('gi-bb-slot-warn');
+  if (!warn) return;
+  if (!selectedPlayer) {
+    warn.style.display = 'none';
+    warn.innerHTML = '';
+    return;
+  }
+  var acct = selectedPlayer.account_id;
+  apiCall('GET', '/admin/api/dune/bb/slot-count?account_id=' + encodeURIComponent(acct)).then(function(d) {
+    var c = (d && typeof d.count === 'number') ? d.count : null;
+    var cap = (d && typeof d.max === 'number') ? d.max : 3;
+    if (c == null) {
+      warn.style.display = 'none';
+      warn.innerHTML = '';
+      return;
+    }
+    warn.style.display = '';
+    if (c >= cap) {
+      warn.innerHTML = '<span style="color:var(--red);">⚠ Recipient already has ' + c
+        + ' base backups (max ' + cap + '). This grant will be refused — ask them to free a slot first.</span>';
+    } else if (c >= cap - 1) {
+      warn.innerHTML = '<span style="color:var(--yellow);">⚠ Recipient has ' + c
+        + ' base backups; this grant will push them to ' + (c + 1) + '/' + cap + '.</span>';
+    } else {
+      warn.innerHTML = '<span style="color:var(--text-muted);">Recipient currently has '
+        + c + '/' + cap + ' base backups.</span>';
+    }
+  }).catch(function(e) {
+    warn.style.display = '';
+    warn.innerHTML = '<span style="color:var(--text-muted);">Could not fetch recipient slot count: '
+      + escHtml(e.message || 'error') + '</span>';
+  });
+}
+
+/* Give-item catalog (data/dune-give-item-catalog.json, rebuilt 2026-08-25 from
+ * the game's own item table). The bench's item pickers read THIS, never
+ * catalog.entries.item: that list is a 2026-05-21 community cross-reference of
+ * an older build, while the give-item catalog carries the native template ids
+ * plus is_gradeable, pak_max_stack, tier, rarity and category per template.
+ * Served admin-gated by GET /admin/api/dune/v2/catalog/give-items. */
+var giveItems = null;          // mapped picker entries, null until loaded
+var giveItemById = {};         // template_id -> entry
+var giveItemsError = null;     // load failure message, shown in the list
+var itemRowLinks = {};         // picker domId -> {grade, stack} control ids
+var gradeStackOf = {};         // grade domId -> stack input id (or null)
+var STACK_SERVER_CAP = 9999;   // server cap when a template has no pak max
+
+function loadGiveItems() {
+  return apiCall('GET', '/admin/api/dune/v2/catalog/give-items').then(function(d) {
+    giveItems = ((d && d.items) || []).map(function(it) {
+      return {
+        template_id: it.id,
+        label: it.name || it.id,
+        cat: it.cat || '',
+        tier: (it.tier === undefined) ? null : it.tier,
+        rarity: it.rarity || '',
+        is_gradeable: !!it.is_gradeable,
+        pak_max_stack: it.pak_max_stack || 0,
+        non_tradeable: !!it.non_tradeable,
+        mtx: !!it.mtx
+      };
+    });
+    giveItemById = {};
+    giveItems.forEach(function(e) { giveItemById[e.template_id] = e; });
+    return giveItems;
+  }).catch(function(e) {
+    giveItemsError = e.message || 'error';
+    giveItems = [];
+    return giveItems;
+  });
+}
+
+/* Category chips. The catalog ships 57 fine-grained `cat` values; these group
+ * them into the families an admin actually shops by. Anything unmapped lands
+ * in "More" rather than disappearing. */
+var GIVE_CAT_FAMILIES = [
+  ['weapons', 'Weapons', ['ranged', 'shortblades', 'longblades', 'battlerifle',
+    'pistol', 'shotgun', 'smg', 'melee', 'heavypistol', 'spitdart',
+    'heavyshotgun', 'heavyrifle', 'flamethrower', 'lasgun', 'missilelauncher',
+    'fireballer', 'cutteray', 'ammunition']],
+  ['armor', 'Armor', ['chest', 'hands', 'feet', 'head', 'legs', 'lightarmor',
+    'heavyarmor', 'armor', 'stillsuits', 'shield', 'utilitywearables']],
+  ['tools', 'Tools', ['watertools', 'bloodtools', 'cartographytools',
+    'utility', 'compactor']],
+  ['vehicles', 'Vehicles', ['engine', 'psu', 'powerpack', 'chassis', 'hull',
+    'suspensor', 'locomotion', 'cockpit', 'cabin', 'rear', 'tail', 'buggy',
+    'sandbike', 'sandcrawler', 'lightornithopter', 'mediumornithopter',
+    'transportornithopter']],
+  ['components', 'Components', ['components', 'deployables']],
+  ['rawresources', 'Raw resources', ['rawresources']],
+  ['refinedresources', 'Refined resources', ['refinedresources', 'fuel']]
+];
+var GIVE_CAT_OF = {};
+GIVE_CAT_FAMILIES.forEach(function(f) {
+  f[2].forEach(function(cat) { GIVE_CAT_OF[cat] = f[0]; });
+});
+
+function giveEntryFamily(e) {
+  return GIVE_CAT_OF[e.cat] || 'more';
+}
+
+function isSchematicId(templateId) {
+  return /_Schematic$/.test(String(templateId || ''));
+}
+
+function entryInFamily(e, fam) {
+  if (!fam) return true;
+  if (fam === 'schematics') return isSchematicId(e.template_id);
+  return giveEntryFamily(e) === fam;
+}
+
+function entriesFor(key) {
+  // Items come from the give-item catalog; every other key still reads the
+  // curated grant catalog.
+  if (key === 'item') return giveItems || [];
+  return (catalog && catalog.entries && catalog.entries[key]) || [];
+}
+
+/* Warning chips for item/schematic entries (pak-meta overlay fields). */
+function itemWarnTags(e) {
+  var out = '';
+  if (e.mtx) {
+    out += '<span class="gb-tag" style="color:var(--yellow); border:1px solid var(--yellow);">MTX</span>';
+  }
+  if (e.non_tradeable) {
+    out += '<span class="gb-tag" style="color:var(--text-muted); border:1px solid var(--border);">NO-TRADE</span>';
+  }
+  return out;
+}
+
+function confidenceTag(conf) {
+  if (conf === 'CONFIRMED') {
+    return '<span class="gb-tag" style="color:var(--green); border:1px solid var(--green);">CONFIRMED</span>';
+  }
+  return '<span class="gb-tag" style="color:var(--yellow); border:1px solid var(--yellow);">NEEDS-VERIFICATION</span>';
+}
+
+/* Build a searchable picker of catalog entries.
+   `idAttr` is the raw-id field name; only CONFIRMED entries when confirmedOnly. */
+function entryPickerHtml(domId, key, idAttr, confirmedOnly) {
+  var isItem = (key === 'item');
+  var placeholder = isItem ? 'Search by name, id or category...' : 'Type to search...';
+  return '<div class="gb-picker">'
+    + '<input type="text" id="' + domId + '-search" autocomplete="off" spellcheck="false" '
+    + 'placeholder="' + placeholder + '" oninput="filterEntryPicker(\'' + domId + '\')" '
+    + 'onkeydown="entryPickerKeys(\'' + domId + '\', event)" '
+    + 'onfocus="filterEntryPicker(\'' + domId + '\')">'
+    + (isItem ? '<div class="gb-chips" id="' + domId + '-chips"></div>' : '')
+    + '<div id="' + domId + '-list" class="gb-list" data-key="' + key + '" data-idattr="' + idAttr + '" '
+    + 'data-confirmed="' + (confirmedOnly ? '1' : '0') + '" data-cat="" data-active="-1" '
+    + 'style="display:none;"></div>'
+    + '<input type="hidden" id="' + domId + '-value">'
+    + '<div id="' + domId + '-picked" class="form-hint"></div>'
+    + '</div>';
+}
+
+function renderEntryChips(domId) {
+  var el = document.getElementById(domId + '-chips');
+  if (!el || el.getAttribute('data-built') === '1' || giveItems === null) return;
+  var counts = { schematics: 0 };
+  giveItems.forEach(function(e) {
+    var f = giveEntryFamily(e);
+    counts[f] = (counts[f] || 0) + 1;
+    if (isSchematicId(e.template_id)) counts.schematics += 1;
+  });
+  var box = document.getElementById(domId + '-list');
+  var cur = box ? (box.getAttribute('data-cat') || '') : '';
+  function chip(fam, label, n) {
+    return '<button type="button" class="gb-chip' + (fam === cur ? ' active' : '') + '" '
+      + 'data-cat="' + fam + '" onclick="setEntryCat(\'' + domId + '\', \'' + fam + '\')">'
+      + escHtml(label) + ' <span style="opacity:0.7;">' + n + '</span></button>';
+  }
+  var html = chip('', 'All', giveItems.length);
+  GIVE_CAT_FAMILIES.forEach(function(f) {
+    if (counts[f[0]]) html += chip(f[0], f[1], counts[f[0]]);
+  });
+  if (counts.schematics) html += chip('schematics', 'Schematics', counts.schematics);
+  if (counts.more) html += chip('more', 'More', counts.more);
+  el.innerHTML = html;
+  el.setAttribute('data-built', '1');
+}
+
+function setEntryCat(domId, fam) {
+  var box = document.getElementById(domId + '-list');
+  if (box) box.setAttribute('data-cat', fam);
+  var el = document.getElementById(domId + '-chips');
+  if (el) {
+    var chips = el.querySelectorAll('.gb-chip');
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].classList.toggle('active', chips[i].getAttribute('data-cat') === fam);
+    }
+  }
+  filterEntryPicker(domId);
+}
+
+function entryOptHtml(domId, e, idAttr) {
+  var raw = String(e[idAttr] !== undefined ? e[idAttr] : e.template_id);
+  // entriesFor only redirects 'item' to the give-item catalog, so a schematic
+  // entry arrives from the grant catalog with no is_gradeable and no
+  // pak_max_stack. 191 of the 443 _Schematic ids in the give-item catalog DO
+  // carry grades; without this fallback applyItemMeta locks the pills on every
+  // one of them and setGrade refuses every click above Base.
+  var give = giveItemById[raw];
+  var gradeable = (e.is_gradeable === undefined || e.is_gradeable === null)
+    ? !!(give && give.is_gradeable) : !!e.is_gradeable;
+  var pakStack = e.pak_max_stack || (give ? give.pak_max_stack : 0);
+  var meta = [];
+  if (e.label && e.label !== raw) meta.push(escHtml(raw));
+  if (e.tier !== null && e.tier !== undefined && e.tier !== '') meta.push('T' + escHtml(String(e.tier)));
+  if (e.cat) meta.push(escHtml(e.cat));
+  var tags = '';
+  if (gradeable) {
+    tags += '<span class="gb-tag" style="color:var(--accent); border:1px solid var(--accent);">GRADEABLE</span>';
+  }
+  if (e.unknown) {
+    tags += '<span class="gb-tag" style="color:var(--yellow); border:1px solid var(--yellow);">NOT IN CATALOG</span>';
+  }
+  return '<div class="gb-opt" onclick="pickEntry(\'' + domId + '\', this)" '
+    + 'data-raw="' + escAttr(raw) + '" '
+    + 'data-stack="' + escAttr(pakStack || '') + '" '
+    + 'data-mtx="' + escAttr(e.mtx ? '1' : '') + '" '
+    + 'data-nt="' + escAttr(e.non_tradeable ? '1' : '') + '" '
+    + 'data-gradeable="' + escAttr(gradeable ? '1' : '') + '" '
+    + 'data-unknown="' + escAttr(e.unknown ? '1' : '') + '">'
+    + '<span>' + escHtml(e.label || raw) + '</span>'
+    + (e.confidence ? confidenceTag(e.confidence) : '')
+    + tags + itemWarnTags(e)
+    + (meta.length ? '<br><span class="gb-opt-meta">' + meta.join(' &middot; ') + '</span>' : '')
+    + '</div>';
+}
+
+function renderEntryList(domId, list) {
+  var box = document.getElementById(domId + '-list');
+  var idAttr = box.getAttribute('data-idattr');
+  box.setAttribute('data-active', '-1');
+  if (!list.length) {
+    // Raw-id escape hatch: the catalog is operator shorthand, not a whitelist,
+    // so a template it does not carry can still be granted. The route stays
+    // warn-only for these.
+    var typed = document.getElementById(domId + '-search').value.trim();
+    if (typed && /^[A-Za-z0-9_]+$/.test(typed)) {
+      box.innerHTML = entryOptHtml(domId, { template_id: typed, label: typed, unknown: true }, 'template_id');
+      return;
+    }
+    box.innerHTML = '<div class="gb-opt gb-opt-flat">No matching entries</div>';
+    return;
+  }
+  box.innerHTML = list.slice(0, 200).map(function(e) {
+    return entryOptHtml(domId, e, idAttr);
+  }).join('');
+}
+
+function filterEntryPicker(domId) {
+  var box = document.getElementById(domId + '-list');
+  if (!box) return;
+  box.style.display = '';
+  var key = box.getAttribute('data-key');
+  var idAttr = box.getAttribute('data-idattr');
+  var confirmedOnly = box.getAttribute('data-confirmed') === '1';
+  var q = document.getElementById(domId + '-search').value.trim().toLowerCase();
+  // Schematic entries come from the grant catalog but take their is_gradeable
+  // from the give-item catalog, so this picker waits for the load too. It does
+  // NOT stop on giveItemsError: the grant catalog still lists every schematic,
+  // only the grade flag is missing.
+  if (key === 'item' || key === 'schematic_item') {
+    if (giveItems === null) {
+      box.innerHTML = '<div class="gb-opt gb-opt-flat">Loading the item catalog...</div>';
+      return;
+    }
+  }
+  if (key === 'item') {
+    renderEntryChips(domId);
+    if (giveItemsError) {
+      box.innerHTML = '<div class="gb-opt gb-opt-flat" style="color:var(--red);">Failed to load the item catalog: '
+        + escHtml(giveItemsError) + '</div>';
+      return;
+    }
+  }
+  var list = entriesFor(key);
+  if (confirmedOnly) list = list.filter(function(e) { return e.confidence === 'CONFIRMED'; });
+  if (key === 'item') {
+    var fam = box.getAttribute('data-cat') || '';
+    if (fam) list = list.filter(function(e) { return entryInFamily(e, fam); });
+  }
+  if (q) {
+    list = list.filter(function(e) {
+      return String(e.label || '').toLowerCase().indexOf(q) >= 0
+          || String(e[idAttr] || '').toLowerCase().indexOf(q) >= 0
+          || String(e.cat || '').toLowerCase().indexOf(q) >= 0;
+    });
+  }
+  renderEntryList(domId, list);
+}
+
+/* Up/down moves the highlight, enter picks it, escape closes the list. */
+function entryPickerKeys(domId, ev) {
+  var box = document.getElementById(domId + '-list');
+  if (!box) return;
+  var k = ev.key;
+  if (k === 'Escape') { box.style.display = 'none'; return; }
+  if (k !== 'ArrowDown' && k !== 'ArrowUp' && k !== 'Enter') return;
+  var opts = box.querySelectorAll('.gb-opt[data-raw]');
+  if (!opts.length) return;
+  var cur = parseInt(box.getAttribute('data-active'), 10);
+  if (isNaN(cur)) cur = -1;
+  if (k === 'Enter') {
+    if (cur < 0 || cur >= opts.length) return;
+    ev.preventDefault();
+    pickEntry(domId, opts[cur]);
+    return;
+  }
+  ev.preventDefault();
+  box.style.display = '';
+  cur = (k === 'ArrowDown') ? Math.min(cur + 1, opts.length - 1) : Math.max(cur - 1, 0);
+  box.setAttribute('data-active', String(cur));
+  for (var i = 0; i < opts.length; i++) opts[i].classList.toggle('active', i === cur);
+  if (opts[cur].scrollIntoView) opts[cur].scrollIntoView({ block: 'nearest' });
+}
+
+function pickEntry(domId, optEl) {
+  var raw = optEl.getAttribute('data-raw');
+  document.getElementById(domId + '-value').value = raw;
+  document.getElementById(domId + '-search').value = raw;
+  document.getElementById(domId + '-list').style.display = 'none';
+  var picked = 'Raw id: <span style="color:var(--accent);">' + escHtml(raw) + '</span>';
+  var stack = optEl.getAttribute('data-stack');
+  if (stack) {
+    picked += ' &middot; pak max stack ' + Number(stack).toLocaleString() + ' <span style="color:var(--text-muted);">(live config may differ)</span>';
+  }
+  if (optEl.getAttribute('data-unknown')) {
+    picked += '<br><span style="color:var(--yellow);">&#9888; Not in the catalog: sent as a raw template id. Its grades and stack cap cannot be checked here.</span>';
+  } else if (optEl.getAttribute('data-gradeable')) {
+    picked += '<br><span style="color:var(--accent);">Gradeable: can carry grades Base through G5.</span>';
+  }
+  if (optEl.getAttribute('data-mtx')) {
+    picked += '<br><span style="color:var(--yellow);">&#9888; MTX template: event/paid item; granting hands out store/event content.</span>';
+  }
+  if (optEl.getAttribute('data-nt')) {
+    picked += '<br><span style="color:var(--text-muted);">&#9888; Non-tradeable: cannot be listed on the exchange.</span>';
+  }
+  document.getElementById(domId + '-picked').innerHTML = picked;
+  applyItemMeta(domId, optEl);
+  invalidatePreview();
+}
+
+/* Grade + stack controls.
+ * quality_level is the item GRADE, not a rarity: grades run Base(0) through 5
+ * and exist only on gradeable (T6) templates. Base(0) is a real grade, never
+ * "unset". 6 is not a grade and the writer refuses it. */
+var GRADE_LABELS = ['Base', 'G1', 'G2', 'G3', 'G4', 'G5'];
+
+function gradeControlHtml(domId) {
+  var pills = '';
+  for (var g = 0; g < GRADE_LABELS.length; g++) {
+    pills += '<button type="button" class="gb-grade-pill' + (g === 0 ? ' active' : '') + '" '
+      + 'data-grade="' + g + '" onclick="setGrade(\'' + domId + '\', ' + g + ')">'
+      + GRADE_LABELS[g] + '</button>';
+  }
+  return '<div class="gb-grade" id="' + domId + '-pills" data-locked="1">' + pills + '</div>'
+    + '<input type="hidden" id="' + domId + '" value="0">'
+    + '<div class="form-hint gb-grade-hint" id="' + domId + '-hint">Pick an item first: only gradeable items carry a grade.</div>';
+}
+
+/* Register which grade + stack controls a picker drives. Cleared on every
+ * grant-type switch so a stale row id cannot be written to. */
+function linkItemRow(pickerId, gradeId, stackId) {
+  itemRowLinks[pickerId] = { grade: gradeId || null, stack: stackId || null };
+  if (gradeId) gradeStackOf[gradeId] = stackId || null;
+}
+
+function setGradeMode(gradeId, unlocked, unknown) {
+  var pills = document.getElementById(gradeId + '-pills');
+  if (!pills) return;
+  pills.setAttribute('data-locked', unlocked ? '0' : '1');
+  var hint = document.getElementById(gradeId + '-hint');
+  if (hint) {
+    if (!unlocked) {
+      hint.innerHTML = 'No grades on this item: stays at Base.';
+    } else if (unknown) {
+      hint.innerHTML = 'Not in the catalog: grades are not checked here. Base is grade 0.';
+    } else {
+      hint.innerHTML = 'Grade of the item. Base is grade 0, a real value, not "unset".';
+    }
+  }
+  if (!unlocked) setGrade(gradeId, 0);
+  else enforceGradeStack(gradeId);
+}
+
+function setGrade(gradeId, g) {
+  var pills = document.getElementById(gradeId + '-pills');
+  if (!pills) return;
+  if (pills.getAttribute('data-locked') === '1' && g !== 0) return;
+  var hidden = document.getElementById(gradeId);
+  if (hidden) hidden.value = String(g);
+  var btns = pills.querySelectorAll('.gb-grade-pill');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].classList.toggle('active', btns[i].getAttribute('data-grade') === String(g));
+  }
+  enforceGradeStack(gradeId);
+  invalidatePreview();
+}
+
+/* Never stack graded items: a grade above Base forces the stack to 1. */
+function enforceGradeStack(gradeId) {
+  var stackId = gradeStackOf[gradeId];
+  if (!stackId) return;
+  var stackEl = document.getElementById(stackId);
+  if (!stackEl) return;
+  var note = document.getElementById(stackId + '-note');
+  var hidden = document.getElementById(gradeId);
+  var g = hidden ? (parseInt(hidden.value, 10) || 0) : 0;
+  if (g > 0) {
+    stackEl.value = '1';
+    stackEl.disabled = true;
+    if (note) note.innerHTML = '<span style="color:var(--yellow);">Graded items never stack: stack forced to 1.</span>';
+  } else {
+    stackEl.disabled = false;
+    if (note) note.innerHTML = stackNoteText(stackEl);
+  }
+}
+
+function stackCapOf(stackEl) {
+  return parseInt(stackEl.getAttribute('data-cap'), 10) || STACK_SERVER_CAP;
+}
+
+function stackNoteText(stackEl) {
+  var cap = stackCapOf(stackEl);
+  return (stackEl.getAttribute('data-cap-src') === 'pak')
+    ? 'Max ' + cap.toLocaleString() + ' (pak max stack; live config may differ).'
+    : 'Max ' + cap.toLocaleString() + ' (server cap).';
+}
+
+function setStackMax(stackId) {
+  var stackEl = document.getElementById(stackId);
+  if (!stackEl || stackEl.disabled) return;
+  stackEl.value = String(stackCapOf(stackEl));
+  invalidatePreview();
+}
+
+/* Push the picked template's metadata onto the row's grade + stack controls. */
+function applyItemMeta(domId, optEl) {
+  var link = itemRowLinks[domId];
+  if (!link) return;
+  var gradeable = !!optEl.getAttribute('data-gradeable');
+  var unknown = !!optEl.getAttribute('data-unknown');
+  var pakMax = parseInt(optEl.getAttribute('data-stack'), 10);
+  if (link.stack) {
+    var stackEl = document.getElementById(link.stack);
+    if (stackEl) {
+      var cap = (pakMax >= 1) ? Math.min(pakMax, STACK_SERVER_CAP) : STACK_SERVER_CAP;
+      stackEl.max = String(cap);
+      stackEl.setAttribute('data-cap', String(cap));
+      stackEl.setAttribute('data-cap-src', (pakMax >= 1) ? 'pak' : 'server');
+      if ((parseInt(stackEl.value, 10) || 1) > cap) stackEl.value = String(cap);
+      var note = document.getElementById(link.stack + '-note');
+      if (note) note.innerHTML = stackNoteText(stackEl);
+    }
+  }
+  if (link.grade) setGradeMode(link.grade, gradeable || unknown, unknown);
+}
+
+function modeToggleHtml(domId) {
+  return '<select id="' + domId + '" onchange="invalidatePreview()">'
+    + '<option value="add">Add to current value</option>'
+    + '<option value="set">Set to exact value</option>'
+    + '</select>';
+}
+
+function onGrantTypeChange() {
+  var id = document.getElementById('grant-type').value;
+  selectedType = id ? grantTypeById[id] : null;
+  var hint = document.getElementById('grant-type-hint');
+  var wrap = document.getElementById('grant-inputs');
+  // The old form's rows are about to be thrown away; drop their control links
+  // so a picker can never write to a grade or stack input that no longer exists.
+  itemRowLinks = {};
+  gradeStackOf = {};
+  invalidatePreview();
+
+  if (!selectedType) { hint.textContent = ''; wrap.innerHTML = ''; return; }
+
+  hint.innerHTML = selectedType.requires_offline
+    ? '<span style="color:var(--yellow);">Requires the player to be OFFLINE</span> &mdash; this grant is RAM-fragile.'
+    : '<span style="color:var(--green);">Online-safe</span> &mdash; tabular grant, applies while the player is online.';
+
+  var html = '<div style="display:grid; gap:1rem;">';
+
+  if (id === 'item' || id === 'schematic_item') {
+    var key = (id === 'item') ? 'item' : 'schematic_item';
+    var noun = (id === 'item') ? 'item' : 'schematic';
+    html += '<div class="form-group" style="margin-bottom:0;"><label>Item (label + raw template_id)</label>'
+      + entryPickerHtml('gi-entry', key, 'template_id', false) + '</div>';
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-quantity">Quantity</label>'
+      + '<input type="number" id="gi-quantity" min="1" max="9999" step="1" value="1" oninput="invalidatePreview()">'
+      + '<div class="form-hint">How many of this ' + noun + ' to place in the player\'s <b>main backpack</b>. Max 9,999. The backpack has finite slots — if the stack is too big or the backpack is full the grant will fail; ask the player to make room first.</div></div>';
+    html += '<div class="form-group" style="margin-bottom:0;"><label>Grade</label>'
+      + gradeControlHtml('gi-quality')
+      + '<div class="form-hint"><b>Item grade</b> (<code>quality_level</code>), not a rarity word. Grades run Base(0) through G5 and exist only on gradeable templates: the pills unlock once you pick one, and <b>Base is a real grade</b>, not "unset". Grade 6 does not exist and the writer refuses it.</div></div>';
+
+  } else if (id === 'solari') {
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-amount">Solari amount</label>'
+      + '<input type="number" id="gi-amount" min="1" max="10000000" step="1" value="1" oninput="invalidatePreview()">'
+      + '<div class="form-hint">'
+      + '<b>What is Solari?</b> The primary in-game currency, used at most NPC vendors and the CHOAM Exchange. This grant drops coin items into the player\'s <b>main backpack</b> (counts toward backpack capacity). Max 10,000,000 per grant. '
+      + 'For a <b>direct balance</b> top-up that uses no backpack slot and works while the player is online, pick <b>Solari — Direct Balance</b> instead.'
+      + '</div></div>';
+
+  } else if (id === 'solari_currency') {
+    // G13 — Solari delta via Funcom adjust_player_virtual_currency_balance proc.
+    // Online-safe, no backpack slot. Auditable through log_event_solaris on
+    // the DB side. Use this for ops Solari rewards.
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-amount">Solari amount</label>'
+      + '<input type="number" id="gi-amount" min="1" max="10000000" step="1" value="1" oninput="invalidatePreview()">'
+      + '<div class="form-hint">'
+      + '<b>What this grant does:</b> Adds Solari directly to the player\'s wallet balance. No coin item is dropped into their backpack, so it works even if their bag is full and even if they are <b>online right now</b>. The new balance shows up immediately in-game when they next open the CHOAM Exchange or check Solari in the HUD. Max 10,000,000 per grant.'
+      + '<br><br><b>When to use vs the other Solari grant:</b> Use this for ops rewards, refunds, restitution, or any non-narrative top-up. Use the <b>Solari — Coin in Backpack</b> grant for welcome-pack style "you found a stack of coins" deliveries that need a visible item in inventory.'
+      + '</div></div>';
+
+  } else if (id === 'intel') {
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-amount">Intel points</label>'
+      + '<input type="number" id="gi-amount" min="1" max="100000" step="1" value="1" oninput="invalidatePreview()">'
+      + '<div class="form-hint">'
+      + '<b>What is Intel?</b> The points players spend in the in-game <b>Codex</b> to unlock schematics they\'ve discovered. Earned from scanning ruins, defeating elites, and exploring. Max 100,000 per grant. '
+      + '<br><br>Distinct from <b>Character XP</b> (levels them up) and <b>Specialization XP</b> (Landsraad track XP). Granting intel does not give the player anything to craft — they still need the matching schematic discovered.'
+      + '</div></div>';
+
+  } else if (id === 'house_scrip') {
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-amount">House Scrip amount</label>'
+      + '<input type="number" id="gi-amount" min="1" max="1000000" step="1" value="1" oninput="invalidatePreview()">'
+      + '<div class="form-hint">'
+      + '<b>What is House Scrip?</b> The Landsraad-only currency earned from completing house missions and decree tasks. Spent at <b>House Vendors</b> to buy house-specific schematics, cosmetics, and consumables. Max 1,000,000 per grant. '
+      + 'Online-safe (the grant applies even if the player is logged in).'
+      + '</div></div>';
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-mode">Mode</label>'
+      + modeToggleHtml('gi-mode')
+      + '<div class="form-hint"><b>Add</b> = add the amount to their current balance. <b>Set</b> = overwrite their balance to exactly this number.</div></div>';
+
+  } else if (id === 'recipe') {
+    html += '<div class="form-group" style="margin-bottom:0;"><label>Recipe / schematic unlock</label>'
+      + entryPickerHtml('gi-entry', 'recipe', 'item_key', true)
+      + '<div class="form-hint">'
+      + '<b>What this does:</b> Permanently unlocks a schematic the player can craft from any fitting workbench. They don\'t need to discover it the normal way (no intel spend, no ruin scan). '
+      + '<br><br><b>Why some recipes don\'t appear here:</b> Only recipes the game already recognizes for a player can be granted reliably. The dropdown is filtered to those CONFIRMED entries — if you don\'t see what you want, it probably needs to be added to the catalog first.'
+      + '</div></div>';
+
+  } else if (id === 'faction_rep') {
+    // G7 v2 — major-faction rank XP (Atreides/Harkonnen). Writes both the
+    // FactionPlayerComponent JSONB on the controller actor (UI source) AND
+    // dune.set_player_faction_reputation proc (tier tags + table). Offline-
+    // gated since FactionPlayerComponent is RAM-fragile. See G7 v2 builder
+    // in dune-grant.sh.
+    var factionOpts = entriesFor('faction').map(function(f) {
+      return '<option value="' + f.faction_id + '">' + escHtml(f.label) + '  [faction_id ' + f.faction_id + ']</option>';
+    }).join('');
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-faction">Faction</label>'
+      + '<select id="gi-faction" onchange="invalidatePreview()">' + factionOpts + '</select>'
+      + '<div class="form-hint">Pick <b>Atreides</b> or <b>Harkonnen</b> (the two major factions). None/Smuggler exist but are not normal player allegiances.</div></div>';
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-amount">Rank XP amount</label>'
+      + '<input type="number" id="gi-amount" min="-12475" max="12475" step="1" value="99" oninput="invalidatePreview()">'
+      + '<div class="form-hint">'
+      + 'How much rank XP to add (or subtract — negative values are allowed for roleplay penalties or undoing a previous grant). '
+      + 'Each grant is clamped to ±12,475. Final absolute value is clamped to [0..12,475] (rank 20 = the cap).'
+      + '</div></div>';
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-mode">Mode</label>'
+      + modeToggleHtml('gi-mode')
+      + '<div class="form-hint"><b>Add</b> = increase by the amount (positive) or decrease (negative). <b>Set</b> = overwrite to exactly this absolute value.</div></div>';
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<span style="color:var(--yellow);">⚠ Player must be Offline.</span> The FactionPlayerComponent on the actor is RAM-fragile (same rule as Character XP) — writes get clobbered by RAM-flush on logout if the player is online.'
+      + '<br><br>'
+      + '<b>What this is:</b> the player\'s rank XP with one of the two big factions (Atreides/Harkonnen). The XP fills a bar that levels them up through 21 rank tiers; the rank gates faction-specific schematics, dialogue, and NPCs. It also feeds the <b>bi-weekly Landsraad faction war</b> — Atreides vs Harkonnen side standing.'
+      + '<br><br>'
+      + '<b>What this is NOT:</b> Landsraad noble-house reputation (Argosaz, Vesto, Spinette, etc.). That is a <i>separate</i> system, tracked per noble house, used for the per-term Landsraad task contributions. For Landsraad noble-house items the <code>item_live</code> grant is the right tool.'
+      + '<br><br>'
+      + '<b>Both writes happen in one transaction:</b>'
+      + '<br>1. <code>FactionPlayerComponent.m_FactionDataArray</code> JSONB on the controller actor — this is what the in-game rank/XP HUD reads.'
+      + '<br>2. <code>dune.set_player_faction_reputation()</code> Funcom proc — keeps the <code>player_faction_reputation</code> table in sync AND syncs the <code>Faction.&lt;Name&gt;.Tier_N</code> gameplay tags that gate tier-locked content.'
+      + '<br><br>'
+      + '<b>Rank tier table</b> (cumulative XP needed to reach the rank, empirically corrected vs icehunter\'s off-by-one):'
+      + '<br><table style="font-family:var(--font-mono); font-size:0.72rem; border-collapse:collapse;">'
+      + '<tr><td style="padding:0 0.6rem;">0 — Outsider</td><td style="padding:0 0.6rem;">0</td><td style="padding:0 0.6rem;">11 — Tier 11</td><td style="padding:0 0.6rem;">4,475</td></tr>'
+      + '<tr><td style="padding:0 0.6rem;">1 — Mercenary</td><td style="padding:0 0.6rem;">100</td><td style="padding:0 0.6rem;">12 — Tier 12</td><td style="padding:0 0.6rem;">5,150</td></tr>'
+      + '<tr><td style="padding:0 0.6rem;">2 — Recruit</td><td style="padding:0 0.6rem;">250</td><td style="padding:0 0.6rem;">13 — Tier 13</td><td style="padding:0 0.6rem;">5,900</td></tr>'
+      + '<tr><td style="padding:0 0.6rem;">3 — Contractor</td><td style="padding:0 0.6rem;">500</td><td style="padding:0 0.6rem;">14 — Tier 14</td><td style="padding:0 0.6rem;">6,725</td></tr>'
+      + '<tr><td style="padding:0 0.6rem;">4 — Agent</td><td style="padding:0 0.6rem;">1,000</td><td style="padding:0 0.6rem;">15 — Tier 15</td><td style="padding:0 0.6rem;">7,625</td></tr>'
+      + '<tr><td style="padding:0 0.6rem;">5 — House Operator</td><td style="padding:0 0.6rem;">2,000</td><td style="padding:0 0.6rem;">16 — Tier 16</td><td style="padding:0 0.6rem;">8,600</td></tr>'
+      + '<tr><td style="padding:0 0.6rem;">6 — Tier 6</td><td style="padding:0 0.6rem;">2,225</td><td style="padding:0 0.6rem;">17 — Tier 17</td><td style="padding:0 0.6rem;">9,650</td></tr>'
+      + '<tr><td style="padding:0 0.6rem;">7 — Tier 7</td><td style="padding:0 0.6rem;">2,525</td><td style="padding:0 0.6rem;">18 — Tier 18</td><td style="padding:0 0.6rem;">10,775</td></tr>'
+      + '<tr><td style="padding:0 0.6rem;">8 — Tier 8</td><td style="padding:0 0.6rem;">2,900</td><td style="padding:0 0.6rem;">19 — Tier 19</td><td style="padding:0 0.6rem;">11,975</td></tr>'
+      + '<tr><td style="padding:0 0.6rem;">9 — Tier 9</td><td style="padding:0 0.6rem;">3,350</td><td style="padding:0 0.6rem;">20 — Envoy/Enforcer (cap)</td><td style="padding:0 0.6rem;">12,474</td></tr>'
+      + '<tr><td style="padding:0 0.6rem;">10 — Tier 10</td><td style="padding:0 0.6rem;">3,875</td><td></td><td></td></tr>'
+      + '</table>'
+      + '<br>(Confirmed 2026-05-23 empirically: 499 XP = rank 2, 500 XP = rank 3. icehunter\'s table used <code>icehunter_value = funcom_threshold − 1</code> for ranks 1–19. Rank 20 cap of 12,474 is matched on both. Tier names 6–19 are placeholders — the real Funcom names live in the client paks and could be filled in later. Rank 20 = "Envoy" for Atreides, "Enforcer" for Harkonnen.)'
+      + '</div>';
+
+  } else if (id === 'spec_xp') {
+    // Only CONFIRMED tracks are grant targets — track_type "Invalid" is a C++
+    // enum sentinel and NEEDS-VERIFICATION tracks are not trusted (M1).
+    var confirmedTracks = entriesFor('specialization_track').filter(function(t) {
+      return t.confidence === 'CONFIRMED';
+    });
+    var trackOpts = confirmedTracks.map(function(t) {
+      return '<option value="' + escAttr(t.track_type) + '">' + escHtml(t.label)
+        + '  [' + escHtml(t.track_type) + ']</option>';
+    }).join('');
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-track">Specialization track</label>'
+      + '<select id="gi-track" onchange="invalidatePreview()">' + trackOpts + '</select>'
+      + (confirmedTracks.length ? '<div class="form-hint">Which Spec track to add XP/levels to. Tracks are leveled independently (max L100 each).</div>' : '<div class="form-hint" style="color:var(--yellow);">No CONFIRMED specialization tracks in the catalog.</div>')
+      + '</div>';
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-xp">XP amount</label>'
+      + '<input type="number" id="gi-xp" min="0" max="44182" step="1" value="0" oninput="invalidatePreview()">'
+      + '<div class="form-hint">XP for the selected track. <b>Per-track cap = 44,182</b> (icehunter-verified, hard-clamped by the script). The final absolute value is clamped to 0..44,182 regardless of mode.</div></div>';
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-level">Level</label>'
+      + '<input type="number" id="gi-level" min="0" max="100" step="1" value="0" oninput="invalidatePreview()">'
+      + '<div class="form-hint">Level for the selected track. <b>Cap = 100</b> per track. Set to <code>0</code> if you only want to push XP.</div></div>';
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-mode">Mode</label>'
+      + modeToggleHtml('gi-mode')
+      + '<div class="form-hint"><b>Add</b> = increase their track XP/level. <b>Set</b> = overwrite to exactly the values above.</div></div>';
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<b>What is Spec XP?</b> Earned from Landsraad missions only. Levels a single <b>Specialization track</b> (Combat, Crafting, etc.) up to L100 each. Tier-up content (keystone nodes) gates on track level — see the <code>keystone</code> grant for granting individual nodes.'
+      + '<br><br><b>How this writes:</b> routes through Funcom\'s own <code>dune.set_specialization_xp_and_level</code> proc. Writes to the player\'s <b>controller actor</b> (not pawn — verified empirically). For <b>add</b> mode, the script reads current XP/level from the table, adds the delta, clamps to [0..44182] / [0..100], then SETs the result.'
+      + '<br><br><b>Different from Character XP:</b> Spec XP only moves Landsraad tracks. Use the <b>Character XP</b> grant if you want to raise the player\'s overall character level (the big number on their HUD).'
+      + '</div>';
+
+  } else if (id === 'char_xp') {
+    // G11 character XP / level / base skill points. v2 delta-credit CTE
+    // writes TotalXPEarned + TotalSkillPoints + UnspentSkillPoints by
+    // levels_gained delta. Offline-gated. Distinct from spec_xp (Landsraad
+    // tracks) and from G4 intel grants. See CHAR-XP-GRANT-SPEC.md.
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-amount">Character XP</label>'
+      + '<input type="number" id="gi-amount" min="1" max="344440" step="1" value="600" oninput="invalidatePreview()">'
+      + '<div class="form-hint">'
+      + '<b>What is Character XP?</b> The XP that raises the player\'s <b>overall character level</b> (the big number on their HUD, capped at L200). Each new level grants them <b>+1 base skill point</b> to spend on character skills. '
+      + '<br><br><b>What this grant does:</b> Adds XP to their current total. If they cross level boundaries we automatically credit the matching skill points (e.g. +600 XP at L23 → L24 with +1 SP). Cap is <b>344,440 XP (L200)</b>.'
+      + '<br><br><b>Quick level-to-XP reference (cumulative):</b> L10 = 1,290 · L25 = 6,990 · L50 = 24,990 · L100 = 87,540 · L150 = 184,440 · L200 = 344,440.'
+      + '<br><br><b>Different from:</b> Spec XP (Landsraad tracks only), Intel (Codex unlocks). Each is its own grant type.'
+      + '</div></div>';
+    // Ack flag is optional post-validation (script-side gate dropped
+    // 2026-05-23 after grant_id=11). Kept as an audit-trail checkbox.
+    html += '<div class="form-group" style="margin-bottom:0;">'
+      + '<label><input type="checkbox" id="gi-ack" onchange="invalidatePreview()"> '
+      + 'Force-wipe-points ack <span style="color:var(--text-muted);">(optional &mdash; just tags the audit row, no behavior change)</span></label>'
+      + '</div>';
+
+  } else if (id === 'keystone') {
+    // G9 keystone (icehunter parity Action #1). Deployed 2026-05-23.
+    // Dropdown populated from /grant/keystones (catalog sidecar). Grouped
+    // by track; SP-bonus nodes ordered first within each track. See
+    // PHASE-B-DEPLOY-RUNBOOK.md for the wire-level details.
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-keystone-select">Keystone</label>'
+      + '<select id="gi-keystone-select" onchange="invalidatePreview()" style="font-family:var(--font-mono); font-size:0.82rem;">'
+      + '<option value="">— loading keystone catalog… —</option>'
+      + '</select></div>';
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<span style="color:var(--yellow);">⚠ Player must be Offline.</span> '
+      + '<br><br>'
+      + '<b>What is a keystone?</b><br>'
+      + 'A keystone is one purchasable node inside a <b>Specialization track</b> '
+      + '(Combat, Crafting, Exploration, Gathering, or Sabotage). Each track has 41 nodes; '
+      + 'they unlock passive perks — bigger vehicle bonuses, better refining yield, '
+      + 'extra inventory slots, headshot damage, etc.'
+      + '<br><br>'
+      + '<b>What this grant does</b><br>'
+      + '• Marks the keystone as <b>purchased</b> for the player. They keep it permanently.<br>'
+      + '• If the keystone is one of the <b>30 "Skill Point" keystones in the Combat track</b>, '
+      + 'it ALSO gives the player bonus base skill points (+1, +3, or +5) they can spend on '
+      + 'character skills. Other keystones (175 of 205) give effect-only perks with no SP bonus.<br>'
+      + '• Idempotent: clicking submit twice is harmless — the second submit is a no-op.'
+      + '<br><br>'
+      + '<b>The five tracks at a glance</b><br>'
+      + '• <b>Combat</b> — health, stamina, +SP nodes (this is the only track with SP bonuses)<br>'
+      + '• <b>Crafting</b> — yield, speed, durability, refining, augments<br>'
+      + '• <b>Exploration</b> — vehicle perks, scanning, inventory, fog of war<br>'
+      + '• <b>Gathering</b> — bonus yields, compactor range, harvesting<br>'
+      + '• <b>Sabotage</b> — Landsraad contribution, stealth, headshot damage'
+      + '<br><br>'
+      + '<b>"(Major)" / "(Super)" suffix</b><br>'
+      + 'Same effect, bigger magnitude. <i>Major</i> is the upgraded version, <i>Super</i> is the maxed version. '
+      + 'For example: "Skill Point" = +1 SP, "Skill Point (Major)" = +3 SP, "Skill Point (Super)" = +5 SP.'
+      + '<br><br>'
+      + '<b>"Node 3 of 19" annotation</b><br>'
+      + 'Some keystones repeat in the talent tree — e.g. there are 19 separate "+1 Skill Point" nodes '
+      + 'spread across different positions in the Combat tree. The player can buy each one independently. '
+      + 'For most ops grants (just want to give them +SP), pick any node — they are functionally equivalent.'
+      + '<br><br>'
+      + '<b>UI caveat — visibility</b><br>'
+      + 'The in-game Specializations menu is gated behind the faction journey. If the player has not '
+      + 'unlocked Specializations yet, they will not <i>see</i> the keystone in their talent tree, but '
+      + 'the SP bonus (if any) <b>does</b> show up in their HUD immediately. Confirmed 2026-05-23 with '
+      + 'an owner-controlled character on Combat keystone #2 — 199 → 200 SP visible in HUD, no Spec-tree visibility because '
+      + 'his Specializations tab is still locked.'
+      + '</div>';
+    // Async-populate the select from the keystone catalog once it loads.
+    setTimeout(populateKeystoneSelect, 0);
+
+  } else if (id === 'item_live') {
+    html += '<div class="form-group" style="margin-bottom:0;"><label>Item (label + raw template_id)</label>'
+      + entryPickerHtml('gi-entry', 'item', 'template_id', false) + '</div>';
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-amount">Amount</label>'
+      + '<input type="number" id="gi-amount" min="1" step="1" value="1" oninput="invalidatePreview()"></div>';
+    if (activeHouses && activeHouses.length) {
+      // House -> rep-location annotations, sourced from method.gg 2026-05-23.
+      // The "defaultStarter" tag drives the pre-selected option on form open
+      // (Argosaz at Griffins Reach is the Hagga-south starter rep).
+      var HOUSE_REP_LOCATIONS = {
+        'DA_HouseAlexin':    { loc: 'Harko Village council chamber (before tax counter)' },
+        'DA_HouseArgosaz':   { loc: 'Griffins Reach Tradepost (Hagga south starter)', defaultStarter: true },
+        'DA_HouseDyvetz':    { loc: 'Hagga Rift, NW of Riftwatch (Harkonnen checkpoint)' },
+        'DA_HouseEcaz':      { loc: 'Southern Hagga Rift, small cave in spire nook' },
+        'DA_HouseHagal':     { loc: 'Eastern Shield Wall, rocks beside cliff edge' },
+        'DA_HouseHurata':    { loc: 'Eastern Vermillius Gap, cave halfway up cliff' },
+        'DA_HouseImota':     { loc: 'Jabal Eifrit Al-Sharq border, small cave halfway up cliff' },
+        'DA_HouseKenola':    { loc: 'Mysa Tarill, cave atop rocky spire behind Mass Kharet stronghold' },
+        'DA_HouseLindaren':  { loc: 'Western Shield Wall, cave in cliff south of The View' },
+        'DA_HouseMaros':     { loc: 'Deep Desert tile B8, northeastern mountain base' },
+        'DA_HouseMikkarol':  { loc: 'Jabal Eifrit Al-Janub, cliffs southwest of The Slant' },
+        'DA_HouseMoritani':  { loc: 'Hagga Rift, Harkonnen building balcony NE of Riftwatch' },
+        'DA_HouseMutelli':   { loc: 'Arrakeen, upper walkway near entrance (after stairs)' },
+        'DA_HouseNovebruns': { loc: 'Western Vermillius Gap, cave atop cliff SE of Wreck of the Pallas' },
+        'DA_HouseRichese':   { loc: 'Helius Gate (Eastern Shield Wall), behind contract board' },
+        'DA_HouseSor':       { loc: 'Pinnacle Station Tradepost, Jabal Eifrit Al-Gharb' },
+        'DA_HouseSpinette':  { loc: 'Harko Village, upper walkway overlooking central grounds' },
+        'DA_HouseTaligari':  { loc: 'Crossroads Tradepost, Mysa Tarill' },
+        'DA_HouseThorvald':  { loc: 'Hagga Rift, small cave at chasm bottom near Wreck of the Kytheria' },
+        'DA_HouseTseida':    { loc: 'Anvil Tradepost, Eastern Vermillius Gap' },
+        'DA_HouseVarota':    { loc: 'Arrakeen council chamber (before tax counter)' },
+        'DA_HouseVernius':   { loc: 'Helius Gate (Eastern Shield Wall), off to the side' },
+        'DA_HouseWallach':   { loc: 'Arrakeen, building on left past ornithopter landing site' },
+        'DA_HouseWayku':     { loc: 'Deep Desert tile A2, east of huge NE mountain' },
+        'DA_HouseWydras':    { loc: 'Northern Sheol, rocky outcroppings north of Edge of Acheron' }
+      };
+      var defaultHouse = null;
+      Object.keys(HOUSE_REP_LOCATIONS).forEach(function(k) {
+        if (HOUSE_REP_LOCATIONS[k].defaultStarter && activeHouses.indexOf(k) !== -1) { defaultHouse = k; }
+      });
+      html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-house">Landsraad House (rep to claim from)</label>'
+        + '<select id="gi-house" onchange="invalidatePreview()">'
+        + activeHouses.map(function(h){
+            var meta = HOUSE_REP_LOCATIONS[h];
+            var label = meta ? (h + ' (' + meta.loc + ')') : h;
+            var sel = (h === defaultHouse) ? ' selected' : '';
+            return '<option value="' + h + '"' + sel + '>' + label + '</option>';
+          }).join('')
+        + '</select>'
+        + '<div class="form-hint"><span style="color:var(--green);">Online-safe.</span> Queued as a Landsraad reward at the selected house\'s rep. Player travels to that rep to claim. A new grant of the same item+house replaces any unclaimed prior one for that pair.'
+        + '<br>Rep locations: <a href="https://www.method.gg/dune-awakening/all-landsraad-house-representative-locations-in-dune-awakening" target="_blank" rel="noopener">method.gg — all Landsraad house representative locations</a></div></div>';
+    } else {
+      html += '<div class="form-group"><div class="form-hint"><span style="color:var(--red);">No active Landsraad houses returned from the server</span> — item_live cannot be issued right now. Refresh and try again, or fall back to the offline-only Item grant.</div></div>';
+    }
+
+  } else if (id === 'teleport') {
+    // G15 — icehunter parity. Move offline player to a named coords + partition.
+    // 10 baked-in locations match icehunter's set; custom-coords mode below.
+    var TELEPORT_OPTS = [
+      ['Windsack',       'Windsack — Hagga north spice fields (974276, 20084, 5112)'],
+      ['EcoLabs',        'EcoLabs — Hagga southwest research site (826879, -925967, 4974)'],
+      ['CrashSite',      'CrashSite — Hagga central wreck (330284, 205237, 2251)'],
+      ['MediumStarter',  'MediumStarter — Hagga starter zone (268515, 207559, 5000)'],
+      ['ConvoyAmbush',   'ConvoyAmbush — Hagga northwest road (-920080, 909620, 300)'],
+      ['SpiceRaid',      'SpiceRaid — Hagga south spice pocket (271590, -493122, 8471)'],
+      ['PS5_ESW_0',      'PS5_ESW_0 — Eastern Shield Wall test point 0'],
+      ['PS5_ESW_1',      'PS5_ESW_1 — Eastern Shield Wall test point 1'],
+      ['PS5_ESW_2',      'PS5_ESW_2 — Eastern Shield Wall test point 2'],
+      ['PS5_ESW_3',      'PS5_ESW_3 — Eastern Shield Wall test point 3']
+    ];
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-tp-location">Location</label>'
+      + '<select id="gi-tp-location" onchange="invalidatePreview(); document.getElementById(\'gi-tp-custom\').style.display = (this.value === \'__custom__\') ? \'\' : \'none\';">'
+      + TELEPORT_OPTS.map(function(o){ return '<option value="' + o[0] + '">' + escHtml(o[1]) + '</option>'; }).join('')
+      + '<option value="__custom__">Custom coordinates (advanced)</option>'
+      + '</select>'
+      + '<div class="form-hint">Pick one of the 10 baked-in points (mostly Hagga Basin), or choose <b>Custom coordinates</b> to type your own X/Y/Z.</div></div>';
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-tp-partition">Partition (optional)</label>'
+      + '<input type="number" id="gi-tp-partition" min="1" max="1000" step="1" placeholder="leave blank to use player\'s current partition" oninput="invalidatePreview()">'
+      + '<div class="form-hint"><b>Partition id.</b> Most use cases leave this blank — the teleport reuses the player\'s last partition (Hagga = 1, Deep Desert PvP = 8, Deep Desert PvE = 31, Arrakeen = 3, Harko Village = 4, Overmap = 2). Override only when sending someone to a different zone.</div></div>';
+    html += '<div id="gi-tp-custom" style="display:none;">'
+      + '<div class="form-group" style="margin-bottom:0;"><label for="gi-tp-x">X coordinate</label>'
+      + '<input type="number" id="gi-tp-x" step="any" oninput="invalidatePreview()"></div>'
+      + '<div class="form-group" style="margin-bottom:0;"><label for="gi-tp-y">Y coordinate</label>'
+      + '<input type="number" id="gi-tp-y" step="any" oninput="invalidatePreview()"></div>'
+      + '<div class="form-group" style="margin-bottom:0;"><label for="gi-tp-z">Z coordinate</label>'
+      + '<input type="number" id="gi-tp-z" step="any" oninput="invalidatePreview()"></div>'
+      + '</div>';
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<span style="color:var(--yellow);">⚠ Player must be Offline.</span> Calls <code>dune.admin_move_offline_player_to_partition</code>, which itself enforces the offline check at the DB and raises if the player is currently in-game. On next login the player spawns at the new coords + partition.'
+      + '<br><br><b>What this is for:</b> recovering stuck players (clipped into geometry, fell through the world, can\'t leave a broken instance) or repositioning during admin scenarios. Coordinates are baked from icehunter\'s known-safe set; the custom-coords mode is for cases where you have a specific destination from a screenshot or another player\'s position dump.'
+      + '</div>';
+
+  } else if (id === 'reset_specs') {
+    // G16 — icehunter parity. Reset spec tracks + keystones (RAM-fragile,
+    // offline-gated). Optional track_type for single-track reset.
+    var trackOpts = '<option value="">All tracks + keystones (full respec)</option>';
+    if (catalog && catalog.entries && catalog.entries.specialization_track) {
+      catalog.entries.specialization_track.forEach(function(t) {
+        if (t.confidence === 'CONFIRMED') {
+          trackOpts += '<option value="' + escAttr(t.track_type) + '">' + escHtml(t.track_type) + ' (single track)</option>';
+        }
+      });
+    }
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-reset-track">Scope</label>'
+      + '<select id="gi-reset-track" onchange="invalidatePreview()">' + trackOpts + '</select>'
+      + '<div class="form-hint">Choose <b>All tracks</b> to wipe every specialization track AND every purchased keystone (a full from-scratch respec). Choose a single track to delete only that one track\'s row, leaving keystones and other tracks intact.</div></div>';
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<span style="color:var(--yellow);">⚠ Player must be Offline.</span> Specialization tracks are loaded into RAM on login; writing while online gets clobbered on logout.'
+      + '<br><br><b>All tracks mode</b> calls Funcom\'s <code>reset_specialization_tracks</code> + <code>reset_specialization_keystones</code> procs together. The player\'s spec menu opens to a blank slate. Character XP, base skill points, and faction rank are untouched; only specialization data resets.'
+      + '<br><br><b>Single-track mode</b> deletes one row from <code>specialization_tracks</code>. Keystones on that track stay purchased (the player still owns them) but the in-game UI may show a partial state until they re-level. Use this surgically.'
+      + '</div>';
+
+  } else if (id === 'reset_tutorials') {
+    // G17 — icehunter parity. Online-safe, no inputs.
+    html += '<div class="form-hint" style="padding:0.75rem 0;">'
+      + '<b>What this does:</b> Calls <code>dune.delete_all_tutorial_entries</code> for the selected player. Every tutorial popup and onboarding hint will replay the next time the player triggers the matching trigger (entering a new biome, opening crafting for the first time, picking up their first spice mass, etc.).'
+      + '<br><br><span style="color:var(--green);">Online-safe.</span> Tutorial state lives in its own table, read on-demand by the game.'
+      + '<br><br><b>When to use:</b> Player asks to re-experience the intro flow, or a tutorial got stuck mid-display and the player wants a clean replay.'
+      + '<br><br><b>What this is NOT:</b> Codex / Mnemonic Recall lessons — that\'s a separate grant (<i>Wipe Codex</i>).'
+      + '</div>';
+
+  } else if (id === 'wipe_codex') {
+    // G18 — icehunter parity. Online-safe, no inputs.
+    html += '<div class="form-hint" style="padding:0.75rem 0;">'
+      + '<b>What this does:</b> Calls <code>dune.delete_mnemonic_recall_lesson_all</code> for the selected account. ALL Codex / Mnemonic Recall lesson entries are deleted — the player\'s entire learned-codex log goes back to empty. Schematics they already know stay known (those are different); only the lesson log is wiped.'
+      + '<br><br><span style="color:var(--green);">Online-safe.</span> Codex log is a lookup table.'
+      + '<br><br><span style="color:var(--yellow);">⚠ This is destructive.</span> The player loses progress visible on the Codex screen. They\'ll need to re-encounter content to repopulate it. Confirm with the player before running.'
+      + '<br><br><b>When to use:</b> Player explicitly requests a Codex re-grind (popular with completionist players who want to re-experience the discovery loop during a Boosted Progression weekend).'
+      + '</div>';
+
+  } else if (id === 'repair_all') {
+    // G19 — backpack + hotbar bulk repair. Offline-gated.
+    html += '<div class="form-hint" style="padding:0.75rem 0;">'
+      + '<b>What this does:</b> Sets <code>CurrentDurability = MaxDurability</code> on every item in the player\'s <b>main backpack</b> (inventory_type 14) AND <b>hotbar</b> (inventory_type 15). Stackable items without durability (SolarisCoin, resources) are skipped automatically.'
+      + '<br><br><span style="color:var(--yellow);">⚠ Player must be Offline.</span> Backpack and hotbar inventories are loaded into RAM on login; writing while online gets clobbered.'
+      + '<br><br><b>What this is for:</b> A goodwill "your gear is shot" repair for a player who took a beating, lost gear durability in a bad encounter, or hit a bug that drained durability faster than expected. Per-item repair (single item by ID) is available via the icehunter parity path but rarely needed when bulk repair fits.'
+      + '<br><br><b>What this does NOT touch:</b> Bank inventory (items in CHOAM bank don\'t lose durability). Vehicles (separate system).'
+      + '</div>';
+
+  } else if (id === 'progression_preset') {
+    // G12 (icehunter parity Action #4). Three presets — landsraad_unlock_only
+    // is the Last Sietch-verified "unbrick a leveled-past-onboarding character" flow.
+    // ch3_start + rank19_eligible are icehunter parity. All offline-gated.
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-faction">Faction</label>'
+      + '<select id="gi-faction" onchange="invalidatePreview()">'
+      + '<option value="atreides">Atreides</option>'
+      + '<option value="harkonnen">Harkonnen</option>'
+      + '</select>'
+      + '<div class="form-hint">Which big-faction journey to unlock. Determines the dialogue flag set (<code>SentToMeetHawat</code> vs <code>SentToPiterDeVries</code>) and the faction-tier tag namespace.</div></div>';
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-preset">Preset</label>'
+      + '<select id="gi-preset" onchange="invalidatePreview()" style="font-family:var(--font-mono); font-size:0.82rem;">'
+      + '<option value="landsraad_unlock_only">landsraad_unlock_only — unbrick a leveled-past character (Last Sietch-verified)</option>'
+      + '<option value="ch3_start">ch3_start — through tier 5 (icehunter parity)</option>'
+      + '<option value="rank19_eligible">rank19_eligible — through tier 19 + set rep to 11,975 (icehunter parity)</option>'
+      + '</select></div>';
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<span style="color:var(--yellow);">⚠ Player must be Offline.</span> Uses Funcom\'s own procs (<code>complete_journey_story_nodes_for_player</code> + <code>update_player_tags</code>) so it\'s as safe as Funcom\'s own progression code, but writes touch journey/tag state that is RAM-cached during a session.'
+      + '<br><br>'
+      + '<b>What is this grant for?</b><br>'
+      + 'When you admin-bump a character\'s faction rank XP past the normal in-game onboarding, the player\'s Journey state (Specializations menu, Landsraad UI, Hawat dialogue) stays gated — the game won\'t recognize the rank-up since the onboarding quest chain was never completed. This grant runs the 8 Rank5To20 ClimbTheRanks journey nodes through Funcom\'s own completion proc and adds the tier tags + dialogue flag + Landsraad unlock tag, simulating natural onboarding completion.'
+      + '<br><br>'
+      + '<b>The three presets:</b>'
+      + '<br>• <code>landsraad_unlock_only</code> — completes the 8 journey nodes; adds Tier0..TierN tags (N = the player\'s CURRENT corrected rank derived from JSONB rep — no overreach); adds <code>SentTo&lt;Faction&gt;</code> dialogue + <code>Journey.LandsraadContractsUnlocked</code>. <b>Does NOT change rep.</b> Verified on an owner-controlled character 2026-05-23 — unlocked Landsraad UI + revealed Hunting Skorda quest in one shot.'
+      + '<br>• <code>ch3_start</code> — completes the same 8 nodes; adds Tier0..Tier5 tags (matches a fresh chapter-3 starter). <b>Does NOT change rep.</b> Player progresses naturally from there.'
+      + '<br>• <code>rank19_eligible</code> — completes the same 8 nodes; adds Tier0..Tier19 tags + Landsraad unlock; <b>SETS rep to 11,975</b> (corrected tier-19 threshold) via FactionPlayerComponent JSONB + Funcom proc. One-shot to push a veteran returning to rank 19 with the journey state ready for rank-20 grind.'
+      + '<br><br>'
+      + '<b>What this writes:</b>'
+      + '<br>1. <code>dune.complete_journey_story_nodes_for_player</code> — 8 ClimbTheRanks Rank5To20 nodes'
+      + '<br>2. <code>dune.update_player_tags</code> — tier tags + dialogue flag + optional Landsraad unlock'
+      + '<br>3. (rank19_eligible only) FactionPlayerComponent JSONB + <code>dune.set_player_faction_reputation</code> — see <code>faction_rep</code> docs for the dual-write pattern'
+      + '<br><br>'
+      + '<b>Idempotent on replay</b> — Funcom\'s procs are themselves idempotent on identical inputs.'
+      + '</div>';
+
+  } else if (id === 'import_blueprint') {
+    // G20 — Import a Solido Market blueprint (UUID) OR an inline JSON blueprint
+    // into the player's backpack (offline) or CHOAM bank (online-safe).
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-bp-delivery">Delivery</label>'
+      + '<select id="gi-bp-delivery" onchange="invalidatePreview()">'
+      + '<option value="bank">Bank — CHOAM (online-safe, recommended)</option>'
+      + '<option value="backpack">Backpack — main inventory (OFFLINE only)</option>'
+      + '</select>'
+      + '<div class="form-hint">'
+      + '<b>Bank delivery</b> is online-safe: the blueprint device drops into the player\'s CHOAM bank inventory; they withdraw it at any CHOAM terminal when ready. No relog required to receive it.'
+      + '<br><br><b>Backpack delivery</b> places the device directly into the main backpack — requires the player to be Offline (RAM-fragile inventory). Use only if the player has an empty bag and wants the device immediately on next login.'
+      + '</div></div>';
+
+    html += '<div class="form-group" style="margin-bottom:0;"><label>Blueprint source</label>'
+      + '<div style="display:flex; gap:1rem; align-items:center; margin:0.4rem 0;">'
+      + '<label style="font-weight:normal;"><input type="radio" name="gi-bp-mode" value="solido" checked onchange="toggleBlueprintMode()"> Solido Market UUID</label>'
+      + '<label style="font-weight:normal;"><input type="radio" name="gi-bp-mode" value="inline" onchange="toggleBlueprintMode()"> Paste blueprint JSON</label>'
+      + '</div></div>';
+
+    html += '<div class="form-group" id="gi-bp-solido-wrap" style="margin-bottom:0;">'
+      + '<label for="gi-bp-uuid">Solido blueprint UUID</label>'
+      + '<input type="text" id="gi-bp-uuid" placeholder="00000000-0000-0000-0000-000000000000" '
+      + 'pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" '
+      + 'oninput="invalidatePreview()" style="font-family:var(--font-mono);">'
+      + '<div class="form-hint">Paste a UUID from a Solido Market blueprint page (e.g. <code>dune.layout.tools/blueprints/&lt;uuid&gt;</code>). The admin-backend fetches the blueprint JSON server-side; the script only receives the resolved data.</div>'
+      + '</div>';
+
+    html += '<div class="form-group" id="gi-bp-inline-wrap" style="margin-bottom:0; display:none;">'
+      + '<label for="gi-bp-json">Blueprint JSON</label>'
+      + '<textarea id="gi-bp-json" rows="10" placeholder=\'{"instances":[...],"placeables":[...]}\' '
+      + 'oninput="invalidatePreview()" style="font-family:var(--font-mono); font-size:0.78rem; width:100%;"></textarea>'
+      + '<div class="form-hint">Paste the full Solido blueprint JSON object. Must contain <code>instances</code> and/or <code>placeables</code> arrays; <code>pentashields</code> is optional. Max 5,000 pieces total, 1 MiB serialized.</div>'
+      + '</div>';
+
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-bp-title">Title <span style="color:var(--text-muted);">(optional, audit only)</span></label>'
+      + '<input type="text" id="gi-bp-title" maxlength="200" placeholder="e.g. Hagga starter base" oninput="invalidatePreview()">'
+      + '<div class="form-hint">Free-text label saved on the audit row alongside the source UUID + piece counts. Helpful when reviewing the recent-grants list.</div>'
+      + '</div>';
+
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<b>What this grant does:</b> Materializes a <code>BuildingBlueprint_CopyDevice</code> item containing a captured base layout. The player places the device near a buildable area and the game pastes the entire structure natively — no manual rebuild, no material grant needed.'
+      + '<br><br>'
+      + '<b>Two delivery modes:</b><br>'
+      + '• <b>Bank</b> (online-safe) — drops into <code>inventory_type=30</code> (CHOAM bank). Player withdraws at any CHOAM terminal when ready. Works while player is online.<br>'
+      + '• <b>Backpack</b> (offline-gated) — drops into <code>inventory_type=0</code> (main backpack). RAM-fragile; player must be Offline.'
+      + '<br><br>'
+      + '<b>MTX caveat:</b> Solido blueprints may contain <code>MTX_*</code> pieces (Twitch drops, paid skins, event-only items). The game will prompt for missing entitlement at paste time for those pieces only — everything else materializes. The MTX count is captured on the audit row so you can warn the player up front if it is significant.'
+      + '<br><br>'
+      + '<b>Source:</b> Solido Market (<a href="https://dune.layout.tools" target="_blank" rel="noopener">dune.layout.tools</a>), built by icehunter. Native paste mechanism reverse-engineered from icehunter\'s <code>cmdImportBlueprint</code> (db.go:1974-2129).'
+      + '</div>';
+
+  } else if (id === 'bb_handoff' || id === 'bb_clone') {
+    // G21 — base-backup transfer (bb_handoff) or deep-clone (bb_clone).
+    // Both forms share: source dropdown (admin-saved bases), optional name.
+    // Differences: bb_handoff is one-shot (source consumed), bb_clone preserves
+    // source and supports multi-recipient delivery.
+    var isClone = (id === 'bb_clone');
+    var nameLabel = isClone ? 'Backup name on recipient\'s side' : 'Override name (optional)';
+    var namePlaceholder = isClone
+      ? 'defaults to: source name + (Last Sietch Starter)'
+      : 'leave blank to keep the source name';
+
+    var recipientName = selectedPlayer ? (selectedPlayer.character_name || ('account ' + selectedPlayer.account_id)) : '— pick a player in Step 1 above —';
+    html += '<div class="form-hint" style="margin-bottom:0.75rem; padding:0.55rem 0.75rem; border:1px solid var(--border); border-radius:4px; background:var(--accent-glow);">'
+      + '<b>→ Recipient:</b> <span style="font-family:var(--font-mono);">' + escHtml(recipientName) + '</span>'
+      + ' &nbsp;<span style="color:var(--text-muted); font-size:0.78rem;">(the player selected in Step 1 above — change there to retarget)</span>'
+      + '</div>';
+
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-bb-source">Source backup</label>'
+      + '<select id="gi-bb-source" onchange="invalidatePreview()" style="font-family:var(--font-mono); font-size:0.82rem;">'
+      + '<option value="">— loading available source backups… —</option>'
+      + '</select>'
+      + '<div class="form-hint">'
+      + (isClone
+          ? 'Reference base to deep-clone. Your source backup is preserved — you can clone it again for additional recipients.'
+          : 'Saved base whose ownership will transfer to the recipient. After this grant, the original owner no longer has it. Refused if recipient IS already the current owner (would be a no-op).')
+      + '</div></div>';
+
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-bb-name">' + nameLabel + '</label>'
+      + '<input type="text" id="gi-bb-name" maxlength="200" placeholder="' + namePlaceholder + '" oninput="invalidatePreview()">'
+      + '</div>';
+
+    html += '<div class="form-hint" id="gi-bb-slot-warn" style="margin-top:0.5rem; display:none;"></div>';
+
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<span style="color:var(--green);">Online-safe.</span> Delivery uses the CHOAM bank path — recipient sees the empty <code>BaseBackupTool</code> in their bank instantly, no relog required.'
+      + '<br><br>'
+      + (isClone
+          ? '<b>What this grant does:</b> Deep-clones a reference base (totem + buildings + placeables + inventories + items) into a fresh <code>base_backups</code> row owned by the recipient. Your source row is left untouched. Recipient places the tool to materialize the entire structure.'
+          : '<b>What this grant does:</b> Transfers ownership of an existing saved-base row to the recipient. One-shot — after the grant, the source admin no longer owns this backup. Use <b>bb_clone</b> if you want to keep your source backup for re-use.')
+      + '<br><br>'
+      + '<span style="color:var(--yellow);">⚠ Hagga Basin only.</span> The game restricts saved-base restore to Hagga Basin; the recipient cannot place this in Deep Desert. Sub-fief consoles also can\'t restore in Hagga South.'
+      + '<br><br>'
+      + '<span style="color:var(--yellow);">⚠ 3-slot cap.</span> Players may hold at most 3 stored bases. This grant adds 1, so a recipient already at 3 will be refused (the source-backup dropdown query also pulls the recipient\'s current count and warns at 2).'
+      + '<br><br>'
+      + '<span style="color:var(--yellow);">⚠ Permissions do NOT transfer.</span> Guild access, totem permissions, and taxation links are wiped at save-time by Funcom (G21 doesn\'t re-attach them). The recipient must rebuild permissions after placing.'
+      + (isClone
+          ? '<br><br><b>Multi-recipient use:</b> The same source backup can be cloned to many recipients. Each gets their own independent copy.'
+          : '<br><br><b>One-shot:</b> Once granted, the source is gone from your hand. Pick <b>bb_clone</b> instead if you intend to share it more than once.')
+      + '</div>';
+
+    // Async-populate the source dropdown + (when recipient is already picked)
+    // run the slot-count check to render the yellow/red warning band.
+    setTimeout(populateBbSources, 0);
+    setTimeout(refreshBbSlotWarning, 0);
+
+  } else if (id === 'import_solido_to_basebackup') {
+    // G22 — synthesize a base_backups slot from a Solido design and deliver
+    // an empty BaseBackupTool to the recipient's CHOAM bank. Solido fetch /
+    // inline JSON path mirrors G20; slot-count + recipient picker mirror G21.
+    // v1 ships refuse-at-cap; --overwrite-slot deferred to v1.5.
+    var g22RecipientName = selectedPlayer ? (selectedPlayer.name || ('account ' + selectedPlayer.account_id)) : '— pick a player in Step 1 above —';
+    html += '<div class="form-hint" style="margin-bottom:0.75rem; padding:0.55rem 0.75rem; border:1px solid var(--border); border-radius:4px; background:var(--accent-glow);">'
+      + '<b>→ Recipient:</b> <span style="font-family:var(--font-mono);">' + escHtml(g22RecipientName) + '</span>'
+      + ' &nbsp;<span style="color:var(--text-muted); font-size:0.78rem;">(the player selected in Step 1 above — change there to retarget)</span>'
+      + '</div>';
+
+    html += '<div class="form-group" style="margin-bottom:0;"><label for="gi-g22-name">Saved-base name on recipient\'s side</label>'
+      + '<input type="text" id="gi-g22-name" maxlength="200" placeholder="e.g. Tippytoes Starter Sietch" oninput="invalidatePreview()">'
+      + '<div class="form-hint">Shown in the recipient\'s BaseBackupTool slot list. 1..200 chars; this label is also written to <code>permission_actor.actor_name</code> on the totem.</div>'
+      + '</div>';
+
+    html += '<div class="form-group" style="margin-bottom:0;"><label>Solido source</label>'
+      + '<div style="display:flex; gap:1rem; align-items:center; margin:0.4rem 0;">'
+      + '<label style="font-weight:normal;"><input type="radio" name="gi-g22-mode" value="solido" checked onchange="toggleG22BlueprintMode()"> Solido Market UUID</label>'
+      + '<label style="font-weight:normal;"><input type="radio" name="gi-g22-mode" value="inline" onchange="toggleG22BlueprintMode()"> Paste blueprint JSON</label>'
+      + '</div></div>';
+
+    html += '<div class="form-group" id="gi-g22-solido-wrap" style="margin-bottom:0;">'
+      + '<label for="gi-g22-uuid">Solido blueprint UUID</label>'
+      + '<input type="text" id="gi-g22-uuid" placeholder="00000000-0000-0000-0000-000000000000" '
+      + 'pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" '
+      + 'oninput="invalidatePreview()" style="font-family:var(--font-mono);">'
+      + '<div class="form-hint">Paste a UUID from a Solido Market page (<code>dune.layout.tools/blueprints/&lt;uuid&gt;</code>). The admin-backend fetches the JSON server-side; the script receives the resolved data. MTX placeables (decorative DLC fabricators, unique skins) are not currently supported — the grant will refuse with a clear error listing which classes need to be stripped.</div>'
+      + '</div>';
+
+    html += '<div class="form-group" id="gi-g22-inline-wrap" style="margin-bottom:0; display:none;">'
+      + '<label for="gi-g22-json">Blueprint JSON</label>'
+      + '<textarea id="gi-g22-json" rows="10" placeholder=\'{"instances":[...],"placeables":[...]}\' '
+      + 'oninput="invalidatePreview()" style="font-family:var(--font-mono); font-size:0.78rem; width:100%;"></textarea>'
+      + '<div class="form-hint">Paste the full Solido blueprint JSON object. Must contain <code>instances</code> and/or <code>placeables</code> arrays; <code>pentashields</code> is optional. Max 10,000 pieces total, 1 MiB serialized.</div>'
+      + '</div>';
+
+    // Reuse the bb_ slot-warning band id so refreshBbSlotWarning() drives it.
+    html += '<div class="form-hint" id="gi-bb-slot-warn" style="margin-top:0.5rem; display:none;"></div>';
+
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<b>What this grant does:</b> Synthesizes a complete base subgraph (totem + building shell + placeables + permission rows) from a Solido design and seeds a fresh <code>base_backups</code> row owned by the recipient. An empty <code>BaseBackupTool</code> drops into the recipient\'s CHOAM bank instantly; on first use it opens directly onto the seeded base for one-tap placement anywhere in Hagga Basin.'
+      + '<br><br>'
+      + '<span style="color:var(--green);">Online-safe.</span> Bank delivery is the same proven path as G21 — recipient sees the tool instantly, no relog required. Recipient\'s 24h save/restore cooldown is NOT consumed.'
+      + '<br><br>'
+      + '<span style="color:var(--yellow);">⚠ Hagga Basin only.</span> All actors are anchored to Hagga at INSERT time; the game C++ enforces Hagga-only at restore time. Recipient cannot place this in Deep Desert or Hagga South sub-fief slots.'
+      + '<br><br>'
+      + '<span style="color:var(--yellow);">⚠ 3-slot cap.</span> Players may hold at most 3 stored bases. This grant adds 1, so a recipient already at 3 will be refused (see warning band above).'
+      + '<br><br>'
+      + '<span style="color:var(--yellow);">⚠ v1 ships EMPTY containers.</span> Chests, silos, fabricators all materialize but are empty — recipient stocks them post-placement. Stock-loadout templates are a v2 enhancement.'
+      + '<br><br>'
+      + '<b>Class registry:</b> Every placeable class in the Solido must be present in <code>dune.ls_solido_class_defaults</code>. v1 seeds ~22 high-value classes; unknown classes refuse with a clear list of missing class names. The operator expands the registry empirically as new classes appear.'
+      + '<br><br>'
+      + '<b>Source:</b> Solido Market (<a href="https://dune.layout.tools" target="_blank" rel="noopener">dune.layout.tools</a>). See <code>docs/dune-research/ITEM-G22-BUILD-SPEC.md</code> for the full design.'
+      + '</div>';
+
+    setTimeout(refreshBbSlotWarning, 0);
+
+  /* <!-- G23 --> main_quest_unlock — 6 DA_MQ_* preset dropdown.
+     Spec §G23 §Inputs. Pre-computed node + tag union resolved offline from
+     scripts/tags-data.json sidecar; UI just picks a preset id. */
+  } else if (id === 'main_quest_unlock') {
+    var mqOpts = '<option value="">— select a main-quest preset —</option>';
+    (entriesFor('main_quest_preset') || []).forEach(function(e) {
+      var nc = (e.node_count != null) ? (' [' + e.node_count + ' nodes]') : '';
+      mqOpts += '<option value="' + escAttr(e.preset) + '">'
+        + escHtml(e.label || e.preset) + nc + '</option>';
+    });
+    html += '<div class="form-group" style="margin-bottom:0;">'
+      + '<label for="gi-mq-preset">Main-quest preset</label>'
+      + '<select id="gi-mq-preset" onchange="invalidatePreview()" style="font-family:var(--font-mono); font-size:0.82rem;">'
+      + mqOpts + '</select>'
+      + '<div class="form-hint">Six trees from icehunter v0.5.x parity. Each preset completes every node in the chosen subtree + applies the m_TagsToAdd union those nodes would emit on natural completion.</div></div>';
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<span style="color:var(--yellow);">⚠ Player must be Offline.</span> Funcom\'s <code>complete_journey_story_nodes_for_player</code> proc raises EXCEPTION if the player is online — they must be logged out + past the settle timer (5 min open world / 30 sec secure zone) before grant.'
+      + '<br><br><b>What this writes:</b><br>'
+      + '1. <code>dune.complete_journey_story_nodes_for_player(fls_id, node_ids[])</code> — cascade completion across every node id in the chosen subtree (resolved from <code>tags-data.json</code> at script time).<br>'
+      + '2. <code>dune.update_player_tags(account_id, tag_union[], [])</code> — applies the union of <code>m_TagsToAdd</code> across the same subtree.'
+      + '<br><br><b>Targets:</b> veteran-skip onboarding — the alt jumps to the chosen chapter without grinding the prologue. <code>DA_MQ_TheBloodline</code> has a 0-tag union (standalone root); the proc runs but no tag side-effects fire.'
+      + '<br><br><b>Idempotency:</b> safe to re-click. The <code>_grant_gate</code> CTE skips replays, and both Funcom procs are themselves idempotent at the row level.'
+      + '</div>';
+
+  /* <!-- G24a --> grant_full_job_tree — single job dropdown.
+     Spec §G24a §Inputs. high_value=true → typed-confirmation modal at apply.
+     Direct JSONB write to FLevelComponent.ModuleData; preserves player SP via
+     SkillPointsSpent < 1 predicate in the bash builder's plpgsql DO block. */
+  } else if (id === 'grant_full_job_tree') {
+    var jobOpts = '<option value="">— select a job —</option>';
+    (entriesFor('job') || []).forEach(function(e) {
+      jobOpts += '<option value="' + escAttr(e.job) + '">'
+        + escHtml(e.label || e.job) + '</option>';
+    });
+    html += '<div class="form-group" style="margin-bottom:0;">'
+      + '<label for="gi-job">Job</label>'
+      + '<select id="gi-job" onchange="invalidatePreview()" style="font-family:var(--font-mono); font-size:0.82rem;">'
+      + jobOpts + '</select>'
+      + '<div class="form-hint">Unlocks all 6 <code>Skills.Key.*</code> modules for the chosen job (3 tier blocks + 3 capstones) in a single write. Blocks the player has already paid SP into are preserved (the <code>SkillPointsSpent &lt; 1</code> predicate skips them).</div></div>';
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<span style="color:var(--yellow);">⚠ Player must be Offline.</span> Writes the pawn\'s <code>FLevelComponent[1].ModuleData</code> JSONB; RAM-fragile.'
+      + '<br><br><b>Fixes the v0.5.1 CapstoneWeaponry stuck-bug</b> where Funcom placeholder ModuleData rows with <code>SkillPointsSpent: 0</code> block trainer grants.'
+      + '<br><br><b>High-value grant.</b> Confirm-by-typing required at apply.'
+      + '</div>';
+
+  /* <!-- G24b --> grant_skill_block — single Skills.Key.* select.
+     Spec §G24b §Inputs. 30 valid values grouped by job. Same FLevelComponent
+     write path as G24a, single block per grant. */
+  } else if (id === 'grant_skill_block') {
+    var skillBlocks = entriesFor('skill_block') || [];
+    var skillByJob = {};
+    skillBlocks.forEach(function(e) {
+      (skillByJob[e.job] = skillByJob[e.job] || []).push(e);
+    });
+    var sbOpts = '<option value="">— select a skill block —</option>';
+    Object.keys(skillByJob).forEach(function(j) {
+      sbOpts += '<optgroup label="' + escAttr(j) + '">';
+      skillByJob[j].forEach(function(e) {
+        sbOpts += '<option value="' + escAttr(e.block) + '">'
+          + escHtml(e.label || e.block) + '</option>';
+      });
+      sbOpts += '</optgroup>';
+    });
+    html += '<div class="form-group" style="margin-bottom:0;">'
+      + '<label for="gi-skill-block">Skill block</label>'
+      + '<select id="gi-skill-block" onchange="invalidatePreview()" style="font-family:var(--font-mono); font-size:0.82rem;">'
+      + sbOpts + '</select>'
+      + '<div class="form-hint">Surgical version of G24a — unlock exactly one block. Useful when an operator wants just one capstone (e.g. <code>CapstoneWeaponry</code>) without granting the whole tree.</div></div>';
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<span style="color:var(--yellow);">⚠ Player must be Offline.</span> Same FLevelComponent path as Grant Full Job Tree.'
+      + '<br><br><b>Preserves player progress:</b> if the block already has SP &gt;= 1, the UPDATE is a no-op.'
+      + '</div>';
+
+  /* <!-- G25a --> reset_full_skill_area — per-job module nuke.
+     Spec §G25a §Inputs + starter-class hazard guard. high_value=true.
+     Bash builder refuses if job == StarterSkillTreeTag (actor wipe hazard
+     observed on actor 31, 2026-05-24). */
+  } else if (id === 'reset_full_skill_area') {
+    var rsOpts = '<option value="">— select a job to reset —</option>';
+    (entriesFor('job') || []).forEach(function(e) {
+      rsOpts += '<option value="' + escAttr(e.job) + '">'
+        + escHtml(e.label || e.job) + '</option>';
+    });
+    html += '<div class="form-group" style="margin-bottom:0;">'
+      + '<label for="gi-reset-job">Job to reset</label>'
+      + '<select id="gi-reset-job" onchange="invalidatePreview()" style="font-family:var(--font-mono); font-size:0.82rem;">'
+      + rsOpts + '</select>'
+      + '<div class="form-hint">Drops every ModuleData entry whose SkillArea matches the named job — Key blocks, Abilities, Attributes, Perks. Eliminates phantom refundable rows that survive a Key-only delete.</div></div>';
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<span style="color:var(--yellow);">⚠ Player must be Offline.</span> Direct JSONB write; RAM-fragile.'
+      + '<br><br><span style="color:var(--red);">⚠ REFUSED if the chosen job is the player\'s current StarterSkillTreeTag.</span> Resetting your own starter class wipes <code>TotalXPEarned</code> + <code>TotalSkillPoints</code> + <code>UnspentSkillPoints</code> + <code>KeystoneBonusSkillPoints</code> on next login (observed on actor 31, 2026-05-24). The bash builder refuses with an explicit message; re-assign starter class via SQL-level recovery first.'
+      + '<br><br><b>High-value grant.</b> Confirm-by-typing required at apply.'
+      + '</div>';
+
+  /* <!-- G25b --> set_starter_class — UI DISABLED per spec §G25b DEFERRED.
+     The backend route + bash builder exist for SQL-level recovery only.
+     Re-enable conditions: 3+ alt-character validation across 2 patches +
+     Owner sign-off (mirrors icehunter PlayersTab.tsx:1245-1261 posture).
+     Do NOT add a form section here without the empirical wipe-fix study. */
+
+  /* <!-- align_faction --> g7b — alignment-only repair grant.
+     Spec §Faction tooling / g7b_align_faction. Online-safe (tabular). Does
+     NOT change rep — pair with faction_rep for a rep bump. */
+  } else if (id === 'align_faction') {
+    html += '<div class="form-group" style="margin-bottom:0;">'
+      + '<label for="gi-align-faction">Faction</label>'
+      + '<select id="gi-align-faction" onchange="invalidatePreview()" style="font-family:var(--font-mono); font-size:0.82rem;">'
+      + '<option value="">— select a faction —</option>'
+      + '<option value="atreides">Atreides</option>'
+      + '<option value="harkonnen">Harkonnen</option>'
+      + '</select>'
+      + '<div class="form-hint">Writes the 8 faction-alignment tags from icehunter v0.5.8 (<code>AlignedAtreides</code>/<code>AlignedHarkonnen</code>, <code>MetHawat</code>/<code>MetPiterDeVries</code>, etc.) and calls <code>change_player_faction</code> for unaligned characters.</div></div>';
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<span style="color:var(--green);">Online-safe.</span> Tabular grant — writes tag rows + faction row via Funcom procs.'
+      + '<br><br><b>What this is for:</b> a player has rep but the alignment tags somehow missed (legacy G7 grants from before the v0.5.8 tag-union extension; characters whose rank-up UI is stuck despite a valid rep value).'
+      + '<br><br><b>Does NOT change rep.</b> Pair with <code>faction_rep</code> if you also need to bump the numeric value.'
+      + '<br><br><b>Idempotency:</b> safe to re-click — <code>change_player_faction</code> is server-side no-op when already aligned, and <code>update_player_tags</code> is union-write.'
+      + '</div>';
+  } else if (id === 'bank_items_batch') {
+    html += '<div class="form-group" style="margin-bottom:0;">'
+      + '<label>Items to insert into the recipient\'s CHOAM bank</label>'
+      + '<div id="gi-bank-rows" style="display:flex; flex-direction:column; gap:0.5rem; margin-top:0.4rem;"></div>'
+      + '<div style="margin-top:0.6rem; display:flex; gap:0.6rem; align-items:center;">'
+      + '<button type="button" onclick="addBankItemRow()" style="font-family:var(--font-mono); font-size:0.78rem; padding:0.3rem 0.8rem;">+ Add Item</button>'
+      + '<span class="form-hint" id="gi-bank-rowcount" style="margin:0;">0 / 30 items</span>'
+      + '</div>'
+      + '<div class="form-hint" style="margin-top:0.6rem;">Each row inserts one item stack into the recipient\'s bank. Stack 1..' + STACK_SERVER_CAP.toLocaleString() + ' (or the item\'s pak max stack, whichever is lower); grade Base through G5, and a graded item is always a stack of 1. Batch capped at 30 items. Server-side capacity check (bank max_item_count vs current usage + batch size) aborts the entire batch atomically if the bank can\'t hold all items.</div>'
+      + '</div>';
+    html += '<div class="form-hint" style="margin-top:0.5rem;">'
+      + '<span style="color:var(--green);">Online-safe.</span> Bank writes (inventory_type=30) don\'t clobber RAM — proven 2026-05-23. Single audit row per batch carries the full items array in <code>detail.items</code>.'
+      + '<br><br><b>Recipient must have logged in at least once</b> — bank inventory is pawn-keyed and materializes on first login.'
+      + '<br><br><b>All-or-nothing:</b> if capacity check fails or any item is invalid, the whole batch aborts in-transaction.'
+      + '</div>';
+  } else if (id === 'container_items_batch') {
+    html += '<div class="form-group" style="margin-bottom:0;">'
+      + '<label for="gi-cont-target">Target container (recipient\'s own)</label>'
+      + '<select id="gi-cont-target" onchange="invalidatePreview()"><option value="">&mdash; loading containers&hellip; &mdash;</option></select>'
+      + '<div class="form-hint">Only the recipient\'s OWN vehicle / storage containers are listed (ownership-checked via permission_actor_rank). The CHOAM bank is excluded &mdash; use the Bank batch grant for that.</div>'
+      + '</div>';
+    html += '<div class="form-group" style="margin-bottom:0;">'
+      + '<label>Add vehicle package</label>'
+      + '<div style="display:grid; grid-template-columns: 1fr 90px auto; gap:0.5rem; align-items:end;">'
+      + '<select id="gi-cont-pkg"><option value="">&mdash; loading packages&hellip; &mdash;</option></select>'
+      + '<input type="number" id="gi-cont-pkgqty" min="1" max="20" step="1" value="1" title="quantity">'
+      + '<button type="button" onclick="addContPackage()" style="font-family:var(--font-mono); font-size:0.78rem; padding:0.3rem 0.8rem;">+ Add</button>'
+      + '</div>'
+      + '<div id="gi-cont-pkglist" style="display:flex; flex-direction:column; gap:0.4rem; margin-top:0.5rem;"></div>'
+      + '<div class="form-hint" style="margin-top:0.4rem;">Each package is a full Mk6 build (parts auto-expanded server-side). Buggy includes 250 vehicle rockets.</div>'
+      + '</div>';
+    html += '<div class="form-group" style="margin-bottom:0;">'
+      + '<label>Extra individual items (optional)</label>'
+      + '<div id="gi-cont-rows" style="display:flex; flex-direction:column; gap:0.5rem; margin-top:0.4rem;"></div>'
+      + '<div style="margin-top:0.6rem;"><button type="button" onclick="addContItemRow()" style="font-family:var(--font-mono); font-size:0.78rem; padding:0.3rem 0.8rem;">+ Add Item</button></div>'
+      + '</div>';
+    html += '<div class="form-hint" id="gi-cont-summary" style="margin-top:0.3rem;">0 items queued / 150 cap</div>';
+    html += '<div class="form-hint">'
+      + '<b>Ownership-guarded.</b> Writes only to the recipient\'s own containers. '
+      + '<span style="color:var(--yellow);">RAM caveat:</span> items appear in-game only after the container reloads from the DB &mdash; fly it out of the zone and back, or relog. Capped 150 items/grant; free slots checked server-side.'
+      + '</div>';
+  }
+
+  html += '</div>';
+  wrap.innerHTML = html;
+  if (id === 'item' || id === 'schematic_item') {
+    // Grade only: this form's quantity is a count of items, not a stack size,
+    // so the never-stack-graded rule is not applied to it here.
+    linkItemRow('gi-entry', 'gi-quality', null);
+  }
+  if (id === 'bank_items_batch') {
+    bankItemRowSeq = 0;
+    addBankItemRow();
+  }
+  if (id === 'container_items_batch') {
+    contItemRowSeq = 0;
+    contPackages = [];
+    renderContPkgList();
+    loadContTargets();
+    loadContPackages();
+    updateContSummary();
+  }
+}
+
+/* G29 helpers — multi-row item input for bank_items_batch. */
+var bankItemRowSeq = 0;
+function addBankItemRow() {
+  var box = document.getElementById('gi-bank-rows');
+  if (!box) return;
+  var rows = box.querySelectorAll('[data-bank-row]').length;
+  if (rows >= 30) { return; }
+  bankItemRowSeq += 1;
+  var seq = bankItemRowSeq;
+  var domId = 'gi-bank-entry-' + seq;
+  var gradeId = 'gi-bank-quality-' + seq;
+  var stackId = 'gi-bank-stack-' + seq;
+  var row = document.createElement('div');
+  row.className = 'gb-item-row';
+  row.setAttribute('data-bank-row', String(seq));
+  row.innerHTML =
+    '<div><label class="gb-label">Item (name + raw template id)</label>'
+    + entryPickerHtml(domId, 'item', 'template_id', false) + '</div>'
+    + '<div class="gb-row-ctl">'
+    +   '<div><label class="gb-label">Grade</label>' + gradeControlHtml(gradeId) + '</div>'
+    +   '<div><label class="gb-label" for="' + stackId + '">Stack</label>'
+    +     '<div class="gb-stack">'
+    +       '<input type="number" id="' + stackId + '" min="1" max="' + STACK_SERVER_CAP + '" step="1" value="1" '
+    +       'data-cap="' + STACK_SERVER_CAP + '" data-cap-src="server" oninput="invalidatePreview()">'
+    +       '<button type="button" class="gb-max" onclick="setStackMax(\'' + stackId + '\')">max</button>'
+    +     '</div>'
+    +     '<div class="form-hint" id="' + stackId + '-note">Max ' + STACK_SERVER_CAP.toLocaleString() + ' (server cap).</div>'
+    +   '</div>'
+    +   '<button type="button" class="gb-remove" onclick="removeBankItemRow(' + seq + ')">&times;</button>'
+    + '</div>';
+  box.appendChild(row);
+  linkItemRow(domId, gradeId, stackId);
+  updateBankRowCount();
+  invalidatePreview();
+}
+function removeBankItemRow(seq) {
+  var box = document.getElementById('gi-bank-rows');
+  if (!box) return;
+  var row = box.querySelector('[data-bank-row="' + seq + '"]');
+  if (!row) return;
+  if (box.querySelectorAll('[data-bank-row]').length <= 1) { return; }
+  row.parentNode.removeChild(row);
+  updateBankRowCount();
+  invalidatePreview();
+}
+function updateBankRowCount() {
+  var box = document.getElementById('gi-bank-rows');
+  var label = document.getElementById('gi-bank-rowcount');
+  if (!box || !label) return;
+  var n = box.querySelectorAll('[data-bank-row]').length;
+  label.textContent = n + ' / 30 items';
+  label.style.color = (n >= 30) ? 'var(--yellow)' : 'var(--text-muted)';
+}
+
+/* G22 helper: switch between Solido UUID and inline JSON paste modes. */
+function toggleG22BlueprintMode() {
+  var modeEls = document.getElementsByName('gi-g22-mode');
+  var mode = 'solido';
+  for (var i = 0; i < modeEls.length; i++) {
+    if (modeEls[i].checked) { mode = modeEls[i].value; break; }
+  }
+  var solidoWrap = document.getElementById('gi-g22-solido-wrap');
+  var inlineWrap = document.getElementById('gi-g22-inline-wrap');
+  if (solidoWrap) solidoWrap.style.display = (mode === 'solido') ? '' : 'none';
+  if (inlineWrap) inlineWrap.style.display = (mode === 'inline') ? '' : 'none';
+  invalidatePreview();
+}
+
+/* G20 helper: switch the blueprint-source pickers based on radio selection. */
+function toggleBlueprintMode() {
+  var modeEls = document.getElementsByName('gi-bp-mode');
+  var mode = 'solido';
+  for (var i = 0; i < modeEls.length; i++) {
+    if (modeEls[i].checked) { mode = modeEls[i].value; break; }
+  }
+  var solidoWrap = document.getElementById('gi-bp-solido-wrap');
+  var inlineWrap = document.getElementById('gi-bp-inline-wrap');
+  if (solidoWrap) solidoWrap.style.display = (mode === 'solido') ? '' : 'none';
+  if (inlineWrap) inlineWrap.style.display = (mode === 'inline') ? '' : 'none';
+  invalidatePreview();
+}
+
+/* ── Detail builder + validation ── */
+function readEntryValue(domId) {
+  var v = document.getElementById(domId + '-value');
+  return v ? v.value : '';
+}
+
+/* Returns {detail} or throws Error with a user message. */
+function collectDetail() {
+  var id = selectedType.id;
+  if (id === 'item' || id === 'schematic_item') {
+    var tpl = readEntryValue('gi-entry');
+    if (!tpl) throw new Error('Pick an item from the list.');
+    var qty = parseInt(document.getElementById('gi-quantity').value, 10);
+    if (!(qty >= 1)) throw new Error('Quantity must be at least 1.');
+    var quality = parseInt(document.getElementById('gi-quality').value, 10);
+    return { template_id: tpl, quantity: qty, quality: quality };
+  }
+  if (id === 'solari' || id === 'solari_currency' || id === 'intel') {
+    var amt = parseInt(document.getElementById('gi-amount').value, 10);
+    if (!(amt >= 1)) throw new Error('Amount must be at least 1.');
+    return { amount: amt };
+  }
+  if (id === 'house_scrip') {
+    var hs = parseInt(document.getElementById('gi-amount').value, 10);
+    if (!(hs >= 1)) throw new Error('Amount must be at least 1.');
+    return { amount: hs, mode: document.getElementById('gi-mode').value };
+  }
+  if (id === 'recipe') {
+    var rk = readEntryValue('gi-entry');
+    if (!rk) throw new Error('Pick a recipe ItemKey from the list.');
+    return { item_key: rk };
+  }
+  if (id === 'teleport') {
+    var locSel = document.getElementById('gi-tp-location');
+    var locVal = locSel ? locSel.value : '';
+    var pidRaw = (document.getElementById('gi-tp-partition') || {}).value;
+    var tpOut = {};
+    if (locVal === '__custom__') {
+      var tx = parseFloat(document.getElementById('gi-tp-x').value);
+      var ty = parseFloat(document.getElementById('gi-tp-y').value);
+      var tz = parseFloat(document.getElementById('gi-tp-z').value);
+      if (!isFinite(tx) || !isFinite(ty) || !isFinite(tz)) {
+        throw new Error('Custom coords require numeric X, Y, and Z.');
+      }
+      tpOut.x = tx; tpOut.y = ty; tpOut.z = tz;
+    } else {
+      if (!locVal) throw new Error('Pick a teleport location.');
+      tpOut.location_name = locVal;
+    }
+    if (pidRaw !== undefined && pidRaw !== '') {
+      var pid = parseInt(pidRaw, 10);
+      if (!(pid >= 1)) throw new Error('Partition must be a positive integer or blank.');
+      tpOut.partition_id = pid;
+    }
+    return tpOut;
+  }
+  if (id === 'reset_specs') {
+    var trackSel = document.getElementById('gi-reset-track');
+    var trackVal = trackSel ? trackSel.value : '';
+    return trackVal ? { track_type: trackVal } : {};
+  }
+  if (id === 'reset_tutorials' || id === 'wipe_codex' || id === 'repair_all') {
+    return {};
+  }
+  if (id === 'faction_rep') {
+    var fid = parseInt(document.getElementById('gi-faction').value, 10);
+    var famt = parseInt(document.getElementById('gi-amount').value, 10);
+    if (isNaN(famt)) throw new Error('Reputation amount is required.');
+    return { faction_id: fid, amount: famt, mode: document.getElementById('gi-mode').value };
+  }
+  if (id === 'spec_xp') {
+    var track = document.getElementById('gi-track').value;
+    if (!track) throw new Error('Pick a specialization track.');
+    var xp = parseInt(document.getElementById('gi-xp').value, 10) || 0;
+    var lvl = parseInt(document.getElementById('gi-level').value, 10) || 0;
+    return { track_type: track, xp: xp, level: lvl, mode: document.getElementById('gi-mode').value };
+  }
+  if (id === 'keystone') {
+    var ks = document.getElementById('gi-keystone-select').value.trim();
+    if (!ks) throw new Error('Pick a keystone from the dropdown.');
+    if (!/^[0-9]+$/.test(ks)) throw new Error('Keystone id must be numeric (digits only).');
+    return { keystone_id: ks };
+  }
+  if (id === 'char_xp') {
+    var cxp = parseInt(document.getElementById('gi-amount').value, 10);
+    if (!(cxp >= 1 && cxp <= 344440)) throw new Error('Character XP must be 1..344440.');
+    var ackEl = document.getElementById('gi-ack');
+    return { amount: cxp, force_wipe_points_ack: !!(ackEl && ackEl.checked) };
+  }
+  if (id === 'item_live') {
+    var tplLive = readEntryValue('gi-entry');
+    if (!tplLive) throw new Error('Pick an item from the list.');
+    var amtLive = parseInt(document.getElementById('gi-amount').value, 10);
+    if (!(amtLive >= 1)) throw new Error('Amount must be at least 1.');
+    var houseEl = document.getElementById('gi-house');
+    if (!houseEl || !houseEl.value) throw new Error('Pick a Landsraad house.');
+    return { template_id: tplLive, amount: amtLive, house_name: houseEl.value };
+  }
+  if (id === 'progression_preset') {
+    var factionEl = document.getElementById('gi-faction');
+    var presetEl = document.getElementById('gi-preset');
+    if (!factionEl || !factionEl.value) throw new Error('Pick a faction.');
+    if (!presetEl || !presetEl.value) throw new Error('Pick a preset.');
+    var validFactions = ['atreides', 'harkonnen'];
+    var validPresets = ['landsraad_unlock_only', 'ch3_start', 'rank19_eligible'];
+    if (validFactions.indexOf(factionEl.value) === -1) throw new Error('Invalid faction.');
+    if (validPresets.indexOf(presetEl.value) === -1) throw new Error('Invalid preset.');
+    return { faction: factionEl.value, preset: presetEl.value };
+  }
+  if (id === 'import_blueprint') {
+    var deliveryEl = document.getElementById('gi-bp-delivery');
+    var delivery = deliveryEl ? deliveryEl.value : '';
+    if (delivery !== 'backpack' && delivery !== 'bank') {
+      throw new Error('Pick a delivery mode (backpack or bank).');
+    }
+    var modeEls = document.getElementsByName('gi-bp-mode');
+    var bpMode = 'solido';
+    for (var bi = 0; bi < modeEls.length; bi++) {
+      if (modeEls[bi].checked) { bpMode = modeEls[bi].value; break; }
+    }
+    var out = { delivery: delivery };
+    if (bpMode === 'solido') {
+      var uuidEl = document.getElementById('gi-bp-uuid');
+      var uuid = uuidEl ? (uuidEl.value || '').trim() : '';
+      if (!uuid) throw new Error('Enter a Solido blueprint UUID, or switch to inline JSON.');
+      var uuidRe = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+      if (!uuidRe.test(uuid)) throw new Error('Solido UUID is malformed.');
+      out.blueprint_id = uuid;
+    } else {
+      var jsonEl = document.getElementById('gi-bp-json');
+      var jsonText = jsonEl ? (jsonEl.value || '').trim() : '';
+      if (!jsonText) throw new Error('Paste the blueprint JSON, or switch to Solido UUID mode.');
+      var parsed;
+      try {
+        parsed = JSON.parse(jsonText);
+      } catch (e) {
+        throw new Error('Blueprint JSON is not valid: ' + e.message);
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Blueprint JSON must be an object with instances/placeables arrays.');
+      }
+      // If the user pasted the full Solido detail envelope, unwrap it.
+      if (parsed.blueprint_data && typeof parsed.blueprint_data === 'object') {
+        parsed = parsed.blueprint_data;
+      }
+      var inst = Array.isArray(parsed.instances) ? parsed.instances : [];
+      var plac = Array.isArray(parsed.placeables) ? parsed.placeables : [];
+      if (inst.length + plac.length < 1) {
+        throw new Error('Blueprint must contain at least one instance or placeable.');
+      }
+      out.blueprint_data = parsed;
+    }
+    var titleEl = document.getElementById('gi-bp-title');
+    var title = titleEl ? (titleEl.value || '').trim() : '';
+    if (title) out.title = title;
+    return out;
+  }
+  if (id === 'import_solido_to_basebackup') {
+    // G22 — Solido design synthesized into a base_backups slot + empty
+    // BaseBackupTool delivered to the recipient's CHOAM bank.
+    if (!selectedPlayer) throw new Error('Pick a recipient first (Step 1).');
+    var g22NameEl = document.getElementById('gi-g22-name');
+    var g22Name = g22NameEl ? (g22NameEl.value || '').trim() : '';
+    if (!g22Name) throw new Error('Enter a saved-base name for the recipient.');
+    if (g22Name.length > 200) throw new Error('Saved-base name must be <=200 chars.');
+
+    var g22ModeEls = document.getElementsByName('gi-g22-mode');
+    var g22Mode = 'solido';
+    for (var gi = 0; gi < g22ModeEls.length; gi++) {
+      if (g22ModeEls[gi].checked) { g22Mode = g22ModeEls[gi].value; break; }
+    }
+    var g22Out = {
+      recipient_account_id: selectedPlayer.account_id,
+      base_backup_name: g22Name,
+    };
+    if (g22Mode === 'solido') {
+      var g22UuidEl = document.getElementById('gi-g22-uuid');
+      var g22Uuid = g22UuidEl ? (g22UuidEl.value || '').trim() : '';
+      if (!g22Uuid) throw new Error('Enter a Solido blueprint UUID, or switch to inline JSON.');
+      var g22UuidRe = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+      if (!g22UuidRe.test(g22Uuid)) throw new Error('Solido UUID is malformed.');
+      g22Out.blueprint_id = g22Uuid;
+    } else {
+      var g22JsonEl = document.getElementById('gi-g22-json');
+      var g22JsonText = g22JsonEl ? (g22JsonEl.value || '').trim() : '';
+      if (!g22JsonText) throw new Error('Paste the blueprint JSON, or switch to Solido UUID mode.');
+      var g22Parsed;
+      try {
+        g22Parsed = JSON.parse(g22JsonText);
+      } catch (e) {
+        throw new Error('Blueprint JSON is not valid: ' + e.message);
+      }
+      if (!g22Parsed || typeof g22Parsed !== 'object' || Array.isArray(g22Parsed)) {
+        throw new Error('Blueprint JSON must be an object with instances/placeables arrays.');
+      }
+      if (g22Parsed.blueprint_data && typeof g22Parsed.blueprint_data === 'object') {
+        g22Parsed = g22Parsed.blueprint_data;
+      }
+      var g22Inst = Array.isArray(g22Parsed.instances) ? g22Parsed.instances : [];
+      var g22Plac = Array.isArray(g22Parsed.placeables) ? g22Parsed.placeables : [];
+      if (g22Inst.length + g22Plac.length < 1) {
+        throw new Error('Blueprint must contain at least one instance or placeable.');
+      }
+      g22Out.blueprint_data = g22Parsed;
+    }
+    return g22Out;
+  }
+  if (id === 'bb_handoff' || id === 'bb_clone') {
+    if (!selectedPlayer) throw new Error('Pick a recipient first (Step 1).');
+    var sourceEl = document.getElementById('gi-bb-source');
+    var sourceRaw = sourceEl ? (sourceEl.value || '').trim() : '';
+    if (!sourceRaw) throw new Error('Pick a source backup from the dropdown.');
+    var sourceId = parseInt(sourceRaw, 10);
+    if (!(sourceId >= 1)) throw new Error('Source backup id must be a positive integer.');
+    var nameEl = document.getElementById('gi-bb-name');
+    var rawName = nameEl ? (nameEl.value || '').trim() : '';
+    var bbOut = {
+      recipient_account_id: selectedPlayer.account_id,
+      source_backup_id: sourceId,
+    };
+    if (rawName) {
+      bbOut[id === 'bb_clone' ? 'backup_name' : 'override_name'] = rawName;
+    }
+    return bbOut;
+  }
+  /* <!-- G23 --> */
+  if (id === 'main_quest_unlock') {
+    var mqEl = document.getElementById('gi-mq-preset');
+    var mq = mqEl ? mqEl.value : '';
+    if (!mq) throw new Error('Pick a main-quest preset.');
+    return { preset: mq };
+  }
+  /* <!-- G24a --> + <!-- G25a --> share the single-job shape. */
+  if (id === 'grant_full_job_tree') {
+    var jobEl = document.getElementById('gi-job');
+    var jobVal = jobEl ? jobEl.value : '';
+    if (!jobVal) throw new Error('Pick a job.');
+    return { job: jobVal };
+  }
+  if (id === 'reset_full_skill_area') {
+    var rjEl = document.getElementById('gi-reset-job');
+    var rjVal = rjEl ? rjEl.value : '';
+    if (!rjVal) throw new Error('Pick a job to reset.');
+    return { job: rjVal };
+  }
+  /* <!-- G24b --> */
+  if (id === 'grant_skill_block') {
+    var sbEl = document.getElementById('gi-skill-block');
+    var sbVal = sbEl ? sbEl.value : '';
+    if (!sbVal) throw new Error('Pick a skill block.');
+    return { block: sbVal };
+  }
+  /* <!-- align_faction --> */
+  if (id === 'align_faction') {
+    var afEl = document.getElementById('gi-align-faction');
+    var afVal = afEl ? afEl.value : '';
+    if (afVal !== 'atreides' && afVal !== 'harkonnen') {
+      throw new Error('Pick a faction (Atreides or Harkonnen).');
+    }
+    return { faction: afVal };
+  }
+  /* <!-- G29 bank_items_batch --> */
+  if (id === 'bank_items_batch') {
+    var box = document.getElementById('gi-bank-rows');
+    if (!box) throw new Error('Bank items grid missing.');
+    var rowEls = box.querySelectorAll('[data-bank-row]');
+    if (rowEls.length < 1) throw new Error('Add at least one item.');
+    if (rowEls.length > 30) throw new Error('At most 30 items per batch.');
+    var items = [];
+    for (var i = 0; i < rowEls.length; i++) {
+      var seq = rowEls[i].getAttribute('data-bank-row');
+      var tpl = readEntryValue('gi-bank-entry-' + seq);
+      if (!tpl) throw new Error('Row ' + (i + 1) + ': pick an item from the list.');
+      var stack = parseInt(document.getElementById('gi-bank-stack-' + seq).value, 10);
+      if (!(stack >= 1 && stack <= STACK_SERVER_CAP)) throw new Error('Row ' + (i + 1) + ': stack must be 1..' + STACK_SERVER_CAP + '.');
+      var quality = parseInt(document.getElementById('gi-bank-quality-' + seq).value, 10);
+      if (!(quality >= 0 && quality <= 5)) throw new Error('Row ' + (i + 1) + ': grade must be Base through G5.');
+      if (quality > 0 && stack > 1) throw new Error('Row ' + (i + 1) + ': graded items never stack, use a stack of 1.');
+      items.push({ template_id: tpl, stack_size: stack, quality: quality });
+    }
+    return { items: items };
+  }
+  if (id === 'container_items_batch') {
+    var tgt = document.getElementById('gi-cont-target');
+    var targetInv = tgt ? parseInt(tgt.value, 10) : NaN;
+    if (!(targetInv >= 1)) throw new Error('Pick a target container.');
+    var citems = [];
+    var crows = document.querySelectorAll('#gi-cont-rows [data-cont-row]');
+    for (var ci = 0; ci < crows.length; ci++) {
+      var cseq = crows[ci].getAttribute('data-cont-row');
+      var ctpl = readEntryValue('gi-cont-entry-' + cseq);
+      if (!ctpl) continue; // skip blank optional rows
+      var cstack = parseInt(document.getElementById('gi-cont-stack-' + cseq).value, 10);
+      if (!(cstack >= 1 && cstack <= STACK_SERVER_CAP)) throw new Error('Item row: stack must be 1..' + STACK_SERVER_CAP + '.');
+      var cqual = parseInt(document.getElementById('gi-cont-quality-' + cseq).value, 10);
+      if (!(cqual >= 0 && cqual <= 5)) throw new Error('Item row: grade must be Base through G5.');
+      if (cqual > 0 && cstack > 1) throw new Error('Item row: graded items never stack, use a stack of 1.');
+      citems.push({ template_id: ctpl, stack_size: cstack, quality: cqual });
+    }
+    if (contPackages.length === 0 && citems.length === 0)
+      throw new Error('Add at least one vehicle package or item.');
+    var cdetail = { target_inv: targetInv };
+    if (contPackages.length) cdetail.packages = contPackages.map(function(p){ return { key: p.key, qty: p.qty }; });
+    if (citems.length) cdetail.items = citems;
+    return cdetail;
+  }
+  throw new Error('Unknown grant type.');
+}
+
+/* G30 helpers — container target + vehicle-package picker for container_items_batch. */
+var contItemRowSeq = 0;
+var contPackages = [];   // [{key, qty, display, slots}]
+var contPkgData = {};    // key -> {display, slots, ...} from /grant/vehicle-packages
+
+function loadContTargets() {
+  var sel = document.getElementById('gi-cont-target');
+  if (!sel) return;
+  if (!selectedPlayer) { sel.innerHTML = '<option value="">&mdash; pick a player first (Step 1) &mdash;</option>'; return; }
+  sel.innerHTML = '<option value="">&mdash; loading&hellip; &mdash;</option>';
+  apiCall('GET', '/admin/api/dune/player/' + encodeURIComponent(selectedPlayer.account_id) + '/containers').then(function(d) {
+    var list = ((d && d.containers) || []).filter(function(c) { return c.class !== 'CHOAMBank' && c.max_item_count; });
+    if (!list.length) { sel.innerHTML = '<option value="">&mdash; no owned containers found &mdash;</option>'; invalidatePreview(); return; }
+    var opts = ['<option value="">&mdash; pick a container &mdash;</option>'];
+    list.forEach(function(c) {
+      var nm = (c.name && c.name.trim()) ? c.name : (c.label || c.class || 'Container');
+      var loc = c.map ? (' · ' + c.map) : '';
+      var fill = (c.item_count != null && c.max_item_count) ? (' · ' + c.item_count + '/' + c.max_item_count) : '';
+      opts.push('<option value="' + escAttr(c.id) + '">' + escHtml(nm) + loc + fill + '  [inv ' + c.id + ']</option>');
+    });
+    sel.innerHTML = opts.join('');
+    invalidatePreview();
+  }).catch(function() { sel.innerHTML = '<option value="">&mdash; failed to load containers &mdash;</option>'; });
+}
+
+function loadContPackages() {
+  var sel = document.getElementById('gi-cont-pkg');
+  if (!sel) return;
+  apiCall('GET', '/admin/api/dune/grant/vehicle-packages').then(function(d) {
+    contPkgData = (d && d.packages) || {};
+    var opts = ['<option value="">&mdash; pick a vehicle &mdash;</option>'];
+    Object.keys(contPkgData).forEach(function(k) {
+      var p = contPkgData[k];
+      opts.push('<option value="' + escAttr(k) + '">' + escHtml(p.display) + ' (' + p.slots + ' slots)</option>');
+    });
+    sel.innerHTML = opts.join('');
+  }).catch(function() { sel.innerHTML = '<option value="">&mdash; failed to load packages &mdash;</option>'; });
+}
+
+function addContPackage() {
+  var sel = document.getElementById('gi-cont-pkg');
+  var qtyEl = document.getElementById('gi-cont-pkgqty');
+  if (!sel || !sel.value) return;
+  var key = sel.value;
+  var qty = Math.max(1, parseInt(qtyEl ? qtyEl.value : '1', 10) || 1);
+  var p = contPkgData[key] || {};
+  var existing = contPackages.filter(function(x) { return x.key === key; })[0];
+  if (existing) { existing.qty += qty; }
+  else { contPackages.push({ key: key, qty: qty, display: p.display || key, slots: p.slots || 0 }); }
+  renderContPkgList(); updateContSummary(); invalidatePreview();
+}
+
+function removeContPackage(key) {
+  contPackages = contPackages.filter(function(x) { return x.key !== key; });
+  renderContPkgList(); updateContSummary(); invalidatePreview();
+}
+
+function renderContPkgList() {
+  var box = document.getElementById('gi-cont-pkglist');
+  if (!box) return;
+  if (!contPackages.length) { box.innerHTML = '<span class="form-hint" style="margin:0;">No packages added yet.</span>'; return; }
+  box.innerHTML = contPackages.map(function(p) {
+    return '<div style="display:flex; justify-content:space-between; align-items:center; padding:0.35rem 0.6rem; border:1px solid var(--border); border-radius:4px; background:var(--bg-elevated);">'
+      + '<span>' + escHtml(p.display) + ' <b>×' + p.qty + '</b> <span class="form-hint" style="margin:0;">(' + (p.slots * p.qty) + ' slots)</span></span>'
+      + '<button type="button" onclick="removeContPackage(\'' + p.key + '\')" style="color:var(--red); border-color:var(--red); background:transparent; font-size:0.72rem; padding:0.2rem 0.5rem;">×</button>'
+      + '</div>';
+  }).join('');
+}
+
+function addContItemRow() {
+  var box = document.getElementById('gi-cont-rows');
+  if (!box) return;
+  contItemRowSeq += 1;
+  var seq = contItemRowSeq;
+  var domId = 'gi-cont-entry-' + seq;
+  var gradeId = 'gi-cont-quality-' + seq;
+  var stackId = 'gi-cont-stack-' + seq;
+  var row = document.createElement('div');
+  row.className = 'gb-item-row';
+  row.setAttribute('data-cont-row', String(seq));
+  row.innerHTML =
+    '<div><label class="gb-label">Item (name + raw template id)</label>'
+    + entryPickerHtml(domId, 'item', 'template_id', false) + '</div>'
+    + '<div class="gb-row-ctl">'
+    +   '<div><label class="gb-label">Grade</label>' + gradeControlHtml(gradeId) + '</div>'
+    +   '<div><label class="gb-label" for="' + stackId + '">Stack</label>'
+    +     '<div class="gb-stack">'
+    +       '<input type="number" id="' + stackId + '" min="1" max="' + STACK_SERVER_CAP + '" step="1" value="1" '
+    +       'data-cap="' + STACK_SERVER_CAP + '" data-cap-src="server" oninput="invalidatePreview()">'
+    +       '<button type="button" class="gb-max" onclick="setStackMax(\'' + stackId + '\')">max</button>'
+    +     '</div>'
+    +     '<div class="form-hint" id="' + stackId + '-note">Max ' + STACK_SERVER_CAP.toLocaleString() + ' (server cap).</div>'
+    +   '</div>'
+    +   '<button type="button" class="gb-remove" onclick="removeContItemRow(' + seq + ')">&times;</button>'
+    + '</div>';
+  box.appendChild(row);
+  linkItemRow(domId, gradeId, stackId);
+  updateContSummary(); invalidatePreview();
+}
+
+function removeContItemRow(seq) {
+  var box = document.getElementById('gi-cont-rows');
+  if (!box) return;
+  var row = box.querySelector('[data-cont-row="' + seq + '"]');
+  if (row) row.parentNode.removeChild(row);
+  updateContSummary(); invalidatePreview();
+}
+
+function updateContSummary() {
+  var el = document.getElementById('gi-cont-summary');
+  if (!el) return;
+  var pkgSlots = contPackages.reduce(function(a, p) { return a + p.slots * p.qty; }, 0);
+  var box = document.getElementById('gi-cont-rows');
+  var rowCount = box ? box.querySelectorAll('[data-cont-row]').length : 0;
+  var total = pkgSlots + rowCount;
+  el.textContent = total + ' items queued / 150 cap' + (pkgSlots ? ' (' + pkgSlots + ' from packages)' : '');
+  el.style.color = (total > 150) ? 'var(--red)' : 'var(--text-muted)';
+}
+
+/* Human-readable detail rows for the preview table. */
+function detailRows(detail) {
+  var rows = [];
+  Object.keys(detail).forEach(function(k) {
+    rows.push([k, String(detail[k])]);
+  });
+  return rows;
+}
+
+/* ── Step 3 — Preview ── */
+function invalidatePreview() {
+  idempotencyKey = null;
+  previewDetail = null;
+  previewBlocked = false;
+  document.getElementById('apply-btn').disabled = true;
+  var wrap = document.getElementById('preview-wrap');
+  wrap.innerHTML = '<div class="form-hint">Select a player and grant details, then build the preview.</div>';
+  hideMsg('preview-gate');
+  var liveWrap = document.getElementById('live-delivery-wrap');
+  var liveCb = document.getElementById('live-delivery-cb');
+  if (liveWrap) liveWrap.hidden = true;
+  if (liveCb) liveCb.checked = false;
+}
+
+function buildPreview() {
+  hideMsg('grant-msg');
+  if (!selectedPlayer) { showMsg('grant-msg', 'Select a player first (Step 1).', 'error'); return; }
+  if (!selectedType) { showMsg('grant-msg', 'Select a grant type first (Step 2).', 'error'); return; }
+
+  var detail;
+  try {
+    detail = collectDetail();
+  } catch (e) {
+    showMsg('grant-msg', e.message, 'error');
+    return;
+  }
+
+  previewDetail = detail;
+  idempotencyKey = uuidv4();   // generated when the preview step is reached
+
+  var online = isOnline(selectedPlayer);
+  previewBlocked = online && !!selectedType.requires_offline;
+
+  var rows = '';
+  rows += previewRow('Target character', escHtml(selectedPlayer.name || ('account ' + selectedPlayer.account_id)));
+  rows += previewRow('Account id', String(selectedPlayer.account_id));
+  rows += previewRow('Player state', presenceDot(online));
+  rows += previewRow('Grant type', escHtml(selectedType.label) + ' <span style="color:var(--text-muted);">[' + escHtml(selectedType.id) + ']</span>');
+  detailRows(detail).forEach(function(r) {
+    rows += previewRow(escHtml(r[0]), escHtml(r[1]));
+  });
+  rows += previewRow('Idempotency key', '<span style="color:var(--text-muted);">' + escHtml(idempotencyKey) + '</span>');
+
+  // M2 — spec_xp SET mode overwrites BOTH xp and level; an untouched field at 0
+  // is silently set to 0. Make that explicit at the preview step.
+  var setWarning = '';
+  if (selectedType.id === 'spec_xp' && detail.mode === 'set') {
+    setWarning =
+      '<div class="msg error" style="margin-top:0.85rem;">'
+      + 'SET mode overwrites BOTH xp and level on this track; any field left at 0 will be set to 0. '
+      + 'This preview shows xp = ' + escHtml(String(detail.xp))
+      + ' and level = ' + escHtml(String(detail.level)) + '.'
+      + '</div>';
+  }
+
+  document.getElementById('preview-wrap').innerHTML =
+    '<table><tbody>' + rows + '</tbody></table>' + setWarning;
+
+  applyPreviewGate();
+}
+
+// Apply the online/offline gate after a preview is built. When a grant is
+// blocked because the player is online, an RMQ-eligible grant (base item q0 /
+// char_xp) can instead be delivered live: checking the live-delivery box pushes
+// it in-world now and unblocks Apply. Re-runs on checkbox toggle.
+function applyPreviewGate() {
+  var gate = document.getElementById('preview-gate');
+  var wrap = document.getElementById('live-delivery-wrap');
+  var cb = document.getElementById('live-delivery-cb');
+  var applyBtn = document.getElementById('apply-btn');
+  if (!selectedType) return;
+
+  var rmqEligible = (selectedType.id === 'char_xp') ||
+    (selectedType.id === 'item' && Number((previewDetail || {}).quality || 0) === 0);
+
+  if (previewBlocked && rmqEligible) {
+    wrap.hidden = false;
+    if (cb.checked) {
+      hideMsg('preview-gate');
+      applyBtn.disabled = false;
+    } else {
+      gate.className = 'msg error';
+      gate.textContent = 'Target is online — ' + selectedType.label
+        + ' requires the player to be offline. Check "Deliver live now" below to push it '
+        + 'in-world via RMQ, or wait until the player is offline and rebuild the preview.';
+      applyBtn.disabled = true;
+    }
+    return;
+  }
+
+  wrap.hidden = true;
+  cb.checked = false;
+  if (previewBlocked) {
+    gate.className = 'msg error';
+    gate.textContent = 'Target is online — ' + selectedType.label
+      + ' requires the player to be offline. Apply is disabled. Wait until the player is offline and rebuild the preview.';
+    applyBtn.disabled = true;
+  } else {
+    hideMsg('preview-gate');
+    applyBtn.disabled = false;
+  }
+}
+
+function previewRow(k, v) {
+  return '<tr><td style="font-family:var(--font-mono); font-size:0.75rem; color:var(--text-muted); width:40%;">'
+    + k + '</td><td style="font-family:var(--font-mono); font-size:0.8rem;">' + v + '</td></tr>';
+}
+
+/* ── Step 4 — Confirm + Apply ── */
+function applyGrant() {
+  if (applying) return;
+  hideMsg('grant-msg');
+  if (!previewDetail || !idempotencyKey) {
+    showMsg('grant-msg', 'Build the preview first (Step 3).', 'error');
+    return;
+  }
+  if (previewBlocked) {
+    showMsg('grant-msg', 'Target is online and this grant requires the player to be offline.', 'error');
+    return;
+  }
+
+  var name = selectedPlayer.name || ('account ' + selectedPlayer.account_id);
+  var lines = [
+    'Apply this grant?',
+    '',
+    'PLAYER: ' + name + ' (account ' + selectedPlayer.account_id + ')',
+    'GRANT:  ' + selectedType.label + ' [' + selectedType.id + ']'
+  ];
+  detailRows(previewDetail).forEach(function(r) {
+    lines.push('  ' + r[0] + ' = ' + r[1]);
+  });
+  lines.push('');
+  if (selectedType.id === 'spec_xp' && previewDetail.mode === 'set') {
+    lines.push('SET mode overwrites BOTH xp and level on this track;');
+    lines.push('any field left at 0 will be set to 0.');
+    lines.push('');
+  }
+  lines.push('THIS GRANT IS AUDIT-LOGGED AND CANNOT BE UNDONE FROM THIS PANEL.');
+
+  if (selectedType.high_value) {
+    // High-value grants escalate to a typed-confirmation modal.
+    showTypedConfirm(
+      'HIGH-VALUE GRANT — type the character name "' + name + '" to confirm.',
+      name,
+      function() { doApply(); }
+    );
+  } else {
+    showConfirm(lines.join('\n'), function() { doApply(); });
+  }
+}
+
+function doApply() {
+  if (applying) return;
+  applying = true;
+  var btn = document.getElementById('apply-btn');
+  btn.disabled = true;
+  btn.textContent = 'Applying...';
+  log('Submitting ' + selectedType.id + ' grant for account ' + selectedPlayer.account_id + ' (key ' + idempotencyKey + ')', 'info');
+
+  var liveWrap = document.getElementById('live-delivery-wrap');
+  var liveCb = document.getElementById('live-delivery-cb');
+  var liveDelivery = !!(liveWrap && !liveWrap.hidden && liveCb && liveCb.checked);
+
+  var body = {
+    account_id: selectedPlayer.account_id,
+    grant_type: selectedType.id,
+    idempotency_key: idempotencyKey,
+    detail: previewDetail,
+    mode: 'apply',
+    defer_if_online: false,
+    live_delivery: liveDelivery
+  };
+
+  apiCall('POST', '/admin/api/dune/grant', body).then(function(d) {
+    var status = d.status || (d.success ? 'applied' : 'failed');
+    var base = d.message || ('Grant ' + status + '.');
+    var suffix = liveDelivery
+      ? ' Delivered live in-world via RMQ.'
+      : (selectedType && selectedType.id === 'item_live')
+        ? ' The player can claim it now from the in-game rewards prompt.'
+        : ' The player must relog or change zone before this appears.';
+    var msg = base + suffix;
+    showMsg('grant-msg', msg, 'success');
+    log('Grant ' + status + (d.grant_id ? ' (grant_id ' + d.grant_id + ')' : ''), 'success');
+    resetForm();
+    loadRecent();
+  }).catch(function(e) {
+    showMsg('grant-msg', 'Grant failed: ' + (e.message || 'error'), 'error');
+    log('Grant failed: ' + (e.message || 'error'), 'error');
+    loadRecent();
+  }).finally(function() {
+    applying = false;
+    btn.textContent = 'Apply Grant';
+    // Button stays disabled until a fresh preview is built.
+  });
+}
+
+function resetForm() {
+  selectedPlayer = null;
+  selectedType = null;
+  document.getElementById('player-search').value = '';
+  document.getElementById('player-selected').style.display = 'none';
+  document.getElementById('player-selected').innerHTML = '';
+  document.getElementById('grant-type').value = '';
+  document.getElementById('grant-type-hint').textContent = '';
+  document.getElementById('grant-inputs').innerHTML = '';
+  invalidatePreview();
+}
+
+/* ── Typed-confirmation modal (copied from the showPasswordPrompt pattern) ── */
+var pendingTypedCallback = null;
+var typedExpected = '';
+
+function showTypedConfirm(message, expected, callback) {
+  pendingTypedCallback = callback;
+  typedExpected = expected;
+  document.getElementById('typed-message').textContent = message;
+  document.getElementById('typed-input').value = '';
+  document.getElementById('typed-input').placeholder = 'Type: ' + expected;
+  document.getElementById('typed-overlay').classList.add('active');
+  document.getElementById('typed-input').focus();
+  document.getElementById('typed-confirm').onclick = function() {
+    var typed = document.getElementById('typed-input').value;
+    if (typed !== typedExpected) {
+      alert('Confirmation text does not match. Type exactly: ' + typedExpected);
+      return;
+    }
+    var cb = pendingTypedCallback;
+    closeTypedConfirm();
+    if (cb) cb();
+  };
+}
+
+function closeTypedConfirm() {
+  document.getElementById('typed-overlay').classList.remove('active');
+  pendingTypedCallback = null;
+  typedExpected = '';
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeTypedConfirm();
+});
+
+/* ── Recent Grants ── */
+function toggleRecent() {
+  var panel = document.getElementById('recent-panel');
+  var btn = document.getElementById('recent-toggle');
+  if (panel.style.display === 'none') {
+    panel.style.display = '';
+    btn.textContent = 'Hide';
+    loadRecent();
+  } else {
+    panel.style.display = 'none';
+    btn.textContent = 'Show';
+  }
+}
+
+function statusColor(status) {
+  var s = String(status || '').toLowerCase();
+  if (s === 'applied') return 'var(--green)';
+  if (s === 'failed') return 'var(--red)';
+  if (s === 'deferred' || s === 'pending') return 'var(--yellow)';
+  return 'var(--text-muted)';
+}
+
+function loadRecent() {
+  apiCall('GET', '/admin/api/dune/grant/recent').then(function(d) {
+    var rows = d.grants || d.entries || d || [];
+    var tbody = document.getElementById('recent-tbody');
+    var empty = document.getElementById('recent-empty');
+    if (!Array.isArray(rows) || !rows.length) {
+      tbody.innerHTML = '';
+      empty.style.display = '';
+      return;
+    }
+    empty.style.display = 'none';
+    tbody.innerHTML = rows.map(function(g) {
+      var ts = g.granted_at ? new Date(g.granted_at).toLocaleString() : '—';
+      var det = g.detail ? JSON.stringify(g.detail) : '';
+      var grant = escHtml(g.grant_type || '') + (det ? ' <span style="color:var(--text-muted);">' + escHtml(det) + '</span>' : '');
+      return '<tr>'
+        + '<td style="font-family:var(--font-mono); font-size:0.72rem; white-space:nowrap;">' + escHtml(ts) + '</td>'
+        + '<td>' + escHtml(g.operator || '—') + '</td>'
+        + '<td style="font-family:var(--font-mono); font-size:0.78rem;">' + escHtml(g.player_name || g.account_id || '—') + '</td>'
+        + '<td style="font-family:var(--font-mono); font-size:0.75rem;">' + grant + '</td>'
+        + '<td style="color:' + statusColor(g.status) + '; font-family:var(--font-mono); font-size:0.75rem;">'
+        + escHtml(String(g.status || '—').toUpperCase()) + '</td>'
+        + '</tr>';
+    }).join('');
+  }).catch(function(e) {
+    document.getElementById('recent-tbody').innerHTML =
+      '<tr><td colspan="5" style="text-align:center; color:var(--red);">Failed to load recent grants</td></tr>';
+    document.getElementById('recent-empty').style.display = 'none';
+  });
+}
+
+/* ── Init ── */
+loadCatalog();
+loadGiveItems();
+loadPlayers();
+</script>
+{% endblock %}

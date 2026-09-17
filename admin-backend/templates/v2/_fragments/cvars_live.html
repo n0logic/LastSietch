@@ -1,0 +1,182 @@
+{# Live sub-tab — 5+1-layer INI hierarchy walk + Funcom Live Settings pane.
+
+   Data shape (relay GET /server/cvars/read — coder-helpers contract):
+     live.settings[]: per (section,key) — current_value, source, is_override,
+                      inferred_type, layers[] (always 6 entries, fixed order)
+     live.layers[].layer: defaultEngine_linux | defaultEngine | defaultGame |
+                          userEngine | userGame | userOverrides
+     live.layers[].present: bool — false means the key was not in that file
+     live.raw_sections[]: array of section blocks not in the catalog (codex)
+     live.paths{}: layer name -> container path
+     live.captured_at: ISO timestamp
+     live.warnings[]: relay-side warnings
+
+   Edit gate: per_map fields (sections that vary per-map) render disabled.
+   Slice 2 will expose them per pod selection.
+#}
+{% set settings = live.settings if live.settings is defined else [] %}
+{% set captured_at = live.captured_at if live.captured_at is defined else None %}
+{% set raw_sections = live.raw_sections if live.raw_sections is defined else [] %}
+{% set warnings = live.warnings if live.warnings is defined else [] %}
+
+<div class="v2-cvars-live">
+
+  {% if not live_available %}
+    <div class="empty-state empty-state--loading-failed">
+      <p class="empty-state__headline">Live config unavailable</p>
+      <p class="empty-state__body">
+        The relay couldn't reach the game pod. Catalog and History sub-tabs
+        still work — they read repo-static / DB data.
+      </p>
+      <div class="empty-state__actions">
+        <button type="button" class="btn btn-sm"
+                hx-get="/admin/v2/server/cvars/live"
+                hx-target="#cvars-subtab-body"
+                hx-swap="innerHTML"
+                hx-indicator="#v2-cvars-subtab-loading">Retry</button>
+      </div>
+    </div>
+  {% elif not settings %}
+    <div class="empty-state">
+      <p class="empty-state__headline">No keys returned</p>
+      <p class="empty-state__body">
+        The relay responded but reported zero keys. Pod may be cold or
+        UserOverrides.ini is fresh.
+      </p>
+    </div>
+  {% else %}
+
+    <div class="v2-cvars-live__meta">
+      <span>{{ settings|length }} setting{{ '' if settings|length == 1 else 's' }} walked</span>
+      {% if captured_at %}
+        <span>captured <time datetime="{{ captured_at }}">{{ captured_at }}</time></span>
+      {% endif %}
+      <label class="v2-cvars-live__view-toggle-label">
+        View:
+        <select id="cvars-live-view-toggle" class="v2-cvars-live__view-toggle">
+          <option value="user">User (overrides only)</option>
+          <option value="all">All keys</option>
+        </select>
+      </label>
+    </div>
+
+    {% if warnings %}
+      <div class="v2-cvars-live__warnings">
+        {% for w in warnings %}<div class="badge badge--warning">{{ w }}</div>{% endfor %}
+      </div>
+    {% endif %}
+
+    {# ── Server Config 5+1-layer walk ── #}
+    <section class="card v2-cvars-live__server-config">
+      <header class="card__header">
+        <h2 class="card__title">Server Config — 6-layer walk</h2>
+        <p class="card__subtitle">
+          Effective value per (section, key) + the layer that supplied it.
+          Reads merge low→high: defaultEngine_linux → defaultEngine → defaultGame →
+          userEngine → userGame → userOverrides. Writes go to UserOverrides.ini only.
+          Changes take effect at next maintenance restart.
+        </p>
+      </header>
+      <div class="card__body">
+        <table class="v2-cvars-live__table">
+          <thead>
+            <tr>
+              <th scope="col">Section / Key</th>
+              <th scope="col">Effective</th>
+              <th scope="col">Source layer</th>
+              <th scope="col">Layer walk</th>
+              <th scope="col">Status</th>
+              <th scope="col" class="v2-cvars-live__col-action">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in settings %}
+              {% set is_override = s.is_override %}
+              <tr class="v2-cvars-live__row{% if is_override %} v2-cvars-live__row--override{% endif %}"
+                  data-source-layer="{{ s.source }}">
+                <td class="v2-cvars-live__key">
+                  <code class="v2-cvars-live__section">{{ s.section }}</code>
+                  <code class="v2-cvars-live__keyname">{{ s.key }}</code>
+                </td>
+                <td class="v2-cvars-live__effective"><code>{{ s.current_value if s.current_value is not none else '(unset)' }}</code></td>
+                <td class="v2-cvars-live__source">
+                  <span class="cvars-layer-pill cvars-layer-pill--{{ s.source }}">{{ s.source }}</span>
+                </td>
+                <td class="v2-cvars-live__walk-cell">
+                  <details class="v2-cvars-live__walk">
+                    <summary>{{ (s.layers|selectattr('present')|list)|length }} / {{ s.layers|length }}</summary>
+                    <ol class="v2-cvars-live__walk-list">
+                      {% for step in s.layers %}
+                        <li class="v2-cvars-live__walk-step{% if not step.present %} v2-cvars-live__walk-step--absent{% endif %}">
+                          <span class="cvars-layer-pill cvars-layer-pill--{{ step.layer }} cvars-layer-pill--sm">{{ step.layer }}</span>
+                          {% if step.present %}
+                            <code>{{ step.value if step.value is not none else '(empty)' }}</code>
+                          {% else %}
+                            <code class="v2-cvars-live__walk-absent">—</code>
+                          {% endif %}
+                          {% if step.source_path %}<span class="v2-cvars-live__walk-path">{{ step.source_path }}</span>{% endif %}
+                        </li>
+                      {% endfor %}
+                    </ol>
+                  </details>
+                </td>
+                <td class="v2-cvars-live__status">
+                  {% if s.inferred_type %}
+                    <span class="badge badge--muted v2-cvars-live__type-badge">{{ s.inferred_type }}</span>
+                  {% endif %}
+                  {% if is_override %}<span class="badge badge--info">override</span>{% endif %}
+                  {% if s.high_impact %}<span class="badge badge--danger" title="High player impact (Discord intel A1)">high-impact</span>{% endif %}
+                  {% if s.no_op %}<span class="badge badge--muted" title="Confirmed no-op as of GA 2026-05-25 (Discord intel A18)">no-op</span>{% endif %}
+                  {% if s.per_map %}<span class="badge badge--muted">per-map</span>{% endif %}
+                </td>
+                <td class="v2-cvars-live__action">
+                  {% if s.per_map %}
+                    <button type="button" class="btn btn-sm" disabled aria-disabled="true"
+                            title="Per-map — deferred to slice 2">Edit</button>
+                  {% else %}
+                    <button type="button" class="btn btn-sm cvars-edit-trigger"
+                            data-cvar-section="{{ s.section }}"
+                            data-cvar-key="{{ s.key }}"
+                            data-cvar-old="{{ s.current_value if s.current_value is not none else '' }}"
+                            data-cvar-layer="{{ s.source }}"
+                            data-cvar-type="{{ s.inferred_type or '' }}">Edit</button>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        {% if raw_sections %}
+          <details class="v2-cvars-live__raw">
+            <summary>Raw sections ({{ raw_sections|length }}) — unschematized</summary>
+            <p class="v2-cvars-live__raw-help">
+              Sections present in UserOverrides.ini but not in <code>cvars-schema.json</code>.
+              Display-only; editing routes through the Catalog sub-tab once the schema is updated upstream.
+            </p>
+            <ul class="v2-cvars-live__raw-list">
+              {% for rs in raw_sections %}
+                <li>
+                  <strong>{{ rs.section }}</strong>
+                  <span class="cvars-layer-pill cvars-layer-pill--{{ rs.source }} cvars-layer-pill--sm">{{ rs.source }}</span>
+                  <pre>{{ rs.lines|join('\n') }}</pre>
+                </li>
+              {% endfor %}
+            </ul>
+          </details>
+        {% endif %}
+      </div>
+    </section>
+
+    {# ── Funcom Live Settings (read-only Funcom-owned plane) ──
+       The current /server/cvars/read contract does not surface the latest
+       settingsUpdate capture body (only the diff helper does). The pane
+       below empty-states until coder-helpers extends the contract OR a
+       separate /server/funcom/latest endpoint ships in slice 1.1. #}
+    {% set funcom = live.funcom_live_settings %}
+    {% set capture_ts = live.funcom_capture_ts %}
+    {% include "v2/_fragments/cvars_settingsupdate_pane.html" %}
+
+  {% endif %}
+
+</div>

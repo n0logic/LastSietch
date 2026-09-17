@@ -1,0 +1,365 @@
+{% extends "v2/base.html" %}
+{% block title %}Chat{% endblock %}
+{% block extra_css %}
+{# The admin edge sends no Cache-Control, so the ?v= key IS the cache bust.
+   Bump it in the same commit as any content change to chat.css. #}
+<link rel="stylesheet" href="/admin/static/css/v2/chat.css?v=20260904a">
+{% endblock %}
+{% block content %}
+<main class="v2-chat" id="v2-chat">
+  <header>
+    <h1 class="v2-chat__title">In-Game Chat</h1>
+    <p class="v2-chat__subtitle">
+      Two levers, and only two of the four scopes have ever published. Server
+      Broadcast reaches every connected player and is verified. Whisper reaches
+      one player and is verified. Map and server-wide chat are not wired up.
+    </p>
+  </header>
+
+  {# Server Broadcast leads: it is the verified way to reach everyone, and it
+     used to sit below a radio group that offered "Server-wide" as if it were
+     the same thing. The one live all-player lever is now the first card. #}
+  <section class="card v2-chat__card--primary" id="chat-server-broadcast">
+    <header style="margin-bottom:1rem;">
+      <h2 class="v2-chat__title" style="font-size:1.1rem;">
+        Server Broadcast <span class="v2-chat__badge">live</span>
+      </h2>
+      <p class="v2-chat__subtitle" style="margin:.25rem 0 0;">
+        Native system banner shown to EVERY connected player (Generic ServiceBroadcast).
+        Use for maintenance warnings and server-wide notices. This is the verified
+        all-player path: it publishes live. A live send asks you to type BROADCAST
+        and is rate-limited to one every 30 seconds.
+      </p>
+    </header>
+
+    <div class="form-group">
+      <label class="form-label" for="bc-title">Title</label>
+      <input type="text" id="bc-title" maxlength="80" placeholder="Scheduled Maintenance" autocomplete="off">
+      <div class="char-count"><span id="bc-titlecount">0</span> / 80</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="bc-message">Message</label>
+      <textarea id="bc-message" maxlength="280" placeholder="Server going down for maintenance in 10 minutes. Please find a safe spot to log out."></textarea>
+      <div class="char-count"><span id="bc-msgcount">0</span> / 280</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="bc-duration">Banner duration (seconds on screen)</label>
+      <input type="number" id="bc-duration" min="1" max="600" value="30" style="width:120px;">
+    </div>
+
+    <div class="msg" id="bc-msg"></div>
+
+    <div class="btn-group">
+      <button type="button" class="btn" id="bc-preview">Preview</button>
+      <button type="button" class="btn btn-accent" id="bc-send">Broadcast live</button>
+    </div>
+
+    <div class="v2-chat__results" id="bc-results"></div>
+  </section>
+
+  <section class="card" style="margin-top:1.25rem;">
+    <h2 class="v2-chat__title" style="font-size:1.1rem;">Chat message</h2>
+    <p class="v2-chat__subtitle" style="margin:.25rem 0 1rem;">
+      A chat line in the game's own channels. Only Whisper is wired up.
+    </p>
+
+    {# Map and Server-wide are disabled inputs, not selectable radios with a
+       warning next to them. They have never published; a control the operator
+       can select is a promise the backend does not keep. #}
+    <div class="scope-group" role="radiogroup" aria-label="Send scope">
+      <label><input type="radio" name="chat-scope" value="whisper" checked> Whisper (DM)</label>
+      <label class="is-disabled">
+        <input type="radio" name="chat-scope" value="map" disabled>
+        <span>Map
+          <span class="v2-chat__scope-reason">not wired up: each instance's routing key is unverified</span>
+        </span>
+      </label>
+      <label class="is-disabled">
+        <input type="radio" name="chat-scope" value="server" disabled>
+        <span>Server-wide
+          <span class="v2-chat__scope-reason">not wired up: use Server Broadcast above</span>
+        </span>
+      </label>
+    </div>
+
+    <div class="form-group" id="chat-whisper-row">
+      <label class="form-label" for="chat-player-search">Recipient (search online players)</label>
+      <div class="chat-picker">
+        <input type="text" id="chat-player-search" placeholder="Type a character name..."
+               autocomplete="off" spellcheck="false">
+        <ul class="chat-suggest" id="chat-player-suggest" role="listbox" hidden></ul>
+      </div>
+      <input type="text" id="chat-recipient" placeholder="...or paste a FuncomId (Display#tag)"
+             autocomplete="off" style="margin-top:.4rem;">
+      <p class="chat-picked" id="chat-picked" hidden></p>
+    </div>
+
+    <div class="form-group" id="chat-instance-row" style="display:none;">
+      <label class="form-label" for="chat-instance">Map instance</label>
+      <select id="chat-instance"></select>
+      <p class="v2-chat__warn" id="chat-instance-warn" style="display:none;"></p>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="chat-message">Message</label>
+      <textarea id="chat-message" maxlength="500" placeholder="The spice must flow."></textarea>
+      <div class="char-count"><span id="chat-charcount">0</span> / <span id="chat-charmax">500</span></div>
+    </div>
+
+    <div class="msg" id="chat-msg"></div>
+
+    <div class="btn-group">
+      <button type="button" class="btn" id="chat-preview">Preview</button>
+      <button type="button" class="btn btn-accent" id="chat-send">Send live</button>
+    </div>
+
+    <div class="v2-chat__results" id="chat-results"></div>
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var instances = [];
+  var players = [];
+
+  function escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function loadPlayers() {
+    apiCall('GET', '/admin/api/dune/chat/players').then(function (d) {
+      players = (d.players || []).filter(function (p) { return p.funcom_id; });
+    }).catch(function () { players = []; });
+  }
+
+  function renderSuggest(matches) {
+    var ul = document.getElementById('chat-player-suggest');
+    ul.innerHTML = '';
+    if (!matches.length) { ul.hidden = true; return; }
+    matches.forEach(function (p) {
+      var li = document.createElement('li');
+      li.className = 'chat-suggest-item';
+      li.tabIndex = 0;
+      li.innerHTML = '<span>' + escHtml(p.name) + (p.faction ? ' <code>' + escHtml(p.faction) + '</code>' : '')
+        + '</span><code>' + escHtml(p.funcom_id) + '</code>';
+      var pick = function () {
+        document.getElementById('chat-recipient').value = p.funcom_id;
+        var picked = document.getElementById('chat-picked');
+        picked.textContent = 'Selected: ' + p.name + ' (' + p.funcom_id + ')';
+        picked.hidden = false;
+        document.getElementById('chat-player-search').value = '';
+        ul.hidden = true;
+      };
+      li.addEventListener('click', pick);
+      li.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); pick(); } });
+      ul.appendChild(li);
+    });
+    ul.hidden = false;
+  }
+
+  function filterPlayers() {
+    var q = document.getElementById('chat-player-search').value.trim().toLowerCase();
+    if (!q) { renderSuggest(players.slice(0, 12)); return; }
+    renderSuggest(players.filter(function (p) {
+      return (p.name || '').toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 12));
+  }
+
+  function currentScope() {
+    var el = document.querySelector('input[name=chat-scope]:checked');
+    return el ? el.value : 'whisper';
+  }
+
+  function selectedInstance() {
+    var sel = document.getElementById('chat-instance');
+    return instances.filter(function (i) { return i.id === sel.value; })[0] || null;
+  }
+
+  function updateScope() {
+    var s = currentScope();
+    document.getElementById('chat-whisper-row').style.display = (s === 'whisper') ? '' : 'none';
+    document.getElementById('chat-instance-row').style.display = (s === 'map') ? '' : 'none';
+    var warn = document.getElementById('chat-instance-warn');
+    var inst = selectedInstance();
+    if (s === 'map' && inst && !inst.verified) {
+      warn.textContent = 'This instance is unverified, so a live send is forced to preview only.';
+      warn.style.display = '';
+    } else if (s === 'server') {
+      warn.style.display = 'none';
+    } else {
+      warn.style.display = 'none';
+    }
+    // Only whisper is selectable, so the button says what it does; the two
+    // other branches stay in place because the scope still arrives in the body.
+    var sendBtn = document.getElementById('chat-send');
+    sendBtn.textContent = (s === 'whisper') ? 'Send live' : 'Send live (verified only)';
+  }
+
+  function init() {
+    apiCall('GET', '/admin/api/dune/chat/instances').then(function (d) {
+      instances = d.instances || [];
+      var max = d.max_message || 500;
+      document.getElementById('chat-message').setAttribute('maxlength', max);
+      document.getElementById('chat-charmax').textContent = max;
+      var sel = document.getElementById('chat-instance');
+      sel.innerHTML = '';
+      instances.forEach(function (i) {
+        var o = document.createElement('option');
+        o.value = i.id;
+        o.textContent = i.label + (i.verified ? '' : '  (unverified, preview only)');
+        sel.appendChild(o);
+      });
+      updateScope();
+    }).catch(function (e) {
+      showMsg('chat-msg', 'Failed to load instances: ' + e.message, 'error');
+    });
+  }
+
+  function renderResults(d) {
+    var box = document.getElementById('chat-results');
+    box.innerHTML = '';
+    if (d.note) { showMsg('chat-msg', d.note, 'info'); }
+    else { showMsg('chat-msg', d.success ? 'Done.' : 'Completed with errors.', d.success ? 'success' : 'error'); }
+    (d.results || []).forEach(function (r) {
+      var div = document.createElement('div');
+      div.className = 'v2-chat__result ' + (r.success ? 'v2-chat__result--ok' : 'v2-chat__result--fail');
+      var head = document.createElement('div');
+      head.textContent = '[' + r.mode + '] ' + r.target + (r.success ? '  OK' : '  FAILED');
+      div.appendChild(head);
+      if (r.detail) {
+        var det = document.createElement('div');
+        det.className = 'v2-chat__result-detail';
+        det.textContent = r.detail;
+        div.appendChild(det);
+      }
+      box.appendChild(div);
+    });
+  }
+
+  function send(mode) {
+    hideMsg('chat-msg');
+    var scope = currentScope();
+    var message = document.getElementById('chat-message').value;
+    if (!message.trim()) { showMsg('chat-msg', 'Message is required.', 'error'); return; }
+    var body = { scope: scope, message: message, mode: mode };
+    if (scope === 'whisper') {
+      body.recipient = document.getElementById('chat-recipient').value.trim();
+      if (!body.recipient) { showMsg('chat-msg', 'Recipient FuncomId is required.', 'error'); return; }
+    }
+    if (scope === 'map') { body.instance = document.getElementById('chat-instance').value; }
+
+    var go = function () {
+      showMsg('chat-msg', mode === 'apply' ? 'Sending...' : 'Generating preview...', 'info');
+      apiCall('POST', '/admin/api/dune/chat/send', body).then(renderResults)
+        .catch(function (e) { showMsg('chat-msg', 'Error: ' + e.message, 'error'); });
+    };
+
+    if (mode === 'apply') {
+      var who = scope === 'whisper' ? body.recipient : (scope === 'server' ? 'ALL instances' : 'the selected map');
+      showConfirm('Send this message LIVE to ' + who + '? Every targeted player will see it.', go);
+    } else { go(); }
+  }
+
+  document.querySelectorAll('input[name=chat-scope]').forEach(function (el) {
+    el.addEventListener('change', updateScope);
+  });
+  document.getElementById('chat-instance').addEventListener('change', updateScope);
+  document.getElementById('chat-message').addEventListener('input', function () {
+    document.getElementById('chat-charcount').textContent = this.value.length;
+  });
+  document.getElementById('chat-preview').addEventListener('click', function () { send('dry-run'); });
+  document.getElementById('chat-send').addEventListener('click', function () { send('apply'); });
+
+  var searchEl = document.getElementById('chat-player-search');
+  searchEl.addEventListener('input', filterPlayers);
+  searchEl.addEventListener('focus', filterPlayers);
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('.chat-picker')) {
+      document.getElementById('chat-player-suggest').hidden = true;
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { document.getElementById('chat-player-suggest').hidden = true; }
+  });
+
+  init();
+  loadPlayers();
+})();
+</script>
+<script>
+// Server Broadcast composer, isolated from the chat IIFE. Uses the same global
+// helpers (apiCall handles CSRF; showMsg/hideMsg for status).
+(function () {
+  function renderResult(d) {
+    var box = document.getElementById('bc-results');
+    box.innerHTML = '';
+    var ok = !!d.success;
+    showMsg('bc-msg',
+      ok ? (d.mode === 'apply' ? 'Broadcast sent live to all connected players.'
+                               : 'Preview generated (nothing was published).')
+         : 'Broadcast failed.',
+      ok ? 'success' : 'error');
+    var div = document.createElement('div');
+    div.className = 'v2-chat__result ' + (ok ? 'v2-chat__result--ok' : 'v2-chat__result--fail');
+    var head = document.createElement('div');
+    head.textContent = '[' + (d.mode || '?') + '] ' + (ok ? 'OK' : 'FAILED');
+    div.appendChild(head);
+    if (d.detail) {
+      var det = document.createElement('div');
+      det.className = 'v2-chat__result-detail';
+      det.textContent = d.detail;
+      div.appendChild(det);
+    }
+    box.appendChild(div);
+  }
+
+  function send(mode) {
+    hideMsg('bc-msg');
+    var title = document.getElementById('bc-title').value;
+    var message = document.getElementById('bc-message').value;
+    var duration = parseInt(document.getElementById('bc-duration').value, 10);
+    if (!title.trim()) { showMsg('bc-msg', 'Title is required.', 'error'); return; }
+    if (!message.trim()) { showMsg('bc-msg', 'Message is required.', 'error'); return; }
+    if (!(duration >= 1 && duration <= 600)) { showMsg('bc-msg', 'Duration must be 1..600 seconds.', 'error'); return; }
+    var body = { title: title, message: message, duration: duration, mode: mode };
+
+    var go = function () {
+      showMsg('bc-msg', mode === 'apply' ? 'Broadcasting...' : 'Generating preview...', 'info');
+      apiCall('POST', '/admin/api/dune/broadcast/send', body).then(renderResult)
+        .catch(function (e) { showMsg('bc-msg', 'Error: ' + e.message, 'error'); });
+    };
+
+    if (mode === 'apply') {
+      // This used to be a raw browser dialog. One typed-token modal for every
+      // destructive admin action, so it reads the same as the rest of the panel
+      // and cannot be suppressed by a browser that blocks native dialogs.
+      window.v2ConfirmTyped({
+        title: 'Broadcast live to every player',
+        body: 'This publishes a native banner to EVERY connected player right now.',
+        token: 'BROADCAST',
+        confirmLabel: 'Broadcast live',
+        danger: true
+      }).then(function (ok) {
+        if (!ok) { showMsg('bc-msg', 'Confirmation did not match. Nothing was sent.', 'info'); return; }
+        body.confirm = 'BROADCAST';
+        go();
+      });
+    } else { go(); }
+  }
+
+  document.getElementById('bc-title').addEventListener('input', function () {
+    document.getElementById('bc-titlecount').textContent = this.value.length;
+  });
+  document.getElementById('bc-message').addEventListener('input', function () {
+    document.getElementById('bc-msgcount').textContent = this.value.length;
+  });
+  document.getElementById('bc-preview').addEventListener('click', function () { send('dry-run'); });
+  document.getElementById('bc-send').addEventListener('click', function () { send('apply'); });
+})();
+</script>
+{% endblock %}

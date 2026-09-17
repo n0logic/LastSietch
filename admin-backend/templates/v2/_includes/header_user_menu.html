@@ -1,0 +1,17 @@
+{# Gear-menu dropdown for the .v2-header__user cluster.
+   Requires `user` in context (username, role). Admin Users moved into the Admin
+   tab; what is left here is the account's own business, which has no tab. #}
+{% set initials = (user.username[:2] if user and user.username else '?') | upper %}
+<details class="v2-user-menu" aria-label="User menu">
+  <summary class="v2-user-menu__trigger" role="button">
+    <span class="v2-user-menu__avatar" aria-hidden="true">{{ initials }}</span>
+    <span class="v2-user-menu__name">{{ user.username if user else 'anon' }}</span>
+    <span class="v2-user-menu__role">{{ user.role if user else '' }}</span>
+    <span class="v2-user-menu__chev" aria-hidden="true">▾</span>
+  </summary>
+  <nav class="v2-user-menu__panel">
+    <a class="v2-user-menu__item" href="/admin/change-password">Change password</a>
+    <hr class="v2-user-menu__sep">
+    <button type="button" class="v2-user-menu__item v2-user-menu__item--danger" onclick="doLogout()">Logout</button>
+  </nav>
+</details>

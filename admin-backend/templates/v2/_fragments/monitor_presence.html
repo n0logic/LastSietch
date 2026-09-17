@@ -1,0 +1,36 @@
+{# Player Presence panel — 1h sparkline + current/peak/playhours counters.
+   Data source: aggregator d.presence_1h[] + d.maps_summary[].players sum.
+   JS hydrator: renderPresencePanelFromAgg. #}
+<div class="monitor-panel span-6" id="panel-presence" data-source="presence_1h,maps_summary">
+  <div class="monitor-panel__header">
+    <span class="monitor-panel__title">Player Presence · 1h</span>
+    <span class="monitor-panel__indicator" id="panel-presence-indicator"></span>
+  </div>
+  <div class="monitor-panel__body">
+    <div class="presence-stats">
+      <div class="presence-stat">
+        <div class="presence-stat__value" id="presence-current">—</div>
+        <div class="presence-stat__label">Online now</div>
+      </div>
+      <div class="presence-stat">
+        <div class="presence-stat__value" id="presence-peak">—</div>
+        <div class="presence-stat__label">1h peak</div>
+      </div>
+      <div class="presence-stat">
+        <div class="presence-stat__value" id="presence-playhours">—</div>
+        <div class="presence-stat__label">1h playhours</div>
+      </div>
+    </div>
+    <div class="presence-sparkline" id="presence-sparkline" role="img" aria-label="Player count over the past hour">
+      <svg viewBox="0 0 200 60" preserveAspectRatio="none" aria-hidden="true">
+        <polyline id="presence-sparkline-line" fill="none" stroke="currentColor" stroke-width="1.5" points=""></polyline>
+        <polygon id="presence-sparkline-fill" fill="currentColor" fill-opacity="0.15" stroke="none" points=""></polygon>
+      </svg>
+      <div class="presence-sparkline__empty" id="presence-sparkline-empty">data unavailable</div>
+    </div>
+  </div>
+  <div class="monitor-panel__footer">
+    <span class="monitor-panel__ts" data-ts="0" id="panel-presence-ts">refreshed —</span>
+    <span class="monitor-panel__stale" id="panel-presence-stale" hidden>stale</span>
+  </div>
+</div>

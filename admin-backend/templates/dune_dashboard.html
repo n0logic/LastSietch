@@ -1,0 +1,367 @@
+{% extends "base.html" %}
+{% block title %}Dune Dashboard{% endblock %}
+{% block content %}
+<div class="container">
+  <div style="margin-bottom:1rem;">
+    <a href="/admin/" style="font-family:var(--font-mono); font-size:0.95rem; color:var(--text-muted); text-decoration:none;"
+       onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">&larr; All Servers</a>
+  </div>
+
+  <div class="grid">
+    <!-- Battlegroup -->
+    <div class="card">
+      <div class="card-title">Battlegroup</div>
+      <div class="stat-value status-unknown" id="bg-status">---</div>
+      <div class="stat-label" id="bg-title">Title: ---</div>
+      <div class="stat-label" id="bg-region">Region: ---</div>
+      <div class="stale-note" id="stale-note" style="display:none; font-family:var(--font-mono); font-size:0.7rem; color:var(--yellow); margin-top:0.5rem;">
+        Showing last known data — live feed unavailable.
+      </div>
+    </div>
+
+    <!-- Players Online -->
+    <div class="card">
+      <div class="card-title">Players Online</div>
+      <div class="stat-value" id="online-players">---</div>
+      <div class="stat-label">Across all maps</div>
+    </div>
+
+    <!-- Content Instances -->
+    <div class="card">
+      <div class="card-title">Content Instances</div>
+      <div class="stat-value" id="inst-online" style="font-size:1.5rem;">---</div>
+      <div class="stat-label" id="inst-detail">Instances online / total</div>
+    </div>
+
+    <!-- Grant Progression -->
+    <div class="card full-width">
+      <div class="card-title">Admin Tools</div>
+      <a href="/admin/dashboard/dune/grant" class="btn btn-accent" style="display:inline-block; text-decoration:none;">Grant Progression &rarr;</a>
+      <div class="stat-label" style="margin-top:0.6rem;">Guided tool to grant items, currency, intel, recipes, faction reputation, and specialization progress.</div>
+    </div>
+
+    <!-- Maps -->
+    <div class="card full-width">
+      <div class="card-title">Maps</div>
+      <div id="map-wrap">
+        <div class="form-hint">Loading maps...</div>
+      </div>
+    </div>
+
+    <!-- Presence history -->
+    <div class="card full-width">
+      <div class="card-title">Players Online — History</div>
+      <div class="btn-group" style="margin-top:0; margin-bottom:1rem;">
+        <button class="btn btn-sm win-btn active" data-window="24h" onclick="setWindow('24h')">24h</button>
+        <button class="btn btn-sm win-btn" data-window="7d" onclick="setWindow('7d')">7d</button>
+        <button class="btn btn-sm win-btn" data-window="30d" onclick="setWindow('30d')">30d</button>
+      </div>
+      <div id="chart-wrap">
+        <div class="form-hint">Loading history...</div>
+      </div>
+      <div id="chart-meta" style="display:none; gap:2rem; margin-top:1rem; font-family:var(--font-mono); font-size:0.75rem; color:var(--text-muted);">
+        <span>Peak: <span id="meta-peak" style="color:var(--accent);">--</span></span>
+        <span style="margin-left:2rem;">Play hours: <span id="meta-hours" style="color:var(--accent);">--</span></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.win-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+.chart-svg { width: 100%; height: 180px; display: block; }
+.map-state { font-family: var(--font-mono); font-size: 0.75rem; }
+.map-state.up { color: var(--green); }
+.map-state.blocked { color: var(--yellow); }
+.map-state.offline { color: var(--red); }
+.map-row { cursor: pointer; }
+.map-row:hover { background: var(--accent-glow); }
+.map-caret { display: inline-block; width: 0.9rem; font-family: var(--font-mono);
+  color: var(--text-muted); transition: transform 0.1s; }
+.map-row.open .map-caret { transform: rotate(90deg); }
+.roster-cell { padding: 0; background: var(--bg-deep, rgba(0,0,0,0.15)); }
+.roster-box { padding: 0.5rem 0.75rem; }
+.roster-box table { margin: 0; }
+.roster-box th, .roster-box td { font-size: 0.72rem; }
+.roster-empty { font-family: var(--font-mono); font-size: 0.72rem;
+  color: var(--text-muted); padding: 0.25rem 0; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('nav-dashboard').classList.add('active');
+
+function escHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s == null ? '' : s;
+  return d.innerHTML;
+}
+
+/* ── Map roster (online players per map) ──
+   The roster JSON keys players by actors.map ("HaggaBasin", "HarkoVillage");
+   the Maps card labels rows with friendly names ("Hagga Basin", "Harko
+   Village"). Match on a normalized key — alphanumerics only, lowercased —
+   so the two namespaces line up regardless of spaces or SH_/_N affixes. */
+function normMap(s) {
+  return (s || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+var rosterByMap = {};   // friendly name -> [player, ...]
+var rosterState = 'loading';  // 'loading' | 'ok' | 'error'
+var openMaps = {};      // friendly name -> true when row expanded
+
+function renderRosterCell(friendly) {
+  if (rosterState === 'error') {
+    return '<div class="roster-empty">Roster unavailable.</div>';
+  }
+  if (rosterState === 'loading') {
+    return '<div class="roster-empty">Loading roster...</div>';
+  }
+  var players = rosterByMap[normMap(friendly)] || [];
+  if (!players.length) {
+    return '<div class="roster-empty">No players online.</div>';
+  }
+  var rows = players.map(function(p) {
+    var coords = (p.x == null || p.y == null)
+      ? '--' : (p.x + ', ' + p.y);
+    return '<tr>'
+      + '<td>' + escHtml(p.name || '?') + '</td>'
+      + '<td style="font-family:var(--font-mono);">' + escHtml(coords) + '</td>'
+      + '<td>' + escHtml(p.guild || '—') + '</td>'
+      + '<td>' + escHtml(p.faction || '—') + '</td>'
+      + '</tr>';
+  }).join('');
+  return '<div class="roster-box"><table><thead><tr>'
+    + '<th>Name</th><th>Coords</th><th>Guild</th><th>Faction</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
+function toggleMap(friendly) {
+  if (openMaps[friendly]) { delete openMaps[friendly]; }
+  else { openMaps[friendly] = true; }
+  var row = document.querySelector('.map-row[data-map="' + cssEsc(friendly) + '"]');
+  var detail = document.querySelector('.map-detail[data-map="' + cssEsc(friendly) + '"]');
+  if (!row || !detail) return;
+  var open = !!openMaps[friendly];
+  row.classList.toggle('open', open);
+  detail.style.display = open ? '' : 'none';
+  if (open) {
+    detail.querySelector('.roster-cell').innerHTML = renderRosterCell(friendly);
+  }
+}
+
+function cssEsc(s) {
+  return String(s).replace(/["\\]/g, '\\$&');
+}
+
+function jsEsc(s) {
+  return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function refreshOpenRosters() {
+  for (var friendly in openMaps) {
+    if (!openMaps.hasOwnProperty(friendly)) continue;
+    var detail = document.querySelector('.map-detail[data-map="' + cssEsc(friendly) + '"]');
+    if (detail) detail.querySelector('.roster-cell').innerHTML = renderRosterCell(friendly);
+  }
+}
+
+function loadRoster() {
+  /* Fetched under /admin/ so the session cookie (path=/admin) is sent;
+     Caddy strips /admin and FastAPI sees /api/dune/roster. */
+  fetch('/admin/api/dune/roster', { credentials: 'same-origin' })
+    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(d) {
+      rosterByMap = {};
+      if (d && d.available !== false) {
+        rosterState = 'ok';
+        (d.maps || []).forEach(function(m) {
+          rosterByMap[normMap(m.map)] = m.players || [];
+        });
+      } else {
+        rosterState = 'error';
+      }
+      refreshOpenRosters();
+    })
+    .catch(function() {
+      rosterState = 'error';
+      refreshOpenRosters();
+    });
+}
+
+/* ── Live status ── */
+function renderStatus(d) {
+  document.getElementById('stale-note').style.display = d.stale ? '' : 'none';
+
+  var bg = d.battlegroup || {};
+  var statusEl = document.getElementById('bg-status');
+  if (d.available === false) {
+    statusEl.textContent = 'UNKNOWN';
+    statusEl.className = 'stat-value status-unknown';
+  } else if (bg.error) {
+    statusEl.textContent = 'DIRECTOR OFFLINE';
+    statusEl.className = 'stat-value status-unknown';
+  } else {
+    statusEl.textContent = 'ONLINE';
+    statusEl.className = 'stat-value status-running';
+  }
+
+  document.getElementById('bg-title').textContent = 'Title: ' + (bg.title || '---');
+  document.getElementById('bg-region').textContent = 'Region: ' + (bg.region || '---');
+
+  document.getElementById('online-players').textContent =
+    (d.online_players == null) ? '---' : d.online_players;
+
+  var maps = (d.maps || []).slice().sort(function(a, b) {
+    return (b.players || 0) - (a.players || 0);
+  });
+  var wrap = document.getElementById('map-wrap');
+  if (!maps.length) {
+    wrap.innerHTML = '<div class="form-hint">No map data available.</div>';
+  } else {
+    var rows = maps.map(function(m) {
+      var cls, label;
+      if (m.blocked) { cls = 'blocked'; label = 'Restricted'; }
+      else if (m.up) { cls = 'up'; label = 'Online'; }
+      else { cls = 'offline'; label = 'Offline'; }
+      var count = (m.players == null) ? '--' : m.players;
+      var name = m.name || 'Unknown';
+      var nameEsc = escHtml(name);
+      var attr = ' data-map="' + nameEsc + '"';
+      var isOpen = !!openMaps[name];
+      return '<tr class="map-row' + (isOpen ? ' open' : '') + '"' + attr
+          + ' onclick="toggleMap(\'' + jsEsc(name) + '\')">'
+        + '<td><span class="map-caret">&#9656;</span> ' + nameEsc + '</td>'
+        + '<td style="text-align:right; font-family:var(--font-mono);">' + escHtml(String(count)) + '</td>'
+        + '<td style="text-align:right;"><span class="map-state ' + cls + '">' + escHtml(label) + '</span></td>'
+        + '</tr>'
+        + '<tr class="map-detail"' + attr + ' style="display:' + (isOpen ? '' : 'none') + ';">'
+        + '<td class="roster-cell" colspan="3">'
+        + (isOpen ? renderRosterCell(name) : '') + '</td></tr>';
+    }).join('');
+    wrap.innerHTML = '<table><thead><tr>'
+      + '<th>Map</th><th style="text-align:right;">Players</th><th style="text-align:right;">Status</th>'
+      + '</tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  var inst = d.instances || {};
+  document.getElementById('inst-online').textContent =
+    (inst.online || 0) + ' / ' + (inst.total || 0);
+  var detail = 'Instances online / total';
+  if (inst.players) detail += ' — ' + inst.players + ' players';
+  document.getElementById('inst-detail').textContent = detail;
+}
+
+function loadStatus() {
+  fetch('/api/dune/status', { credentials: 'same-origin' })
+    .then(function(r) { return r.json(); })
+    .then(renderStatus)
+    .catch(function() {
+      renderStatus({ available: false, maps: [], online_players: null, battlegroup: {} });
+    });
+}
+
+/* ── Player-count history chart ── */
+var presenceWindow = '24h';
+
+function setWindow(w) {
+  presenceWindow = w;
+  var btns = document.querySelectorAll('.win-btn');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].classList.toggle('active', btns[i].getAttribute('data-window') === w);
+  }
+  loadPresence();
+}
+
+function fmtTime(ts, win) {
+  var d = new Date(ts * 1000);
+  if (win === '24h') {
+    return d.getHours() + ':' + ('0' + d.getMinutes()).slice(-2);
+  }
+  return (d.getMonth() + 1) + '/' + d.getDate();
+}
+
+function renderChart(d) {
+  var wrap = document.getElementById('chart-wrap');
+  var meta = document.getElementById('chart-meta');
+  var series = d.series || [];
+
+  if (!series.length) {
+    wrap.innerHTML = '<div class="form-hint">No history for this window yet.</div>';
+    meta.style.display = 'none';
+    return;
+  }
+
+  var W = 600, H = 180, padL = 32, padR = 12, padT = 14, padB = 26;
+  var counts = series.map(function(p) { return p.count || 0; });
+  var maxC = Math.max(1, Math.max.apply(null, counts));
+  var n = series.length;
+
+  // Plot x by real timestamp, not index — the sampler series can be
+  // non-contiguous (server-down gaps), so equal index spacing would lie.
+  var t0 = series[0].ts, tN = series[n - 1].ts, span = tN - t0;
+  function xAt(i) {
+    return (n === 1 || span <= 0)
+      ? (padL + (W - padL - padR) / 2)
+      : padL + (W - padL - padR) * ((series[i].ts - t0) / span);
+  }
+  function yAt(c) {
+    return padT + (H - padT - padB) * (1 - c / maxC);
+  }
+
+  var line = '', area = '';
+  for (var i = 0; i < n; i++) {
+    var x = xAt(i).toFixed(1), y = yAt(counts[i]).toFixed(1);
+    line += (i === 0 ? 'M' : 'L') + x + ' ' + y + ' ';
+    area += (i === 0 ? 'M' : 'L') + x + ' ' + y + ' ';
+  }
+  area += 'L' + xAt(n - 1).toFixed(1) + ' ' + (H - padB) + ' '
+        + 'L' + xAt(0).toFixed(1) + ' ' + (H - padB) + ' Z';
+
+  var baseY = (H - padB).toFixed(1);
+  var firstLbl = escHtml(fmtTime(series[0].ts, presenceWindow));
+  var lastLbl = escHtml(fmtTime(series[n - 1].ts, presenceWindow));
+
+  var svg = '<svg class="chart-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">'
+    + '<line x1="' + padL + '" y1="' + padT + '" x2="' + padL + '" y2="' + baseY
+      + '" stroke="#2a2a35" stroke-width="1"/>'
+    + '<line x1="' + padL + '" y1="' + baseY + '" x2="' + (W - padR) + '" y2="' + baseY
+      + '" stroke="#2a2a35" stroke-width="1"/>'
+    + '<path d="' + area + '" fill="rgba(212,137,28,0.15)" stroke="none"/>'
+    + '<path d="' + line + '" fill="none" stroke="#d4891c" stroke-width="2" '
+      + 'stroke-linejoin="round" stroke-linecap="round"/>'
+    + '<text x="2" y="' + (padT + 4) + '" fill="#888899" font-size="10" '
+      + 'font-family="JetBrains Mono, monospace">' + maxC + '</text>'
+    + '<text x="2" y="' + baseY + '" fill="#888899" font-size="10" '
+      + 'font-family="JetBrains Mono, monospace">0</text>'
+    + '<text x="' + padL + '" y="' + (H - 8) + '" fill="#888899" font-size="10" '
+      + 'font-family="JetBrains Mono, monospace">' + firstLbl + '</text>'
+    + '<text x="' + (W - padR) + '" y="' + (H - 8) + '" fill="#888899" font-size="10" '
+      + 'font-family="JetBrains Mono, monospace" text-anchor="end">' + lastLbl + '</text>'
+    + '</svg>';
+  wrap.innerHTML = svg;
+
+  document.getElementById('meta-peak').textContent =
+    (d.peak == null) ? maxC : d.peak;
+  document.getElementById('meta-hours').textContent =
+    (d.play_hours == null) ? '--' : d.play_hours;
+  meta.style.display = 'flex';
+}
+
+function loadPresence() {
+  fetch('/api/dune/stats/presence?window=' + presenceWindow, { credentials: 'same-origin' })
+    .then(function(r) { return r.json(); })
+    .then(renderChart)
+    .catch(function() { renderChart({ series: [] }); });
+}
+
+loadStatus();
+setInterval(loadStatus, 45000);
+
+loadRoster();
+setInterval(loadRoster, 45000);
+
+loadPresence();
+</script>
+{% endblock %}

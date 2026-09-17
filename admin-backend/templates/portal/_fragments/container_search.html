@@ -1,0 +1,46 @@
+{# Cross-container search results — GET /portal/containers/search?q=...
+   Rendered into #cont-search-results by portal-containers.js.
+   Context:
+     results = {too_short?, error?, available, items[], match_count}
+       items: [{template_id, name, icon, total_qty,
+                containers:[{container_id, container_name, container_type, qty}]}]
+     query: str
+#}
+{% set res = results if results is defined else {} %}
+{% if res.get('too_short') %}
+  <p class="cont-search__hint">Type at least 2 characters to search your storage.</p>
+{% elif res.get('error') or not res.get('available') %}
+  <div class="portal-msg portal-msg--warning" role="status">
+    Search is temporarily unavailable. Please try again in a moment.
+  </div>
+{% elif not res.get('items') %}
+  <p class="cont-search__hint">No items match “{{ query }}”.</p>
+{% else %}
+  <p class="cont-search__count">
+    {{ res.match_count }} matching item{{ '' if res.match_count == 1 else 's' }} for “{{ query }}”
+    {% if res.match_count == 50 %}(showing first 50){% endif %}
+  </p>
+  <ul class="cont-search__results" role="list">
+    {% for it in res['items'] %}
+    <li class="cont-search__item" data-template-id="{{ it.template_id }}">
+      <div class="cont-search__head">
+        <span class="cont-item__icon-wrap">
+          <img class="cont-item__icon" loading="lazy" alt="" data-icon-fallback
+               src="/admin/static/img/dune-icons/{{ it.icon }}.png">
+        </span>
+        <span class="cont-search__name">{{ it.name }}</span>
+        <span class="cont-search__total mono">×{{ it.total_qty }}</span>
+      </div>
+      <ul class="cont-search__boxes" role="list">
+        {% for c in it['containers'] %}
+        <li class="cont-search__box" data-container-id="{{ c.container_id }}">
+          <span class="cont-search__box-name">{{ c.container_name or c.container_type }}</span>
+          {% if c.container_name %}<span class="cont-search__box-type">{{ c.container_type }}</span>{% endif %}
+          <span class="cont-search__box-qty mono">×{{ c.qty }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </li>
+    {% endfor %}
+  </ul>
+{% endif %}

@@ -1,0 +1,58 @@
+{% if not available or not detail %}
+  <div class="empty-state empty-state--loading-failed">
+    <p class="empty-state__headline">Detail unavailable</p>
+    <p class="empty-state__body">Couldn't load this base backup's composition. It may have been removed.</p>
+  </div>
+{% else %}
+  <dl class="v2-bases-detail__meta">
+    <div class="v2-bases-detail__meta-row">
+      <dt>Base name</dt>
+      <dd>{{ detail.name or '(unnamed backup)' }}</dd>
+    </div>
+    <div class="v2-bases-detail__meta-row">
+      <dt>Backup id</dt>
+      <dd class="v2-bases-detail__mono">#{{ detail.id }}</dd>
+    </div>
+    <div class="v2-bases-detail__meta-row">
+      <dt>Owner</dt>
+      <dd>
+        {{ detail.owner_name or 'Unknown' }}
+        {% if detail.owner_account_id %}<span class="v2-bases-table__acct">#{{ detail.owner_account_id }}</span>{% endif %}
+      </dd>
+    </div>
+    <div class="v2-bases-detail__meta-row">
+      <dt>Controller actor</dt>
+      <dd class="v2-bases-detail__mono">{{ detail.player_id or '—' }}</dd>
+    </div>
+    <div class="v2-bases-detail__meta-row">
+      <dt>Totem actor</dt>
+      <dd class="v2-bases-detail__mono">{{ detail.totem_actor_id or '—' }}</dd>
+    </div>
+    <div class="v2-bases-detail__meta-row">
+      <dt>Linked actors</dt>
+      <dd>{{ detail.linked_actor_count or 0 }}</dd>
+    </div>
+  </dl>
+
+  {% set classes = detail.classes or [] %}
+  {% if classes %}
+    <h3 class="v2-bases-detail__subhead">Composition</h3>
+    <div style="overflow-x: auto;">
+      <table class="table table--compact table--zebra v2-bases-detail__classes">
+        <thead>
+          <tr><th scope="col">Actor class</th><th scope="col">Count</th></tr>
+        </thead>
+        <tbody>
+          {% for c in classes %}
+            <tr>
+              <td class="v2-bases-detail__class">{{ c.class }}</td>
+              <td class="v2-bases-detail__class-count">{{ c.count }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="v2-bases-detail__hint">No linked-actor breakdown available for this backup.</p>
+  {% endif %}
+{% endif %}

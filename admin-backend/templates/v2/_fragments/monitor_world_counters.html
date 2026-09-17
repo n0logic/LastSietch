@@ -1,0 +1,44 @@
+{# World Counters panel — subfiefs / structures / vehicles + 24h trend.
+   Data source: aggregator d.world_counters.{subfiefs,structures,vehicles}
+                + d.maps_summary players sum.
+   JS hydrator: renderWorldCountersFromAgg. #}
+<div class="monitor-panel span-6" id="panel-world-counters" data-source="world,maps_summary">
+  <div class="monitor-panel__header">
+    <span class="monitor-panel__title">World Counters · 24h</span>
+    <span class="monitor-panel__indicator" id="panel-world-counters-indicator"></span>
+  </div>
+  <div class="monitor-panel__body">
+    <ul class="wc-list" id="wc-list">
+      <li class="wc-row" id="wc-subfiefs">
+        <span class="wc-row__label">Subfiefs</span>
+        <span class="wc-row__value" id="wc-subfiefs-value">—</span>
+        <span class="wc-row__delta" id="wc-subfiefs-delta"></span>
+      </li>
+      <li class="wc-row" id="wc-structures">
+        <span class="wc-row__label">Structures</span>
+        <span class="wc-row__value" id="wc-structures-value">—</span>
+        <span class="wc-row__delta" id="wc-structures-delta"></span>
+      </li>
+      <li class="wc-row" id="wc-vehicles">
+        <span class="wc-row__label">Vehicles</span>
+        <span class="wc-row__value" id="wc-vehicles-value">—</span>
+        <span class="wc-row__delta" id="wc-vehicles-delta"></span>
+      </li>
+      <li class="wc-row" id="wc-players">
+        <span class="wc-row__label">Players online</span>
+        <span class="wc-row__value" id="wc-players-value">—</span>
+        <span class="wc-row__delta" id="wc-players-delta"></span>
+      </li>
+    </ul>
+    <div class="wc-trend" id="wc-trend" role="img" aria-label="World counters trend over the past 24 hours">
+      <svg viewBox="0 0 200 50" preserveAspectRatio="none" aria-hidden="true">
+        <polyline id="wc-trend-line" fill="none" stroke="currentColor" stroke-width="1.2" points=""></polyline>
+      </svg>
+      <div class="wc-trend__empty" id="wc-trend-empty">world feed offline</div>
+    </div>
+  </div>
+  <div class="monitor-panel__footer">
+    <span class="monitor-panel__ts" data-ts="0" id="panel-world-counters-ts">refreshed —</span>
+    <span class="monitor-panel__stale" id="panel-world-counters-stale" hidden>stale</span>
+  </div>
+</div>

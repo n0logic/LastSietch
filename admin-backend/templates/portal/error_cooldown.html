@@ -1,0 +1,28 @@
+{# Context: request, title, message, retry_after_iso, hours_remaining, back_url #}
+{% extends "portal/base.html" %}
+
+{% block title %}{{ title | default('Too many failed attempts', true) }} — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+<article class="portal-card">
+  <div class="portal-error">
+    <div class="portal-error__icon" aria-hidden="true">🛑</div>
+    <h1 class="portal-error__title">{{ title | default('Too many failed attempts', true) }}</h1>
+    <p class="portal-error__body">
+      {{ message | default('We saw three wrong answers on the identity quiz for this character. To protect the account from impersonation, the quiz is locked for the next 24 hours.', true) }}
+    </p>
+    <p class="portal-error__body">
+      If you are the real owner of this character and cannot get back in, ping us on Discord <strong>#help-and-feedback</strong> — an admin can help verify you manually.
+    </p>
+    {% if retry_after_iso %}
+    <div class="portal-error__countdown" aria-live="polite">
+      Quiz unlocks at <span class="mono">{{ retry_after_iso }}</span>
+      {% if hours_remaining is not none %} ({{ hours_remaining }}h remaining){% endif %}
+    </div>
+    {% endif %}
+    <p class="portal-error__body portal-error__back">
+      <a href="{{ back_url | default('/portal/', true) }}">Back to the start</a>
+    </p>
+  </div>
+</article>
+{% endblock %}

@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}User Groups{% endblock %}
+{% block content %}
+<div class="container">
+  <div id="ug-msg" class="msg"></div>
+
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem;">
+      <div class="card-title" id="ug-title">User Groups</div>
+      <a href="/admin/settings/{{ game_id }}" style="font-family:var(--font-mono); font-size:0.7rem; color:var(--text-muted);">&larr; Back to Settings</a>
+    </div>
+
+    <div class="stat-label" style="margin-bottom:1rem;">
+      Each group has a password and a set of capability flags. Players enter one of these passwords at the connect prompt; their granted capabilities are determined by which group's password they used. Saving will stop the server, rewrite the config, and leave the server stopped — restart it from the Dashboard when you're done editing.
+    </div>
+
+    <div id="ug-warning" style="display:none; font-family:var(--font-mono); font-size:0.75rem; color:var(--yellow); margin-bottom:1rem; padding:0.5rem 0.75rem; border:1px solid var(--yellow); border-radius:4px; background:rgba(241,196,15,0.05);"></div>
+
+    <div id="ug-table-wrap" style="overflow-x:auto;">
+      <table id="ug-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Password</th>
+            <th>Kick/Ban</th>
+            <th>Bypass Reserved</th>
+            <th>Change Config</th>
+            <th>Set Perm</th>
+            <th>Reserved Slots</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ug-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="btn-group" style="margin-top:1rem;">
+      <button class="btn" onclick="addGroup()">+ Add Group</button>
+      <button class="btn btn-accent" onclick="saveGroups()" id="ug-save-btn">Save &amp; Restart Server</button>
+      <button class="btn" onclick="loadGroups()">Discard Changes</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Reference: Enshrouded userGroups schema</div>
+    <pre style="font-family:var(--font-mono); font-size:0.7rem; color:var(--text-muted); white-space:pre-wrap;">
+{
+  "userGroups": [
+    {
+      "name": "Admin",
+      "password": "adminPassword",
+      "canKickBan": true,
+      "canBypassSlotReservation": true,
+      "canChangeServerSettings": true,
+      "canSetPermissions": true,
+      "reservedSlots": 0
+    }
+  ]
+}
+    </pre>
+    <p class="form-hint">Each name must be unique. Names appear in server logs and to other users.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('nav-settings').classList.add('active');
+var GAME = '{{ game_id }}';
+var currentGroups = [];
+
+function escHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s == null ? '' : s;
+  return d.innerHTML;
+}
+
+function loadGroups() {
+  apiCall('GET', '/admin/api/games/' + GAME + '/usergroups').then(function(d) {
+    currentGroups = (d.userGroups || []).map(function(g) {
+      return {
+        name: g.name || '',
+        password: g.password || '',
+        canKickBan: !!g.canKickBan,
+        canBypassSlotReservation: !!g.canBypassSlotReservation,
+        canChangeServerSettings: !!g.canChangeServerSettings,
+        canSetPermissions: !!g.canSetPermissions,
+        reservedSlots: g.reservedSlots || 0,
+      };
+    });
+    renderGroups();
+  }).catch(function(e) {
+    showMsg('ug-msg', 'Failed to load user groups: ' + e.message, 'error');
+  });
+
+  apiCall('GET', '/admin/api/games/' + GAME).then(function(info) {
+    document.getElementById('ug-title').textContent = (info.display_name || GAME) + ' — User Groups';
+    document.title = 'User Groups — ' + (info.display_name || GAME) + ' — Last Sietch Admin';
+  }).catch(function() {});
+}
+
+function renderGroups() {
+  var tbody = document.getElementById('ug-tbody');
+  tbody.innerHTML = '';
+  currentGroups.forEach(function(g, idx) {
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><input type="text" data-field="name" data-idx="' + idx + '" value="' + escHtml(g.name) + '" style="width:auto; min-width:130px;"></td>'
+      + '<td><input type="text" data-field="password" data-idx="' + idx + '" value="' + escHtml(g.password) + '" style="width:auto; min-width:150px;"></td>'
+      + '<td style="text-align:center;"><input type="checkbox" data-field="canKickBan" data-idx="' + idx + '"' + (g.canKickBan ? ' checked' : '') + '></td>'
+      + '<td style="text-align:center;"><input type="checkbox" data-field="canBypassSlotReservation" data-idx="' + idx + '"' + (g.canBypassSlotReservation ? ' checked' : '') + '></td>'
+      + '<td style="text-align:center;"><input type="checkbox" data-field="canChangeServerSettings" data-idx="' + idx + '"' + (g.canChangeServerSettings ? ' checked' : '') + '></td>'
+      + '<td style="text-align:center;"><input type="checkbox" data-field="canSetPermissions" data-idx="' + idx + '"' + (g.canSetPermissions ? ' checked' : '') + '></td>'
+      + '<td><input type="number" data-field="reservedSlots" data-idx="' + idx + '" min="0" max="16" value="' + (g.reservedSlots || 0) + '" style="width:auto; min-width:80px;"></td>'
+      + '<td><button class="btn btn-sm btn-stop" onclick="removeGroup(' + idx + ')">Remove</button></td>';
+    tbody.appendChild(tr);
+  });
+}
+
+function collectCurrent() {
+  document.querySelectorAll('#ug-tbody input').forEach(function(el) {
+    var idx = parseInt(el.dataset.idx, 10);
+    var field = el.dataset.field;
+    if (!currentGroups[idx]) return;
+    if (el.type === 'checkbox') {
+      currentGroups[idx][field] = el.checked;
+    } else if (el.type === 'number') {
+      currentGroups[idx][field] = parseInt(el.value, 10) || 0;
+    } else {
+      currentGroups[idx][field] = el.value;
+    }
+  });
+}
+
+function addGroup() {
+  collectCurrent();
+  currentGroups.push({
+    name: 'NewGroup',
+    password: '',
+    canKickBan: false,
+    canBypassSlotReservation: false,
+    canChangeServerSettings: false,
+    canSetPermissions: false,
+    reservedSlots: 0,
+  });
+  renderGroups();
+}
+
+function removeGroup(idx) {
+  collectCurrent();
+  currentGroups.splice(idx, 1);
+  renderGroups();
+}
+
+function saveGroups() {
+  collectCurrent();
+  // Validate: names unique + required fields present
+  var seen = {};
+  for (var i = 0; i < currentGroups.length; i++) {
+    var g = currentGroups[i];
+    if (!g.name || !g.name.trim()) {
+      showMsg('ug-msg', 'Row ' + (i + 1) + ': name is required', 'error');
+      return;
+    }
+    if (seen[g.name]) {
+      showMsg('ug-msg', 'Duplicate name: ' + g.name, 'error');
+      return;
+    }
+    seen[g.name] = true;
+    if (!g.password) {
+      showMsg('ug-msg', 'Row ' + (i + 1) + ' (' + g.name + '): password is required', 'error');
+      return;
+    }
+  }
+
+  showConfirm('Save ' + currentGroups.length + ' group(s)? The server will be stopped to apply changes. Start it back up from the Dashboard when done.', function() {
+    var btn = document.getElementById('ug-save-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    apiCall('POST', '/admin/api/games/' + GAME + '/usergroups', { userGroups: currentGroups }).then(function(d) {
+      showMsg('ug-msg', 'User groups saved. Server stopped — restart it from the Dashboard.', 'success');
+    }).catch(function(e) {
+      showMsg('ug-msg', 'Save failed: ' + e.message, 'error');
+    }).finally(function() {
+      btn.disabled = false;
+      btn.textContent = 'Save & Restart Server';
+    });
+  });
+}
+
+loadGroups();
+</script>
+{% endblock %}

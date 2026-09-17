@@ -1,0 +1,40 @@
+{# W6 Spice-spawn toggle (VC2 P2): "Spice" sub-card on the Server Health page.
+   v1 = boolean only (Decision A): one is_spawning_active toggle per field type.
+   Online-safe; toggling off does not despawn active fields, only suppresses the
+   next spawn-tick. Empty first-paint; spice.js hydrates the 8 rows from
+   /admin/api/dune/v2/spice/types and POSTs flips back. #}
+<div class="monitor-panel monitor-panel--spice span-12" id="panel-spice"
+     data-list-url="/admin/api/dune/v2/spice/types"
+     data-toggle-url="/admin/api/dune/v2/spice/types">
+  <div class="monitor-panel__header">
+    <span class="monitor-panel__title">Spice Spawning</span>
+    <span class="monitor-panel__indicator" id="panel-spice-indicator"></span>
+  </div>
+  <div class="monitor-panel__body">
+    <p class="monitor-panel__hint">
+      Per field-type spawn master switch. Off suppresses the next spawn-tick only;
+      it does not despawn fields already on the map.
+    </p>
+    <table class="spice-table" id="spice-table">
+      <thead>
+        <tr>
+          <th>Field type</th>
+          <th>Map</th>
+          <th>Dim</th>
+          <th>Active now</th>
+          <th>Spawning</th>
+        </tr>
+      </thead>
+      <tbody id="spice-table-body">
+        <tr class="spice-table__empty" id="spice-table-empty">
+          <td colspan="5">loading…</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="spice-status" id="spice-status" aria-live="polite"></div>
+  </div>
+  <div class="monitor-panel__footer">
+    <span class="monitor-panel__ts" data-ts="0" id="panel-spice-ts">not yet refreshed</span>
+    <span class="monitor-panel__stale" id="panel-spice-stale" hidden>stale</span>
+  </div>
+</div>

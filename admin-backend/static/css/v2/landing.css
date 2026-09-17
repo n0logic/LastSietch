@@ -1,0 +1,543 @@
+/* ============================================================================
+ * Admin landing (served at "/") — v2 design-system migration of grid.html.
+ * Scope: body.admin-page .v2-landing__*  (terminal-admin cascade).
+ * All color/spacing/radii/motion pull from design-system.css tokens.
+ * ============================================================================ */
+
+/* --- Slim landing header (no v2-nav; env pin + brand + user menu) ---------- */
+body.admin-page .v2-landing__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-3) var(--space-7);
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+
+body.admin-page .v2-landing__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+body.admin-page .v2-landing__title {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+}
+
+/* --- Page container -------------------------------------------------------- */
+body.admin-page .v2-landing {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-6);
+}
+
+/* --- Infra cards (Proxmox + Dune VPS) -------------------------------------- */
+body.admin-page .v2-landing__infra {
+  margin-bottom: var(--space-6);
+}
+
+body.admin-page .v2-landing__infra-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+body.admin-page .v2-landing__infra-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-landing__refresh {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+/* Status dot (healthy pulse / degraded / unreachable) */
+@keyframes v2landing-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 65, 0.55); opacity: 1; }
+  50% { box-shadow: 0 0 0 5px transparent; opacity: 0.75; }
+}
+
+body.admin-page .v2-landing__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-full);
+  background: var(--green);
+  flex-shrink: 0;
+}
+
+body.admin-page .v2-landing__dot.is-healthy {
+  animation: v2landing-pulse 3s var(--ease-in-out) infinite;
+}
+
+body.admin-page .v2-landing__dot.is-degraded { background: var(--accent); animation: none; }
+body.admin-page .v2-landing__dot.is-unreachable { background: var(--red); animation: none; }
+
+/* Stats grid — 4 across */
+body.admin-page .v2-landing__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+  margin: 0;
+  list-style: none;
+}
+
+body.admin-page .v2-landing__stat {
+  display: flex;
+  flex-direction: column;
+}
+
+body.admin-page .v2-landing__stat + .v2-landing__stat {
+  border-left: 1px solid var(--border);
+  padding-left: var(--space-4);
+}
+
+body.admin-page .v2-landing__stat dt {
+  order: 3;
+  margin-top: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-landing__stat-value {
+  order: 1;
+  margin: 0;   /* dd carries a 40px UA inline-start margin; without this the numbers sit pushed right of their labels */
+  font-family: var(--font-mono);
+  font-size: clamp(1.4rem, 2.1vw, 1.85rem);
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+body.admin-page .v2-landing__stat-value.is-warn { color: var(--accent); }
+body.admin-page .v2-landing__stat-value.is-crit { color: var(--red); }
+
+body.admin-page .v2-landing__stat-sub {
+  order: 2;
+  margin-top: 0.15rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* Sparkline (client-side ring buffer, CPU load history) */
+body.admin-page .v2-landing__spark {
+  position: relative;
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  color: var(--accent);
+}
+
+body.admin-page .v2-landing__spark svg {
+  width: 100%;
+  height: 46px;
+  display: block;
+}
+
+body.admin-page .v2-landing__spark-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+body.admin-page .v2-landing__spark-fill {
+  fill: rgba(212, 137, 28, 0.12);
+  stroke: none;
+}
+
+body.admin-page .v2-landing__spark-label {
+  display: block;
+  margin-top: 0.2rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-landing__spark-empty {
+  position: absolute;
+  inset: var(--space-3) 0 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-landing__spark[data-has-data="true"] .v2-landing__spark-empty {
+  display: none;
+}
+
+/* Infra footer */
+body.admin-page .v2-landing__infra-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-landing__infra-foot .accent { color: var(--accent); }
+
+body.admin-page .v2-landing__infra-loc {
+  font-size: var(--text-2xs);
+  opacity: 0.7;
+}
+
+/* --- Game cards grid ------------------------------------------------------- */
+body.admin-page .v2-landing__games {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-6);
+}
+
+body.admin-page .v2-landing__card-link {
+  display: block;
+  text-decoration: none;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  outline: none;
+}
+
+body.admin-page .v2-landing__card-link:hover { text-decoration: none; }
+
+body.admin-page .v2-landing__card-link:focus-visible {
+  outline: 2px solid var(--card-accent, var(--accent));
+  outline-offset: 3px;
+}
+
+body.admin-page .v2-landing__card-link.inactive {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
+}
+
+body.admin-page .v2-landing__card {
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--card-border-color, var(--border));
+  transition: transform var(--motion-fast) var(--ease-out),
+              box-shadow var(--motion-fast) var(--ease-out),
+              border-color var(--motion-fast) var(--ease-out);
+}
+
+body.admin-page .v2-landing__card-link:hover .v2-landing__card {
+  transform: translateY(-4px);
+  box-shadow: var(--card-hover-shadow, 0 8px 32px rgba(212,137,28,0.18), 0 2px 8px rgba(0,0,0,0.5));
+  border-color: var(--card-border-hover, rgba(212,137,28,0.55));
+}
+
+/* Hero zone (art <img> + gradient overlay + name/badge) */
+body.admin-page .v2-landing__card-hero {
+  position: relative;
+  height: 140px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+body.admin-page .v2-landing__card-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+body.admin-page .v2-landing__card-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--card-overlay);
+}
+
+body.admin-page .v2-landing__card-hero-inner {
+  position: relative;
+  z-index: 2;
+  height: 100%;
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+body.admin-page .v2-landing__card-name {
+  align-self: flex-end;
+  max-width: 65%;
+  font-family: var(--font-mono);
+  font-size: clamp(1.1rem, 3vw, 1.4rem);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--card-name-color, #fff);
+  text-shadow: var(--card-name-shadow, 0 2px 12px rgba(212,137,28,0.4));
+}
+
+/* Card status badge */
+@keyframes v2landing-badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+  50% { box-shadow: 0 0 0 4px transparent; opacity: 0.7; }
+}
+
+body.admin-page .v2-landing__badge {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.25rem 0.6rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+}
+
+body.admin-page .v2-landing__badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+body.admin-page .v2-landing__badge.is-online {
+  background: rgba(0, 255, 65, 0.12);
+  border: 1px solid rgba(0, 255, 65, 0.35);
+  color: var(--green);
+}
+
+body.admin-page .v2-landing__badge.is-online .v2-landing__badge-dot {
+  animation: v2landing-badge-pulse 2.5s var(--ease-in-out) infinite;
+}
+
+body.admin-page .v2-landing__badge.is-offline {
+  background: rgba(192, 57, 43, 0.12);
+  border: 1px solid rgba(192, 57, 43, 0.35);
+  color: #e05a4a;
+}
+
+body.admin-page .v2-landing__badge.is-provisioned {
+  background: rgba(136, 136, 153, 0.10);
+  border: 1px solid rgba(136, 136, 153, 0.25);
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-landing__badge.is-unknown {
+  background: rgba(241, 196, 15, 0.10);
+  border: 1px solid rgba(241, 196, 15, 0.3);
+  color: var(--yellow);
+}
+
+/* Card body / data zone */
+body.admin-page .v2-landing__card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: var(--space-5) var(--space-6);
+  background: var(--card-data-bg);
+  border-top: var(--card-data-border);
+}
+
+/* Build chip line (non-dune) */
+body.admin-page .v2-landing__buildline {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-3);
+}
+
+body.admin-page .v2-landing__build-chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+/* Pulse row (live stat tiles) */
+body.admin-page .v2-landing__pulse-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+body.admin-page .v2-landing__pulse-row--dune {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+body.admin-page .v2-landing__pulse {
+  display: flex;
+  flex-direction: column;
+}
+
+body.admin-page .v2-landing__pulse + .v2-landing__pulse {
+  border-left: 1px solid var(--border);
+  padding-left: var(--space-3);
+}
+
+body.admin-page .v2-landing__pulse-value {
+  font-family: var(--font-mono);
+  font-size: clamp(1.1rem, 2.5vw, 1.5rem);
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--card-stat-color, var(--text));
+  font-variant-numeric: tabular-nums;
+}
+
+body.admin-page .v2-landing__pulse-label {
+  margin-top: 0.2rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-landing__coming-soon {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+  opacity: 0.8;
+  margin-bottom: var(--space-3);
+}
+
+/* Pending-update strip */
+body.admin-page .v2-landing__pending {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: 0.35rem 0.6rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  color: var(--yellow);
+  background: var(--warning-bg);
+  border: 1px solid rgba(241, 196, 15, 0.35);
+  border-radius: var(--radius-sm);
+}
+
+body.admin-page .v2-landing__pending[hidden] { display: none; }
+
+/* Manage hint (hover affordance) */
+body.admin-page .v2-landing__manage {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: right;
+  color: var(--card-accent, var(--accent));
+  opacity: 0;
+  user-select: none;
+  transition: opacity var(--motion-instant) var(--ease-in-out);
+}
+
+body.admin-page .v2-landing__card-link:hover .v2-landing__manage,
+body.admin-page .v2-landing__card-link:focus-visible .v2-landing__manage {
+  opacity: 1;
+}
+
+/* Stat refresh flash */
+@keyframes v2landing-flash {
+  0% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+body.admin-page .is-flashing {
+  animation: v2landing-flash 0.3s var(--ease-out) forwards;
+}
+
+/* --- Per-game accent tokens ------------------------------------------------ */
+body.admin-page .v2-landing__card.conan {
+  --card-accent: #d4891c;
+  --card-border-color: rgba(212, 137, 28, 0.2);
+  --card-border-hover: rgba(212, 137, 28, 0.55);
+  --card-hover-shadow: 0 8px 32px rgba(212,137,28,0.18), 0 2px 8px rgba(0,0,0,0.5);
+  --card-overlay: linear-gradient(to bottom, rgba(42,26,21,0.35) 0%, rgba(10,10,15,0.75) 60%, rgba(10,10,15,0.97) 100%);
+  --card-name-color: #ffffff;
+  --card-name-shadow: 0 2px 12px rgba(212,137,28,0.4);
+  --card-data-bg: linear-gradient(180deg, #1a1210 0%, #0e0a09 100%);
+  --card-data-border: 1px solid rgba(212,137,28,0.25);
+  --card-stat-color: #e0e0e0;
+}
+body.admin-page .v2-landing__card-link.conan { --card-accent: #d4891c; }
+
+body.admin-page .v2-landing__card.enshrouded {
+  --card-accent: #5d8cc0;
+  --card-border-color: rgba(93, 140, 192, 0.18);
+  --card-border-hover: rgba(93, 140, 192, 0.5);
+  --card-hover-shadow: 0 8px 32px rgba(93,140,192,0.18), 0 2px 8px rgba(0,0,0,0.5);
+  --card-overlay: linear-gradient(to bottom, rgba(10,14,26,0.38) 0%, rgba(10,10,15,0.75) 60%, rgba(10,10,15,0.97) 100%);
+  --card-name-color: #e6f0ff;
+  --card-name-shadow: 0 2px 16px rgba(93,140,192,0.35);
+  --card-data-bg: linear-gradient(180deg, #10141e 0%, #0a0c12 100%);
+  --card-data-border: 1px solid rgba(93,140,192,0.22);
+  --card-stat-color: #e6f0ff;
+}
+body.admin-page .v2-landing__card-link.enshrouded { --card-accent: #5d8cc0; }
+
+body.admin-page .v2-landing__card.dune {
+  --card-accent: #c2943c;
+  --card-border-color: rgba(194, 148, 60, 0.12);
+  --card-border-hover: rgba(194, 148, 60, 0.5);
+  --card-hover-shadow: 0 8px 32px rgba(194,148,60,0.18), 0 2px 8px rgba(0,0,0,0.5);
+  --card-overlay: linear-gradient(to bottom, rgba(38,28,12,0.4) 0%, rgba(10,10,15,0.72) 60%, rgba(10,10,15,0.97) 100%);
+  --card-name-color: #f5e8c8;
+  --card-name-shadow: 0 2px 14px rgba(194,148,60,0.3);
+  --card-data-bg: linear-gradient(180deg, #16110a 0%, #0a0907 100%);
+  --card-data-border: 1px solid rgba(194,148,60,0.2);
+  --card-stat-color: #e0e0e0;
+}
+body.admin-page .v2-landing__card-link.dune { --card-accent: #c2943c; }
+
+/* --- Responsive ------------------------------------------------------------ */
+@media (max-width: 1023px) {
+  body.admin-page .v2-landing__stats { grid-template-columns: 1fr 1fr; }
+  body.admin-page .v2-landing__games { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 767px) {
+  body.admin-page .v2-landing { padding: var(--space-4); }
+  body.admin-page .v2-landing__header { padding: var(--space-3) var(--space-4); }
+  body.admin-page .v2-landing__stats { grid-template-columns: 1fr 1fr; }
+  body.admin-page .v2-landing__stat-value { font-size: 1.5rem; }
+  body.admin-page .v2-landing__infra-foot { flex-direction: column; align-items: flex-start; gap: 0.35rem; }
+  body.admin-page .v2-landing__games { grid-template-columns: 1fr; }
+  body.admin-page .v2-landing__card-hero { height: 100px; }
+}

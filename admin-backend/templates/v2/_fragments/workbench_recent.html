@@ -1,0 +1,36 @@
+{# Recent grants for a single account. #}
+{% set grants = recent.grants if recent and recent.grants else [] %}
+{% if recent and recent.error %}
+<div class="v2-card v2-card--empty v2-card--err">
+  <div class="v2-card__title">Recent grants — unavailable</div>
+  <div class="v2-card__body">{{ recent.error }}</div>
+</div>
+{% elif grants %}
+<table class="v2-table v2-table--workbench-recent">
+  <thead>
+    <tr><th>id</th><th>when</th><th>grant</th><th>status</th><th>operator</th><th>preset</th><th>batch</th></tr>
+  </thead>
+  <tbody>
+  {% for g in grants %}
+    <tr>
+      <td><code>#{{ g.id }}</code></td>
+      <td><time datetime="{{ g.granted_at }}">{{ g.granted_at | replace('T',' ') | truncate(19, true, '') }}</time></td>
+      <td>
+        <code>{{ g.grant_type }}</code>
+        {% if g.reverted_by_grant_id %}
+          <span class="v2-tag v2-tag--reverted" title="reverted by #{{ g.reverted_by_grant_id }}">reverted</span>
+        {% endif %}
+      </td>
+      <td><span class="status-badge status-badge--{{ 'applied' if g.status == 'applied' else 'pending' }}">{{ g.status }}</span></td>
+      <td>{{ g.operator }}</td>
+      <td>{% if g.preset_name %}<code class="v2-tag">{{ g.preset_name }}</code>{% endif %}</td>
+      <td>{% if g.batch_id %}<code class="v2-tag" title="{{ g.batch_id }}">{{ g.batch_id[:8] }}…</code>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="v2-card v2-card--empty">
+  <div class="v2-card__body">no recent grants for aid <code>{{ aid }}</code></div>
+</div>
+{% endif %}

@@ -1,0 +1,41 @@
+{# Hero / Server Health strip — full-width.
+   Data source: aggregator d.battlegroup + d.maps_summary[] + d.travel_queue
+                + d.funcom_push.last_ts + d.bgd_rpc.last_ts.
+   JS hydrator: renderHeroPanelFromAgg in v2-monitor.js. #}
+<div class="monitor-panel monitor-panel--hero span-12" id="panel-hero" data-source="status,partitions,travel,funcom_push,bgd_rpc">
+  <div class="monitor-panel__header">
+    <span class="monitor-panel__title">Server Health</span>
+    <span class="monitor-panel__indicator" id="panel-hero-indicator" aria-label="Server health indicator"></span>
+  </div>
+  <div class="monitor-panel__body">
+    <div class="hero-strip" id="hero-strip">
+      <div class="hero-strip__bg" id="hero-bg">
+        <div class="hero-strip__label">Battlegroup</div>
+        <div class="hero-strip__value hero-strip__value--bg" id="hero-bg-title">loading…</div>
+        <div class="hero-strip__sub" id="hero-bg-region"></div>
+        <div class="hero-strip__sub hero-strip__sub--mono" id="hero-bg-guid"></div>
+      </div>
+      <div class="hero-strip__intel" id="hero-intel">
+        <div class="hero-pill" id="hero-pill-funcom" data-state="unknown">
+          <span class="hero-pill__label">Funcom push</span>
+          <span class="hero-pill__value" id="hero-pill-funcom-value">—</span>
+        </div>
+        <div class="hero-pill" id="hero-pill-bgd" data-state="unknown">
+          <span class="hero-pill__label">BGD RPC</span>
+          <span class="hero-pill__value" id="hero-pill-bgd-value">—</span>
+        </div>
+        <div class="hero-pill" id="hero-pill-travel" data-state="unknown">
+          <span class="hero-pill__label">Travel queue</span>
+          <span class="hero-pill__value" id="hero-pill-travel-value">—</span>
+        </div>
+      </div>
+    </div>
+    <div class="hero-maps-grid" id="hero-maps" role="list" aria-label="Per-map status">
+      <div class="hero-maps-grid__empty" id="hero-maps-empty">No map data yet.</div>
+    </div>
+  </div>
+  <div class="monitor-panel__footer">
+    <span class="monitor-panel__ts" data-ts="0" id="panel-hero-ts">refreshed —</span>
+    <span class="monitor-panel__stale" id="panel-hero-stale" hidden>stale</span>
+  </div>
+</div>

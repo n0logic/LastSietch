@@ -1,0 +1,165 @@
+{# Guild directory + recruitment board — GET /portal/guilds
+   Context (from routers/portal.py portal_guilds):
+     active_character_name: str
+     guilds_data: {
+       guilds[], by_faction[ {faction_name, faction_slug, guilds[]} ],
+       recruiting[], rank_overall[], rank_session[] (top 5),
+       current_term: {term_id, start_time, end_time} | None, total_guilds
+     } | None
+     guilds_error: bool
+     my_guild: guild | None
+     my_role_can_edit: bool
+     portal_session, portal_csrf_token (base_ctx)
+   Each guild: {guild_id, guild_name, faction_id, faction_name, faction_slug,
+     member_count, members[{char_name, role_id, role_name}], leaders[],
+     officers[], contacts[], description, blurb, recruiting,
+     contrib_overall, contrib_session, rank_overall, rank_session}
+#}
+{% extends "portal/base.html" %}
+{% set active_nav = "guilds" %}
+
+{% block title %}Guilds — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+
+<section class="portal-hero portal-hero--guilds" aria-label="Guilds">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Last Sietch</span>
+    <p class="portal-hero__title">Guilds of Arrakis</p>
+    <p class="portal-hero__sub">
+      Every guild on the server, who leads them, and who is recruiting.
+      {% if my_guild %}You fly with <strong>{{ my_guild.guild_name }}</strong>.{% endif %}
+    </p>
+  </div>
+</section>
+
+{% if guilds_error or guilds_data is none %}
+<article class="portal-card">
+  <div class="portal-msg portal-msg--warning" role="status">
+    Live guild data is temporarily unavailable. Please refresh in a minute.
+  </div>
+</article>
+{% elif guilds_data.total_guilds == 0 %}
+<article class="portal-card">
+  <div class="portal-msg portal-msg--info" role="status">
+    No guilds have formed on the server yet. Found one in-game and it will appear here.
+  </div>
+</article>
+{% else %}
+
+{# ---- Recruiting board ---- #}
+<article class="portal-card">
+  <h2 class="portal-card__title">Recruiting now</h2>
+  {% if guilds_data.recruiting %}
+  <p class="portal-card__subtitle">
+    {{ guilds_data.recruiting | length }} guild{{ '' if guilds_data.recruiting | length == 1 else 's' }}
+    looking for members. Select one to see who to contact.
+  </p>
+  <div class="gd-reclist">
+    {% for g in guilds_data.recruiting %}
+    <a class="gd-reccard gd-faction--{{ g.faction_slug }}" href="/portal/guilds/{{ g.guild_id }}">
+      <span class="gd-reccard__head">
+        <span class="gd-reccard__name">{{ g.guild_name }}</span>
+        <span class="portal-pill gd-pill--{{ g.faction_slug }}">{{ g.faction_name }}</span>
+      </span>
+      {% if g.description %}<span class="gd-reccard__blurb">{{ g.description | truncate(140) }}</span>{% endif %}
+      <span class="gd-reccard__foot">
+        <span class="gd-reccard__members">{{ g.member_count }} member{{ '' if g.member_count == 1 else 's' }}</span>
+        {% if g.contacts %}<span class="gd-reccard__contact">Contact: {{ g.contacts[0] }}</span>{% endif %}
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="portal-msg portal-msg--info" role="status">
+    No guilds are flagged as recruiting right now.
+    {% if my_role_can_edit %}You can open <strong>{{ my_guild.guild_name }}</strong> for recruitment from its
+    <a href="/portal/guilds/{{ my_guild.guild_id }}">guild page</a>.{% endif %}
+  </div>
+  {% endif %}
+</article>
+
+{# ---- Landsraad rankings: Overall vs This Session (CSS-only tabs) ---- #}
+<article class="portal-card">
+  <h2 class="portal-card__title">Landsraad standings</h2>
+  <p class="portal-card__subtitle">
+    Guild contribution to the Landsraad.
+    {% if guilds_data.current_term %}This session = term {{ guilds_data.current_term.term_id }}.{% endif %}
+  </p>
+
+  <div class="gd-tabs">
+    <input type="radio" name="gd-rank-tab" id="gd-tab-overall" class="gd-tabs__radio" checked>
+    <input type="radio" name="gd-rank-tab" id="gd-tab-session" class="gd-tabs__radio">
+    <div class="gd-tabs__labels" role="tablist">
+      <label for="gd-tab-overall" class="gd-tab">Overall</label>
+      <label for="gd-tab-session" class="gd-tab">This session</label>
+    </div>
+
+    <div class="gd-tabs__panel gd-tabs__panel--overall">
+      {% if guilds_data.rank_overall %}
+      <ol class="gd-rank">
+        {% for g in guilds_data.rank_overall %}
+        <li class="gd-rank__row">
+          <span class="gd-rank__pos">{{ loop.index }}</span>
+          <a class="gd-rank__name" href="/portal/guilds/{{ g.guild_id }}">{{ g.guild_name }}</a>
+          <span class="portal-pill gd-pill--{{ g.faction_slug }}">{{ g.faction_name }}</span>
+          <span class="gd-rank__amt mono">{{ "{:,}".format(g.contrib_overall | int) }}</span>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <div class="portal-msg portal-msg--info" role="status">No contributions recorded yet.</div>
+      {% endif %}
+    </div>
+
+    <div class="gd-tabs__panel gd-tabs__panel--session">
+      {% if guilds_data.rank_session %}
+      <ol class="gd-rank">
+        {% for g in guilds_data.rank_session %}
+        <li class="gd-rank__row">
+          <span class="gd-rank__pos">{{ loop.index }}</span>
+          <a class="gd-rank__name" href="/portal/guilds/{{ g.guild_id }}">{{ g.guild_name }}</a>
+          <span class="portal-pill gd-pill--{{ g.faction_slug }}">{{ g.faction_name }}</span>
+          <span class="gd-rank__amt mono">{{ "{:,}".format(g.contrib_session | int) }}</span>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <div class="portal-msg portal-msg--info" role="status">No contributions this session yet.</div>
+      {% endif %}
+    </div>
+  </div>
+</article>
+
+{# ---- Full directory, grouped by faction. Main factions (Atreides + Harkonnen)
+       render side by side; Smuggler + Unaligned pair up below. ---- #}
+<div class="gd-factions">
+{% for fac in guilds_data.by_faction %}
+<article class="portal-card gd-faction-card gd-faction--{{ fac.faction_slug }}{% if not fac.is_main %} gd-faction-card--minor{% endif %}">
+  <h2 class="portal-card__title gd-faction-card__title">
+    {% if fac.crest %}<img class="gd-faction-card__crest" src="/admin/static/img/factions/{{ fac.crest }}.png" alt="" aria-hidden="true" width="40" height="40" loading="lazy">{% endif %}
+    <span class="gd-faction-card__name">{{ fac.faction_name }}</span>
+    <span class="gd-faction-card__count">{{ fac.guilds | length }} guild{{ '' if fac.guilds | length == 1 else 's' }}</span>
+  </h2>
+  <div class="gd-grid">
+    {% for g in fac.guilds %}
+    <a class="gd-card" href="/portal/guilds/{{ g.guild_id }}">
+      <span class="gd-card__head">
+        <span class="gd-card__name">{{ g.guild_name }}</span>
+        {% if g.recruiting %}<span class="portal-pill gd-pill--recruiting">Recruiting</span>{% endif %}
+      </span>
+      <span class="gd-card__meta">
+        <span class="gd-card__members">{{ g.member_count }} member{{ '' if g.member_count == 1 else 's' }}</span>
+        {% if g.contrib_overall > 0 %}<span class="gd-card__contrib mono">{{ "{:,}".format(g.contrib_overall | int) }} Landsraad</span>{% endif %}
+      </span>
+      {% if g.contacts %}<span class="gd-card__lead">Led by {{ g.contacts[0] }}</span>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+</article>
+{% endfor %}
+</div>
+
+{% endif %}
+
+{% endblock %}

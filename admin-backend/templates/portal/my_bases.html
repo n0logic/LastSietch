@@ -1,0 +1,101 @@
+{# My Bases — GET /portal/my-bases (session required).
+   Context (routers/solido.py my_bases): linked, sections[], solido_site.
+   Each section = one linked character; rows = BuildingBlueprint_CopyDevice
+   items. Download emits Solido-format JSON; Preview renders the same box-mesh
+   viewer on the player's own (same-origin) blueprint. #}
+{% extends "portal/base.html" %}
+
+{% block title %}My Bases — Last Sietch Dune Portal{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/admin/static/css/portal/portal-solido.css?v={{ solido_css_v }}">
+{% endblock %}
+
+{% block content %}
+
+<section class="portal-hero portal-hero--solido" aria-label="My bases">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Last Sietch</span>
+    <h1 class="portal-hero__title">My Bases</h1>
+    <p class="portal-hero__sub">
+      Export any base you've saved to a <code>Solido Tool</code> as a
+      Solido-format file — share it, back it up, or preview it in 3D.
+    </p>
+  </div>
+</section>
+
+{% if not linked %}
+<div class="solido-empty">
+  <p class="solido-empty__headline">Link your character first</p>
+  <p>Connect your Last Sietch character to see and export your saved bases.</p>
+  <a class="portal-btn portal-btn--primary" href="/portal/account">Link a character</a>
+</div>
+{% else %}
+
+<div class="my-bases" data-mybases>
+  {% for sec in sections %}
+  <section class="my-bases__section">
+    <h2 class="my-bases__char">{{ sec.character_name }}</h2>
+    {% if not sec.available %}
+      <p class="solido-status">Couldn't reach the game server for this character — try again shortly.</p>
+    {% elif not sec.blueprints %}
+      <p class="solido-status">
+        No saved bases yet. Save a base blueprint to a <code>Solido Tool</code>
+        in-game, then it'll appear here.
+      </p>
+    {% else %}
+      <ul class="my-bases__list">
+        {% for bp in sec.blueprints %}
+        {% set pub = published.get(bp.bp_id|string) %}
+        <li class="my-bases__row">
+          <div class="my-bases__meta">
+            <span class="my-bases__name" data-mybases-name>{{ bp.name or ('Blueprint #' ~ bp.bp_id) }}</span>
+            <span class="my-bases__pieces">
+              {{ bp.piece_count or 0 }} pieces
+              {% if pub %}<span class="my-bases__badge">Published · &darr; {{ pub.download_count }}</span>{% endif %}
+            </span>
+          </div>
+          <div class="my-bases__actions">
+            <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm"
+                    data-mybases-preview data-bp-id="{{ bp.bp_id }}">Preview 3D</button>
+            <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm"
+                    data-mybases-rename data-bp-id="{{ bp.bp_id }}"
+                    title="Rename this base (applies while you are logged out)">Rename</button>
+            <a class="portal-btn portal-btn--primary portal-btn--sm"
+               href="/portal/my-bases/{{ bp.bp_id }}/export"
+               download="{{ (bp.name or ('blueprint-' ~ bp.bp_id)) }}.json">Download</a>
+            {% if pub %}
+            <a class="portal-btn portal-btn--sm" href="/portal/solido/{{ pub.publish_id }}">View listing</a>
+            <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm"
+                    data-mybases-unpublish data-publish-id="{{ pub.publish_id }}"
+                    data-portal-confirm="Unpublish this blueprint from the market?">Unpublish</button>
+            {% else %}
+            <button type="button" class="portal-btn portal-btn--sm"
+                    data-mybases-publish data-bp-id="{{ bp.bp_id }}">Publish to Market</button>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+  {% endfor %}
+
+  <div class="solido-stage" data-mybases-stage hidden>
+    <canvas class="solido-canvas" data-mybases-canvas></canvas>
+    <p class="solido-stage__hint">Drag to orbit · scroll/pinch to zoom · right-drag to pan</p>
+    <p class="solido-detail__viewnote" data-mybases-viewnote hidden></p>
+  </div>
+</div>
+{% endif %}
+
+<footer class="solido-credit">
+  <p>Export format is Solido-compatible (<a href="{{ solido_site }}" rel="noopener" target="_blank">dune.layout.tools</a>).
+     3D preview is a Last Sietch box-massing render of your own base.</p>
+</footer>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/portal-solido.js?v={{ solido_js_v }}" defer></script>
+{% endblock %}

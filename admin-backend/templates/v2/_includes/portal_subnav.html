@@ -1,0 +1,20 @@
+{# Admin tab sub-tabs: the v1 admin pages plus the portal Discord-link admin.
+   This tab is what replaced the footer "v1 admin" escape, so every v1 page that
+   was routable but unreachable is linked from here. Filename kept as
+   portal_subnav.html: ops/deploy-karum.sh ships this exact path.
+
+   Settings (/admin/settings) and Usergroups (/conan/usergroups) were removed on
+   2026-09-04: both configure Conan, a game this panel no longer runs, so the
+   nav was pointing an operator at a retired server's settings. Solido previews
+   (routers/solido_admin.py) took their place: it is a live admin tool that was
+   routable and linked from nowhere.
+
+   Active state comes from `nav_path` (set in base.html); the v1 pages render in
+   v1 chrome and never reach this nav. #}
+<nav class="v2-subnav" aria-label="Admin sub-tabs">
+  <a class="v2-subnav__tab" href="/admin/users">Users</a>
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/audit') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/audit">Audit</a>
+  <a class="v2-subnav__tab" href="/admin/rcon">RCON</a>
+  <a class="v2-subnav__tab" href="/admin/dashboard/dune/solido-thumbs">Solido previews</a>
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/portal') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/portal">Discord links</a>
+</nav>

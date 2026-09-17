@@ -1,0 +1,102 @@
+{# Market price-alert watchlist — GET /portal/watchlist
+   Context (from routers/portal.py portal_watchlist):
+     active_character_name: str
+     watches: [{id, template_id, name, icon, max_price_display, cheapest_display,
+                status (met|waiting|none), armed, last_triggered_at}]
+     watch_count, watch_cap: int
+     alerts: [{id, name, icon, threshold_display, match_display, created_at, seen}]
+     portal_session, portal_csrf_token (base_ctx)
+   Watches are added from the Market page (the price-ladder drawer "Watch" button).
+   Read-only on the exchange: alerts only notify; buying is done in-game.
+#}
+{% extends "portal/base.html" %}
+{% set active_nav = "watchlist" %}
+
+{% block title %}Price Alerts — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+
+<article class="portal-card">
+  <div class="portal-dash__hero">
+    <h1 class="portal-dash__char-name">Price Alerts</h1>
+    <p class="portal-card__subtitle">
+      Watch the CHOAM Exchange for the items you want. When the cheapest listing
+      drops to your target price, you get a note here and a Discord DM. Add items
+      from the <a href="/portal/market">Market</a> — open an item and tap
+      <em>Watch this item</em>.
+    </p>
+  </div>
+</article>
+
+{% if alerts %}
+<article class="portal-card">
+  <h2 class="portal-card__title">Recent alerts</h2>
+  <ul class="watch-alerts" role="list">
+    {% for a in alerts %}
+    <li class="watch-alert{% if not a.seen %} watch-alert--new{% endif %}">
+      <span class="cont-item__icon-wrap watch-alert__icon">
+        <img class="cont-item__icon" loading="lazy" alt="" data-icon-fallback
+             src="/admin/static/img/dune-icons/{{ a.icon }}.png">
+      </span>
+      <div class="watch-alert__body">
+        <p class="watch-alert__line">
+          {% if not a.seen %}<span class="watch-chip watch-chip--new">New</span>{% endif %}
+          <strong>{{ a.name }}</strong> listed at
+          <span class="mono">{{ a.match_display }}</span> S
+          <span class="watch-alert__muted">(your target ≤ {{ a.threshold_display }} S)</span>
+        </p>
+        <p class="watch-alert__when mono">{{ a.created_at }} UTC</p>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="cont-search__hint">
+    Listings move fast — head to a CHOAM Exchange terminal in-game to buy.
+  </p>
+</article>
+{% endif %}
+
+<article class="portal-card">
+  <h2 class="portal-card__title">
+    Your watches
+    <span class="watch-count">{{ watch_count }} / {{ watch_cap }}</span>
+  </h2>
+
+  {% if not watches %}
+  <div class="portal-msg portal-msg--info" role="status">
+    You aren't watching anything yet. Open the
+    <a href="/portal/market">Market</a>, tap an item, then choose
+    <em>Watch this item</em> to be alerted when it gets cheap.
+  </div>
+  {% else %}
+  <ul class="watch-list" role="list">
+    {% for w in watches %}
+    <li class="watch-row" data-watch-id="{{ w.id }}">
+      <span class="cont-item__icon-wrap watch-row__icon">
+        <img class="cont-item__icon" loading="lazy" alt="" data-icon-fallback
+             src="/admin/static/img/dune-icons/{{ w.icon }}.png">
+      </span>
+      <div class="watch-row__main">
+        <p class="watch-row__name">{{ w.name }}</p>
+        <p class="watch-row__prices">
+          <span class="watch-row__target">Target ≤ <span class="mono">{{ w.max_price_display }}</span> S</span>
+          <span class="watch-row__now">Now: <span class="mono">{{ w.cheapest_display }}</span> S</span>
+        </p>
+      </div>
+      <span class="watch-status watch-status--{{ w.status }}">
+        {% if w.status == 'met' %}At your price
+        {% elif w.status == 'none' %}No listings
+        {% else %}Watching{% endif %}
+      </span>
+      <form method="post" action="/portal/watchlist/remove" class="watch-row__remove" data-portal-csrf-form>
+        <input type="hidden" name="csrf_token" value="{{ portal_csrf_token | default('', true) }}">
+        <input type="hidden" name="watch_id" value="{{ w.id }}">
+        <button type="submit" class="portal-btn portal-btn--ghost portal-btn--sm" data-portal-confirm="Stop watching {{ w.name }}?" aria-label="Stop watching {{ w.name }}">Remove</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</article>
+
+{% endblock %}

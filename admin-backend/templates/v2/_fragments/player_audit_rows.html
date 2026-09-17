@@ -1,0 +1,76 @@
+{% set payload = audit if audit is defined else {} %}
+{% set rows = payload.entries if payload.entries is defined else [] %}
+{% set page = payload.page if payload.page is defined else 1 %}
+{% set page_size = payload.page_size if payload.page_size is defined else 50 %}
+{% set total = payload.total_count if payload.total_count is defined else (rows|length) %}
+{% set total_pages = ((total + page_size - 1) // page_size) if total else 1 %}
+
+<div class="v2-player-audit">
+
+  <div style="overflow-x: auto;">
+    <table class="table table--compact table--dense audit-log">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>User</th>
+          <th>Action</th>
+          <th>IP</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if rows %}
+          {% for e in rows %}
+            {% set is_fail = (e.success == false or e.success == 0) %}
+            {% set is_login_fail = e.action in ('login_failed', 'login_blocked') %}
+            {% set status_class = 'audit-row--fail' if (is_fail and not is_login_fail) else ('audit-row--warn' if is_login_fail else 'audit-row--ok') %}
+            <tr class="audit-row {{ status_class }}">
+              <td class="audit-row__time">
+                {% if e.timestamp %}<time datetime="{{ e.timestamp }}">{{ e.timestamp }}</time>
+                {% else %}—{% endif %}
+              </td>
+              <td>{{ e.username or '—' }}</td>
+              <td class="audit-row__action">{{ e.action or '' }}</td>
+              <td class="audit-row__ip">{{ e.ip_address or '—' }}</td>
+              <td class="audit-row__status">
+                {% if is_login_fail %}<span class="status-badge status-badge--pending">WARN</span>
+                {% elif is_fail %}<span class="status-badge status-badge--failed">FAIL</span>
+                {% else %}<span class="status-badge status-badge--applied">OK</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="5">
+              <div class="empty-state empty-state--zero-results">
+                <p class="empty-state__headline">No audit entries for this player</p>
+                <p class="empty-state__body">Audit log rows targeting account #{{ account_id }} will appear here.</p>
+              </div>
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if rows %}
+    <nav class="pagination" aria-label="Player audit pagination">
+      <button type="button" class="btn btn-sm"
+              {% if page <= 1 %}disabled{% endif %}
+              hx-get="/admin/api/dune/v2/player/{{ account_id }}/_audit?page={{ page - 1 }}"
+              hx-target="#player-subtab-body"
+              hx-swap="innerHTML"
+              hx-indicator="#v2-player-subtab-loading"
+              hx-push-url="/admin/v2/players/{{ account_id }}?tab=audit&page={{ page - 1 }}">Previous</button>
+      <span class="pagination__total">Page {{ page }} of {{ total_pages }} · {{ total }} entries</span>
+      <button type="button" class="btn btn-sm"
+              {% if page >= total_pages %}disabled{% endif %}
+              hx-get="/admin/api/dune/v2/player/{{ account_id }}/_audit?page={{ page + 1 }}"
+              hx-target="#player-subtab-body"
+              hx-swap="innerHTML"
+              hx-indicator="#v2-player-subtab-loading"
+              hx-push-url="/admin/v2/players/{{ account_id }}?tab=audit&page={{ page + 1 }}">Next</button>
+    </nav>
+  {% endif %}
+
+</div>

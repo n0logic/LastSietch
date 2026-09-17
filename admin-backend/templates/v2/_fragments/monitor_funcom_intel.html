@@ -1,0 +1,64 @@
+{# Funcom Intelligence — settingsUpdate diff + BGD RPC counts + build placeholder.
+   Data source: aggregator d.funcom_push.* + d.bgd_rpc.*.
+   JS hydrator: renderFuncomIntelFromAgg. Yellow border + banner when
+   funcom_push.diff_from_baseline is non-empty (P2 wires the actual diff). #}
+<div class="monitor-panel monitor-panel--funcom span-12" id="panel-funcom-intel"
+     data-source="funcom_push,bgd_rpc">
+  <div class="monitor-panel__header">
+    <span class="monitor-panel__title">Funcom Intelligence</span>
+    <span class="monitor-panel__indicator" id="panel-funcom-intel-indicator"></span>
+  </div>
+  <div class="monitor-panel__body">
+    <div class="funcom-diff-banner" id="funcom-diff-banner" hidden role="status">
+      Settings changed — Funcom pushed a settingsUpdate at <span id="funcom-diff-banner-ts">—</span>.
+    </div>
+    <div class="funcom-grid">
+      <div class="funcom-card" id="fi-push">
+        <div class="funcom-card__title">Last settingsUpdate push</div>
+        <div class="funcom-card__row">
+          <span class="funcom-card__label">When</span>
+          <span class="funcom-card__value" id="fi-push-ts">—</span>
+        </div>
+        <div class="funcom-card__row">
+          <span class="funcom-card__label">SHA-256</span>
+          <span class="funcom-card__value funcom-card__value--mono" id="fi-push-sha">—</span>
+        </div>
+        <div class="funcom-card__row">
+          <span class="funcom-card__label">Pushes · 24h</span>
+          <span class="funcom-card__value" id="fi-push-count">—</span>
+        </div>
+        <div class="funcom-card__row funcom-card__row--stale" id="fi-push-stale" hidden>
+          <span class="funcom-card__label">Source</span>
+          <span class="funcom-card__value">RMQ capture unavailable</span>
+        </div>
+      </div>
+      <div class="funcom-card" id="fi-rpc">
+        <div class="funcom-card__title">BGD RPC (sg-…-nhzgrx)</div>
+        <div class="funcom-card__row">
+          <span class="funcom-card__label">Last call</span>
+          <span class="funcom-card__value" id="fi-rpc-last">—</span>
+        </div>
+        <div class="funcom-card__row">
+          <span class="funcom-card__label">Calls · 1h</span>
+          <span class="funcom-card__value" id="fi-rpc-1h">—</span>
+        </div>
+        <div class="funcom-card__row">
+          <span class="funcom-card__label">Calls · today</span>
+          <span class="funcom-card__value" id="fi-rpc-today">—</span>
+        </div>
+        <div class="funcom-card__row funcom-card__row--stale" id="fi-rpc-stale" hidden>
+          <span class="funcom-card__label">Source</span>
+          <span class="funcom-card__value">RMQ capture unavailable</span>
+        </div>
+      </div>
+      <div class="funcom-card funcom-card--placeholder" id="fi-build">
+        <div class="funcom-card__title">Installed build-id</div>
+        <div class="funcom-card__placeholder">P2 — Steam-depot drift comparison.</div>
+      </div>
+    </div>
+  </div>
+  <div class="monitor-panel__footer">
+    <span class="monitor-panel__ts" data-ts="0" id="panel-funcom-intel-ts">refreshed —</span>
+    <span class="monitor-panel__stale" id="panel-funcom-intel-stale" hidden>stale</span>
+  </div>
+</div>

@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="container">
+  <div id="settings-msg" class="msg"></div>
+
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem;">
+      <div class="card-title" id="settings-title">Server Settings</div>
+      <a href="#" id="usergroups-link" style="display:none; font-family:var(--font-mono); font-size:0.7rem; padding:0.3rem 0.7rem; border:1px solid var(--accent); color:var(--accent); border-radius:3px;">Edit User Groups &rarr;</a>
+    </div>
+    <div class="stat-label" style="margin-bottom:1rem;">Edit server configuration. Changes marked with <span style="color:var(--yellow);">RESTART</span> require a server restart to take effect.</div>
+    <div id="settings-stopwrite-note" style="display:none; font-family:var(--font-mono); font-size:0.75rem; color:var(--yellow); margin-bottom:1rem; padding:0.5rem 0.75rem; border:1px solid var(--yellow); border-radius:4px; background:rgba(241,196,15,0.05);">
+      Note: this game rewrites its config file on shutdown. Saving will stop the server process briefly, apply your changes, and leave the server stopped. Use the Dashboard to start it back up.
+    </div>
+
+    <!-- Group tabs -->
+    <div id="group-tabs" style="display:flex; gap:0; flex-wrap:wrap; border-bottom:1px solid var(--border); margin-bottom:1.5rem;">
+    </div>
+
+    <!-- Settings form -->
+    <div id="settings-form">
+      <div class="stat-label">Loading settings...</div>
+    </div>
+
+    <div id="settings-actions" style="display:none; margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--border);">
+      <div id="restart-warning" style="display:none; font-family:var(--font-mono); font-size:0.75rem; color:var(--yellow); margin-bottom:1rem;">
+        Some changes require a server restart to take effect.
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-accent" onclick="saveSettings()" id="save-btn">Save Changes</button>
+        <button class="btn" onclick="resetChanges()">Discard Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('nav-settings').classList.add('active');
+var GAME = '{{ game_id }}';
+var allSettings = [];
+var originalValues = {};
+var currentGroup = null;
+
+function loadSettings() {
+  // Dune runs on k3s with no VM-style editable config. Render an informational
+  // panel instead of hitting the non-existent /config endpoint.
+  if (GAME === 'dune') {
+    document.getElementById('settings-title').textContent = 'Dune Awakening · Server Settings';
+    document.getElementById('group-tabs').style.display = 'none';
+    document.getElementById('settings-actions').style.display = 'none';
+    document.getElementById('settings-stopwrite-note').style.display = 'none';
+    document.getElementById('usergroups-link').style.display = 'none';
+    document.getElementById('settings-form').innerHTML =
+      '<div style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted); line-height:1.7;">'
+      + '<p style="margin:0 0 0.85rem;">Dune Awakening runs on k3s and is not configured through this panel.</p>'
+      + '<p style="margin:0 0 0.85rem;">Server tuning is managed via the canonical <span style="color:var(--accent);">battlegroup</span> config and the player-experience catalogue on <game-host>.</p>'
+      + '<p style="margin:0;"><a href="/admin/dashboard/dune" style="color:var(--accent);">Dune dashboard &rarr;</a></p>'
+      + '</div>';
+    return;
+  }
+
+  // Get game display name + capability flags
+  apiCall('GET', '/admin/api/games/' + GAME).then(function(info) {
+    document.getElementById('settings-title').textContent = (info.display_name || GAME) + ' · Server Settings';
+    if (info.config_restart_mode === 'stop_before_edit') {
+      document.getElementById('settings-stopwrite-note').style.display = '';
+    }
+    {% if user.role == 'admin' %}
+    if (info.config_format === 'json') {
+      var ul = document.getElementById('usergroups-link');
+      ul.href = '/admin/settings/' + GAME + '/usergroups';
+      ul.style.display = '';
+    }
+    {% endif %}
+  }).catch(function() {});
+
+  apiCall('GET', '/admin/api/games/' + GAME + '/config').then(function(d) {
+    allSettings = d.settings || [];
+    var groups = d.groups || [];
+
+    // Store original values
+    originalValues = {};
+    allSettings.forEach(function(s) {
+      originalValues[s.key] = s.current;
+    });
+
+    // Build tabs
+    var tabsEl = document.getElementById('group-tabs');
+    tabsEl.innerHTML = '';
+    groups.forEach(function(g, i) {
+      var btn = document.createElement('a');
+      btn.textContent = g.display_name;
+      btn.href = '#';
+      btn.style.cssText = 'font-family:var(--font-mono); font-size:0.75rem; padding:0.6rem 1rem; color:var(--text-muted); border-bottom:2px solid transparent; white-space:nowrap;';
+      btn.onclick = function(e) { e.preventDefault(); showGroup(g.id); };
+      btn.id = 'tab-' + g.id;
+      tabsEl.appendChild(btn);
+    });
+
+    // Show first group
+    if (groups.length > 0) showGroup(groups[0].id);
+  }).catch(function(e) {
+    document.getElementById('settings-form').innerHTML =
+      '<div style="color:var(--red); font-family:var(--font-mono); font-size:0.85rem;">Failed to load settings.</div>';
+  });
+}
+
+function showGroup(groupId) {
+  currentGroup = groupId;
+
+  // Update tab styling
+  document.querySelectorAll('#group-tabs a').forEach(function(a) {
+    a.style.color = 'var(--text-muted)';
+    a.style.borderBottomColor = 'transparent';
+  });
+  var activeTab = document.getElementById('tab-' + groupId);
+  if (activeTab) {
+    activeTab.style.color = 'var(--accent)';
+    activeTab.style.borderBottomColor = 'var(--accent)';
+  }
+
+  var groupSettings = allSettings.filter(function(s) { return s.group === groupId; });
+  var formEl = document.getElementById('settings-form');
+
+  if (groupSettings.length === 0) {
+    formEl.innerHTML = '<div class="stat-label">No settings in this group.</div>';
+    return;
+  }
+
+  var html = '<div style="display:grid; gap:1rem;">';
+  groupSettings.forEach(function(s) {
+    var inputHtml = '';
+    var restartBadge = s.restart_required
+      ? '<span style="font-size:0.6rem; color:var(--yellow); border:1px solid var(--yellow); padding:0.1rem 0.4rem; border-radius:3px; margin-left:0.5rem;">RESTART</span>'
+      : '';
+
+    if (s.type === 'bool') {
+      var checked = s.current === true || s.current === 'True' || s.current === 'true';
+      inputHtml = '<select id="setting-' + s.key + '" data-key="' + s.key + '" data-type="bool" onchange="trackChange()" style="width:auto; min-width:120px;">'
+        + '<option value="true"' + (checked ? ' selected' : '') + '>Enabled</option>'
+        + '<option value="false"' + (!checked ? ' selected' : '') + '>Disabled</option>'
+        + '</select>';
+    } else if (s.type === 'string') {
+      if (Array.isArray(s.choices) && s.choices.length > 0) {
+        var currentStr = (s.current !== null && s.current !== undefined) ? String(s.current) : (s.default || '');
+        var optsHtml = s.choices.map(function(c) {
+          var sel = (c === currentStr) ? ' selected' : '';
+          return '<option value="' + c.replace(/"/g, '&quot;') + '"' + sel + '>' + c + '</option>';
+        }).join('');
+        inputHtml = '<select id="setting-' + s.key + '" data-key="' + s.key + '" data-type="string" onchange="trackChange()" style="width:auto; min-width:160px;">' + optsHtml + '</select>';
+      } else {
+        inputHtml = '<input type="text" id="setting-' + s.key + '" data-key="' + s.key + '" data-type="string" value="' + (s.current || '').replace(/"/g, '&quot;') + '" oninput="trackChange()">';
+      }
+    } else {
+      var step = s.type === 'int' ? '1' : '0.1';
+      var minAttr = s.min !== undefined ? ' min="' + s.min + '"' : '';
+      var maxAttr = s.max !== undefined ? ' max="' + s.max + '"' : '';
+      inputHtml = '<input type="number" id="setting-' + s.key + '" data-key="' + s.key + '" data-type="' + s.type + '" value="' + (s.current !== null ? s.current : s.default) + '" step="' + step + '"' + minAttr + maxAttr + ' oninput="trackChange()" style="width:auto; min-width:120px;">';
+    }
+
+    var defaultText = s.type === 'bool' ? (s.default ? 'Enabled' : 'Disabled') : s.default;
+
+    html += '<div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; padding:0.75rem 0; border-bottom:1px solid var(--border);">'
+      + '<div style="flex:1; min-width:0;">'
+      + '<div style="font-family:var(--font-mono); font-size:0.85rem; color:var(--text);">' + s.display_name + restartBadge + '</div>'
+      + '<div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem;">' + s.description + ' (default: ' + defaultText + ')</div>'
+      + '</div>'
+      + '<div style="flex-shrink:0;">' + inputHtml + '</div>'
+      + '</div>';
+  });
+  html += '</div>';
+  formEl.innerHTML = html;
+  document.getElementById('settings-actions').style.display = 'none';
+}
+
+function trackChange() {
+  var hasChanges = false;
+  var needsRestart = false;
+  document.querySelectorAll('[data-key]').forEach(function(el) {
+    var key = el.dataset.key;
+    var type = el.dataset.type;
+    var current = el.value;
+    var original = originalValues[key];
+
+    var changed = false;
+    if (type === 'bool') {
+      var origBool = original === true || original === 'True' || original === 'true';
+      changed = (current === 'true') !== origBool;
+    } else if (type === 'float') {
+      changed = Math.abs(parseFloat(current) - parseFloat(original)) > 0.0001;
+    } else if (type === 'int') {
+      changed = parseInt(current) !== parseInt(original);
+    } else {
+      changed = current !== (original || '');
+    }
+
+    el.style.borderColor = changed ? 'var(--accent)' : '';
+    if (changed) {
+      hasChanges = true;
+      var s = allSettings.find(function(x) { return x.key === key; });
+      if (s && s.restart_required) needsRestart = true;
+    }
+  });
+
+  document.getElementById('settings-actions').style.display = hasChanges ? '' : 'none';
+  document.getElementById('restart-warning').style.display = needsRestart ? '' : 'none';
+}
+
+function getChanges() {
+  var changes = {};
+  document.querySelectorAll('[data-key]').forEach(function(el) {
+    var key = el.dataset.key;
+    var type = el.dataset.type;
+    var current = el.value;
+    var original = originalValues[key];
+
+    var changed = false;
+    if (type === 'bool') {
+      var origBool = original === true || original === 'True' || original === 'true';
+      changed = (current === 'true') !== origBool;
+    } else if (type === 'float') {
+      changed = Math.abs(parseFloat(current) - parseFloat(original)) > 0.0001;
+    } else if (type === 'int') {
+      changed = parseInt(current) !== parseInt(original);
+    } else {
+      changed = current !== (original || '');
+    }
+
+    if (changed) {
+      if (type === 'bool') changes[key] = current === 'true';
+      else if (type === 'float') changes[key] = parseFloat(current);
+      else if (type === 'int') changes[key] = parseInt(current);
+      else changes[key] = current;
+    }
+  });
+  return changes;
+}
+
+function saveSettings() {
+  var changes = getChanges();
+  if (Object.keys(changes).length === 0) return;
+
+  var desc = Object.keys(changes).map(function(k) { return k + ' = ' + changes[k]; }).join('\n');
+  showConfirm('Save these changes?\n\n' + desc, function() {
+    var btn = document.getElementById('save-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    apiCall('POST', '/admin/api/games/' + GAME + '/config', { changes: changes }).then(function(d) {
+      showMsg('settings-msg', 'Settings saved.' + (d.needs_restart ? ' Server restart required for changes to take effect.' : ''), d.needs_restart ? 'error' : 'success');
+      // Reload to get fresh values
+      loadSettings();
+    }).catch(function(e) {
+      showMsg('settings-msg', 'Failed to save: ' + e.message, 'error');
+    }).finally(function() {
+      btn.disabled = false;
+      btn.textContent = 'Save Changes';
+    });
+  });
+}
+
+function resetChanges() {
+  showGroup(currentGroup);
+}
+
+loadSettings();
+</script>
+{% endblock %}

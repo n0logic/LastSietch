@@ -1,0 +1,35 @@
+{# VC3 v1.2 — Custom Grants catalog accordion.
+   NOTE: bracket access (cat['items']) avoids Jinja's attribute-first
+   lookup colliding with dict.items() method. #}
+{% if catalog %}
+<div class="v2-catalog">
+  {% for cat in catalog %}
+  {% set entries = cat['items'] %}
+  <details class="v2-catalog__group" open>
+    <summary class="v2-catalog__summary">
+      <span class="v2-catalog__category">{{ cat['category'] }}</span>
+      <span class="v2-catalog__count">{{ entries | length }}</span>
+    </summary>
+    <div class="v2-catalog__items">
+      {% for item in entries %}
+      <button type="button"
+              class="v2-catalog__tile"
+              data-grant-type="{{ item['grant_type'] }}"
+              data-label="{{ item['label'] }}"
+              data-description="{{ item['description'] }}"
+              data-ram-fragile="{{ '1' if item['ram_fragile'] else '0' }}"
+              data-fields='{{ item['fields'] | tojson | safe }}'>
+        <span class="v2-catalog__tile-title">{{ item['label'] }}</span>
+        {% if item['ram_fragile'] %}
+          <span class="v2-catalog__tile-flag" title="Requires player to be offline + grace elapsed (30s safe / ~5min DD-PvP)">offline-only</span>
+        {% endif %}
+        {% if item['description'] %}<span class="v2-catalog__tile-desc">{{ item['description'] }}</span>{% endif %}
+      </button>
+      {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+</div>
+{% else %}
+<div class="v2-card v2-card--empty"><div class="v2-card__body">catalog empty</div></div>
+{% endif %}

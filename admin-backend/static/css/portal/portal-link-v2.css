@@ -1,0 +1,151 @@
+/* portal-link-v2.css — V2-look override for the account-link flow (picker + quiz).
+ *
+ * Loaded ONLY by character_picker.html + quiz.html (via {% block extra_head %},
+ * after portal.css), so it restyles just those unauth pages to match the V2
+ * SvelteKit companion without touching the rest of the classic portal. Palette +
+ * type mirror portal-nextgen/src/app.css (night theme). Selectors are scoped under
+ * body / .portal-main so they win over portal.css by specificity + source order. */
+
+/* V2 typography (same families the SPA uses; V1 portal already loads Google Fonts). */
+@import url('https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=Saira:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --lv2-bg-deep: #040302;
+  --lv2-sand-1: #0c0a07;
+  --lv2-metal-1: #1d160d;
+  --lv2-metal-0: #110b06;
+  --lv2-panel: linear-gradient(180deg, #1d160d, #110b06);
+  --lv2-edge: #463719;
+  --lv2-edge-hi: #6d5730;
+  --lv2-text: #efe3cf;
+  --lv2-muted: #b39e7e;
+  --lv2-amber: #d4891c;
+  --lv2-amber-bright: #f5a23a;
+  --lv2-amber-glow: rgba(212,137,28,.30);
+  --lv2-red: #d65a44;
+  --lv2-disp: 'Saira Condensed', 'Arial Narrow', system-ui, sans-serif;
+  --lv2-sans: 'Saira', system-ui, sans-serif;
+  --lv2-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Page canvas — deep sand with a soft amber vignette (echoes the SPA backdrop). */
+body.portal-page {
+  background:
+    radial-gradient(120% 90% at 50% -10%, #17110a 0%, var(--lv2-bg-deep) 60%) fixed,
+    var(--lv2-bg-deep);
+  color: var(--lv2-text);
+  font-family: var(--lv2-sans);
+}
+body.portal-page .portal-main { color: var(--lv2-text); }
+body.portal-page .mono { font-family: var(--lv2-mono); }
+
+/* Card / panel */
+body.portal-page .portal-card {
+  background: var(--lv2-panel);
+  border: 1px solid var(--lv2-edge);
+  border-radius: 14px;
+  box-shadow: 0 1px 0 rgba(255,210,140,.06) inset, 0 18px 50px rgba(0,0,0,.6);
+  color: var(--lv2-text);
+}
+body.portal-page .portal-card__title {
+  font-family: var(--lv2-disp);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--lv2-text);
+}
+body.portal-page .portal-card__subtitle { color: var(--lv2-muted); }
+
+/* Labels + hints */
+body.portal-page .portal-label {
+  font-family: var(--lv2-mono);
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-size: 11px;
+  color: var(--lv2-amber-bright);
+}
+body.portal-page .portal-field__hint { color: var(--lv2-muted); }
+body.portal-page .portal-field__hint strong { color: var(--lv2-text); }
+body.portal-page .portal-field__hint--error { color: var(--lv2-red); }
+
+/* Inputs + the new quiz dropdown */
+body.portal-page .portal-input,
+body.portal-page .portal-quiz__select {
+  background: var(--lv2-metal-0);
+  border: 1px solid var(--lv2-edge);
+  border-radius: 3px;
+  color: var(--lv2-text);
+  font-family: var(--lv2-sans);
+}
+body.portal-page .portal-input:focus,
+body.portal-page .portal-quiz__select:focus {
+  outline: none;
+  border-color: var(--lv2-amber);
+  box-shadow: 0 0 0 3px var(--lv2-amber-glow);
+}
+body.portal-page .portal-quiz__select { cursor: pointer; }
+body.portal-page .portal-input::placeholder { color: color-mix(in srgb, var(--lv2-muted) 70%, transparent); }
+
+/* Buttons */
+body.portal-page .portal-btn {
+  font-family: var(--lv2-mono);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  border-radius: 3px;
+}
+body.portal-page .portal-btn--primary {
+  background: var(--lv2-amber);
+  color: var(--lv2-bg-deep);
+  border: 1px solid var(--lv2-amber);
+}
+body.portal-page .portal-btn--primary:hover { filter: brightness(1.08); }
+body.portal-page .portal-btn--ghost {
+  background: var(--lv2-metal-1);
+  color: var(--lv2-text);
+  border: 1px solid var(--lv2-edge);
+}
+body.portal-page .portal-btn--ghost:hover { border-color: var(--lv2-amber); }
+
+/* Character result list */
+body.portal-page .portal-char-list__item {
+  background: var(--lv2-metal-0);
+  border: 1px solid var(--lv2-edge);
+  border-radius: 3px;
+  transition: border-color 150ms cubic-bezier(.2,.7,.3,1), transform 150ms cubic-bezier(.2,.7,.3,1);
+}
+body.portal-page .portal-char-list__item:hover { border-color: var(--lv2-edge-hi); transform: translateY(-2px); }
+body.portal-page .portal-char-list__name { color: var(--lv2-text); font-weight: 600; }
+body.portal-page .portal-char-list__meta { color: var(--lv2-muted); }
+
+/* Quiz question blocks. portal.css gives these `padding: space-5 0` (no horizontal
+ * padding); once we turn them into bordered boxes a full-width control runs edge to
+ * edge and its border spills onto the box border. Add horizontal padding so text +
+ * dropdown inset uniformly (also shrinks the dropdown a touch). */
+body.portal-page .portal-quiz__question-block {
+  background: var(--lv2-metal-0);
+  border: 1px solid var(--lv2-edge);
+  border-radius: 8px;
+  padding: var(--space-5);
+}
+body.portal-page .portal-quiz__select {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+}
+body.portal-page .portal-quiz__progress {
+  font-family: var(--lv2-mono);
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--lv2-amber-bright);
+}
+body.portal-page .portal-quiz__question { color: var(--lv2-text); font-family: var(--lv2-disp); letter-spacing: .02em; }
+
+/* Messages + errors */
+body.portal-page .portal-msg--warning { color: var(--lv2-amber-bright); border-color: color-mix(in srgb, var(--lv2-amber) 45%, transparent); }
+body.portal-page .portal-msg--error { color: var(--lv2-red); border-color: color-mix(in srgb, var(--lv2-red) 45%, transparent); }
+body.portal-page .portal-error__title { color: var(--lv2-text); font-family: var(--lv2-disp); text-transform: uppercase; }
+body.portal-page .portal-error__body { color: var(--lv2-muted); }
+body.portal-page .portal-error__icon { color: var(--lv2-amber-bright); }
+
+/* Footer */
+body.portal-page .portal-footer, body.portal-page .portal-footer a { color: var(--lv2-muted); }
+body.portal-page .portal-footer a { color: var(--lv2-amber-bright); }

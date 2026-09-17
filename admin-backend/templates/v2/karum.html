@@ -1,0 +1,234 @@
+{% extends "v2/base.html" %}
+{% block title %}Karum{% endblock %}
+{% block extra_css %}
+<style>
+  .kr-wrap { margin-top: 16px; display: flex; flex-direction: column; gap: 16px; }
+  .kr-card { background: var(--v2-panel, #14171c); border: 1px solid var(--v2-border, #262b33);
+             border-radius: 10px; padding: 16px 18px; }
+  .kr-card h2 { margin: 0 0 4px; font-size: 15px; letter-spacing: .02em; }
+  .kr-card p.kr-sub { margin: 0 0 14px; font-size: 12.5px; opacity: .65; line-height: 1.5; }
+  .kr-note { margin: 0 0 12px; font-size: 12.5px; line-height: 1.55; padding: 10px 12px;
+             border-radius: 8px; border: 1px solid #3a3320; background: #1c1a12; color: #d8cfae; }
+  .kr-note strong { color: #f0e6c0; }
+
+  table.kr-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .kr-tbl th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+               opacity: .55; padding: 6px 8px; border-bottom: 1px solid #262b33; white-space: nowrap; }
+  .kr-tbl td { padding: 8px; border-bottom: 1px solid #1b2028; vertical-align: middle; }
+  .kr-tbl tr:last-child td { border-bottom: none; }
+  .kr-num { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .kr-muted { opacity: .6; font-size: 12px; }
+
+  .kr-badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px;
+              border: 1px solid #2b313b; background: #0e1116; white-space: nowrap; }
+  /* The two transient states and the one that can need a human read differently. */
+  .kr-badge--selling, .kr-badge--reconciling, .kr-badge--returning {
+    border-color: #6a5a20; background: #221d0e; color: #e0cf8a; }
+  .kr-badge--paid_undelivered { border-color: #7a3b2a; background: #251310; color: #f0b39c; }
+  .kr-badge--pending { border-color: #2b4a5c; background: #0e1a22; color: #9fd0e6; }
+  .kr-badge--active { border-color: #245034; background: #14241a; color: #93dcab; }
+
+  .kr-btn { font-size: 12px; padding: 5px 10px; border-radius: 7px; cursor: pointer;
+            border: 1px solid #2b313b; background: #1a2230; color: #e7ebf0; }
+  .kr-btn:hover:not(:disabled) { border-color: #4a5568; }
+  .kr-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .kr-btn--go { border-color: #245034; background: #14241a; color: #93dcab; }
+  .kr-btn--warn { border-color: #6a5a20; background: #221d0e; color: #e0cf8a; }
+  .kr-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  .kr-out { margin: 12px 0 0; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap;
+            font-family: ui-monospace, monospace; background: #0e1116; border: 1px solid #2b313b;
+            border-radius: 8px; padding: 10px 12px; max-height: 22rem; overflow: auto; }
+  .kr-out--page { border-color: #7a3b2a; background: #1a1210; }
+  .kr-out--clean { border-color: #245034; background: #101a13; }
+  .kr-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .kr-empty { font-size: 13px; opacity: .6; padding: 10px 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="kr-wrap">
+
+  <div class="kr-card">
+    <h2>Stuck trades</h2>
+    <p class="kr-sub">
+      Every Karum listing that is not in a terminal state, worst first. <code>selling</code> and
+      <code>reconciling</code> are transient and resolve themselves; one sitting there for hours is
+      a bug. <code>paid_undelivered</code> is the only state that can need a human, and it never
+      means money was lost.
+    </p>
+
+    <p class="kr-note">
+      <strong>Every button here goes through the same writer the portal uses.</strong> Nothing on
+      this page touches the database directly, and every leg is idempotent on its original
+      correlation id, so pressing twice is safe and pressing after something already succeeded is a
+      no-op replay. <strong>Never resolve one of these with hand-written SQL</strong>: that
+      is the exact thing this page exists to make unnecessary.
+      <br><br>
+      <strong>Refund is deliberately separate from force-return.</strong> They are not always both
+      correct: a return with no refund is right when the buyer never paid, and a refund with no
+      return is right when the goods already reached them.
+    </p>
+
+    {% if listings %}
+    <table class="kr-tbl">
+      <thead>
+        <tr>
+          <th>#</th><th>Item</th><th>Seller</th><th>Price</th><th>State</th><th>In state</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in listings %}
+        <tr data-listing="{{ l.listing_id }}">
+          <td class="kr-num">{{ l.listing_id }}</td>
+          <td>
+            {{ l.display_name or l.template_id }}
+            <span class="kr-muted">&times;{{ l.stack_size }}{% if l.quality_level %} &middot; T{{ l.quality_level }}{% endif %}</span>
+          </td>
+          <td>{{ l.seller_name }}</td>
+          <td class="kr-num">{{ '{:,}'.format(l.price) }}</td>
+          <td><span class="kr-badge kr-badge--{{ l.status }}">{{ l.status }}</span></td>
+          <td class="kr-num">{{ l.hours_in_state if l.hours_in_state is not none else '?' }}h</td>
+          <td>
+            <div class="kr-actions">
+              <button class="kr-btn kr-btn--go" data-act="force-deliver" data-id="{{ l.listing_id }}"
+                      {% if not l.buyer_account_id %}disabled title="no buyer on this listing"{% endif %}>
+                Force deliver
+              </button>
+              <button class="kr-btn kr-btn--warn" data-act="force-return" data-id="{{ l.listing_id }}">
+                Force return
+              </button>
+              <button class="kr-btn" data-act="refund" data-id="{{ l.listing_id }}"
+                      {% if not l.sold_corr_id %}disabled title="no recorded payment to refund"{% endif %}>
+                Refund buyer
+              </button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="kr-empty">Nothing stuck. Every listing is either live or finished.</p>
+    {% endif %}
+
+    <div id="kr-force-out"></div>
+  </div>
+
+  <div class="kr-card">
+    <h2>Escrow audit</h2>
+    <p class="kr-sub">
+      Read-only, and safe to run at any time including under a change freeze. It runs nightly from
+      <web-host>; this button runs it now. It is the canary for an offline-gate regression, which
+      is a failure that produces no error of its own, so the only way to see it is to look.
+      It never repairs anything.
+    </p>
+    <div class="kr-row">
+      <button class="kr-btn kr-btn--go" id="kr-audit-run">Run the audit</button>
+      <span class="kr-muted" id="kr-audit-hint">nightly at 03:40 UTC</span>
+    </div>
+    <div id="kr-audit-out"></div>
+  </div>
+
+</div>
+
+{# Inline, matching the other v2 admin pages: the admin CSP allows 'unsafe-inline' for
+   script (the PORTAL CSP does not, which is why the player app never does this), and a
+   separate file under /admin/static would need its own ?v= cache-bust key since that mount
+   ships no Cache-Control.
+
+   Both calls go through base.html's apiCall: it is the only caller that carries the
+   X-CSRF-Token header, and it writes the /admin prefix into the URL. The prefix is the
+   half of the routing trap the router decorator does not cover: the app registers routes
+   WITHOUT it because the proxy strips it, so the BROWSER must send it. A bare
+   /api/dune/... from this page never reaches the app at all. #}
+<script>
+(function () {
+  const forceOut = document.getElementById('kr-force-out');
+  const auditOut = document.getElementById('kr-audit-out');
+
+  function show(el, text, kind) {
+    el.innerHTML = '';
+    const pre = document.createElement('div');
+    pre.className = 'kr-out' + (kind ? ' kr-out--' + kind : '');
+    pre.textContent = text;
+    el.appendChild(pre);
+  }
+
+  // ---- the three operator actions ------------------------------------------
+  // A reason is required, not decoration: this is the dispute trail for a trade involving
+  // another player's money, and "who pressed it and why" is the whole value of the log six
+  // weeks later. The confirm text names the consequence rather than asking "are you sure",
+  // because "are you sure" is a question nobody reads.
+  const CONFIRM = {
+    'force-deliver': 'Hand the escrowed item to the BUYER. Safe to repeat: it replays if the ' +
+                     'delivery already landed.',
+    'force-return':  'Hand the escrowed item back to the SELLER. This does NOT refund the ' +
+                     'buyer; that is a separate button, on purpose.',
+    'refund':        'Refund the buyer as a NEW payments row. This does NOT move the goods.',
+  };
+
+  document.querySelectorAll('button[data-act]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const action = btn.dataset.act;
+      const listingId = Number(btn.dataset.id);
+      if (!window.confirm(CONFIRM[action] + '\n\nListing ' + listingId + '. Continue?')) return;
+      const reason = window.prompt('Why? (recorded against this listing, min 4 characters)');
+      if (reason === null) return;
+      if (reason.trim().length < 4) {
+        show(forceOut, 'A reason of at least 4 characters is required. Nothing was done.', 'page');
+        return;
+      }
+
+      const all = document.querySelectorAll('button[data-act]');
+      all.forEach((b) => { b.disabled = true; });
+      show(forceOut, 'Working on listing ' + listingId + '...');
+      try {
+        if (!window.csrfToken) { await fetchCsrf(); }
+        const data = await apiCall('POST', '/admin/api/dune/v2/karum/force',
+                                   { listing_id: listingId, action: action,
+                                     reason: reason.trim() });
+        if (data && data.ok) {
+          show(forceOut, data.message + '\n\nWriter said: ' + (data.status || '?') +
+                         '. Reload to refresh the table.', 'clean');
+        } else {
+          show(forceOut, (data && (data.message || data.detail)) ||
+                         'The writer answered without a result. Treat this as NOT done.',
+               'page');
+        }
+      } catch (e) {
+        show(forceOut, 'The request did not complete: ' + ((e && e.message) || e) +
+                       '\nNothing partial was left behind; every leg is idempotent, so it is ' +
+                       'safe to press again.', 'page');
+      } finally {
+        all.forEach((b) => { if (!b.hasAttribute('title')) b.disabled = false; });
+      }
+    });
+  });
+
+  // ---- the audit -----------------------------------------------------------
+  const runBtn = document.getElementById('kr-audit-run');
+  if (runBtn) {
+    runBtn.addEventListener('click', async () => {
+      runBtn.disabled = true;
+      show(auditOut, 'Reading escrow against reality...');
+      try {
+        const data = await apiCall('GET', '/admin/api/dune/v2/karum/audit');
+        if (!data) { show(auditOut, 'The audit returned nothing usable. This is NOT a clean ' +
+                                    'result.', 'page'); return; }
+        // 🔴 `page` is authoritative and covers the case the operator most needs to not
+        // misread: an audit that could not RUN is not an audit that came back clean.
+        const body = data.summary || data.message || JSON.stringify(data, null, 2);
+        show(auditOut, body, data.page ? 'page' : (data.ok ? 'clean' : 'page'));
+      } catch (e) {
+        show(auditOut, 'Could not reach the audit: ' + ((e && e.message) || e) +
+                       '\nThis is NOT a clean result.', 'page');
+      } finally {
+        runBtn.disabled = false;
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,116 @@
+{# Order 0 / Data Portability — "Export" subtab fragment.
+   Two cards: Character Export (one-click, snapshot is 1:1 per account) +
+   Solido Blueprint Export (lists every BuildingBlueprint_CopyDevice the
+   player owns, one Download button per row). #}
+{% set payload = export if export is defined else {} %}
+{% set rows = payload.blueprints if payload.blueprints is defined else [] %}
+{% set count = payload.count if payload.count is defined else (rows|length) %}
+{% set available = payload.available if payload.available is defined else False %}
+
+<div class="v2-player-export">
+
+  {# ── Character Export card (always rendered; no list step) ── #}
+  <section class="card v2-player-export__card v2-player-export__card--character">
+    <header class="card__header">
+      <h2 class="card__title">Export Character</h2>
+      <p class="card__subtitle">
+        Full Last Sietch-internal snapshot — FLevelComponent + FactionPlayerComponent
+        + tags + specialization tracks + actor properties. JSON, Last Sietch-only schema
+        (not Solido-compatible).
+      </p>
+    </header>
+    <div class="card__body">
+      {# Explicit download="..." filename so Brave/Chrome don't fall back to
+         the URL basename when Content-Disposition is also present. Server
+         still re-asserts via C-D for direct-URL hits + curl. #}
+      <a href="/admin/v2/dune/player/{{ account_id }}/export-character"
+         class="btn btn-primary"
+         download="account-{{ account_id }}.character.json">
+        Download character.json
+      </a>
+    </div>
+  </section>
+
+  {# ── Solido Blueprint Export list ── #}
+  <section class="card v2-player-export__card v2-player-export__card--blueprints">
+    <header class="card__header">
+      <h2 class="card__title">Export Solido Blueprint</h2>
+      <p class="card__subtitle">
+        One row per <code>BuildingBlueprint_CopyDevice</code> in this player's
+        backpack or bank. Output is Solido-market JSON (verbatim
+        <a href="https://github.com/icehunter/dune-admin" target="_blank" rel="noopener">icehunter</a>
+        schema, MIT-attributed).
+      </p>
+    </header>
+    <div class="card__body">
+      {% if not available %}
+        <div class="empty-state empty-state--loading-failed">
+          <p class="empty-state__headline">Blueprint list unavailable</p>
+          <p class="empty-state__body">The relay couldn't reach the game-side blueprint helper.</p>
+          <div class="empty-state__actions">
+            <button type="button" class="btn btn-sm"
+                    hx-get="/admin/api/dune/v2/player/{{ account_id }}/_export"
+                    hx-target="#player-subtab-body"
+                    hx-swap="innerHTML"
+                    hx-indicator="#v2-player-subtab-loading">Retry</button>
+          </div>
+        </div>
+      {% elif rows %}
+        <p class="v2-player-export__count">
+          {{ count }} blueprint device{{ '' if count == 1 else 's' }}
+        </p>
+        <div style="overflow-x: auto;">
+          <table class="table table--compact v2-player-export__table">
+            <thead>
+              <tr>
+                <th>BP ID</th>
+                <th>Name</th>
+                <th>Location</th>
+                <th>Pieces</th>
+                <th class="v2-player-export__action-col" aria-label="Download"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for bp in rows %}
+                <tr>
+                  <td>{{ bp.bp_id }}</td>
+                  <td>{{ bp.name or ('Blueprint #' ~ bp.bp_id) }}</td>
+                  <td>
+                    <span class="badge badge--{{ bp.inventory_location or 'other' }}">
+                      {{ bp.inventory_location or '—' }}
+                    </span>
+                  </td>
+                  <td>
+                    {{ bp.piece_count or 0 }}
+                    <span class="v2-player-export__piece-breakdown">
+                      ({{ bp.instance_count or 0 }}i / {{ bp.placeable_count or 0 }}p
+                      {%- if bp.pentashield_count %} / {{ bp.pentashield_count }}s{% endif -%})
+                    </span>
+                  </td>
+                  <td>
+                    {# Explicit download filename: the in-game BuildingBlueprintName
+                       (Funcom default "New Build") + .json. Browsers honor this over
+                       URL basename; server's Content-Disposition still matches for
+                       direct-URL/curl users. #}
+                    <a href="/admin/v2/dune/player/{{ account_id }}/export-blueprint/{{ bp.bp_id }}"
+                       class="btn btn-sm"
+                       download="{{ (bp.name or ('blueprint-' ~ bp.bp_id)) ~ '.json' }}">Download</a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty-state empty-state--zero-results">
+          <p class="empty-state__headline">No blueprints crafted</p>
+          <p class="empty-state__body">
+            Account #{{ account_id }} owns zero <code>BuildingBlueprint_CopyDevice</code>
+            items. Craft one in-game first to populate this list.
+          </p>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+</div>

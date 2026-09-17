@@ -1,0 +1,23 @@
+{
+  "name": "ls-portal-nextgen",
+  "private": true,
+  "version": "2.21.1",
+  "type": "module",
+  "description": "Last Sietch Companion V2 (next-gen): SvelteKit + Vite PWA consuming the FastAPI JSON API. Builds a static artifact served by FastAPI at the root of portal.lastsietch.com.",
+  "scripts": {
+    "dev": "vite dev",
+    "dev:wsl": "CHOKIDAR_USEPOLLING=1 CHOKIDAR_INTERVAL=700 vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "preview:review": "LASTSIETCH_PREVIEW=1 vite dev --host 127.0.0.1 --port 4173 --strictPort",
+    "smoke": "node scripts/smoke-map.mjs"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.6",
+    "@sveltejs/kit": "^2.8.0",
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "svelte": "^5.2.0",
+    "three": "0.160.1",
+    "vite": "^6.0.0"
+  }
+}

@@ -1,0 +1,109 @@
+{# Catalog sub-tab — 71-field da-tweakables schema browse.
+
+   Source: admin-backend/data/cvars-schema.json (coder-helpers' KDL→JSON
+   converter output). Grouped into 11 collapsible category cards.
+#}
+{% set categories = catalog.categories if catalog.categories is defined else [] %}
+{% set field_count = catalog.kdl_field_count if catalog.kdl_field_count is defined else (categories|sum(attribute='fields', start=[])|length) %}
+
+<div class="v2-cvars-catalog">
+
+  {% if not catalog_available %}
+    <div class="empty-state empty-state--loading-failed">
+      <p class="empty-state__headline">Catalog unavailable</p>
+      <p class="empty-state__body">
+        <code>data/cvars-schema.json</code> not yet committed. Run the
+        <code>scripts/convert-cvars-schema.sh</code> KDL→JSON converter
+        (coder-helpers task #5) and re-deploy.
+      </p>
+    </div>
+  {% elif not categories %}
+    <div class="empty-state">
+      <p class="empty-state__headline">Catalog is empty</p>
+      <p class="empty-state__body">Schema parsed to zero categories — converter likely needs re-run.</p>
+    </div>
+  {% else %}
+
+    <div class="v2-cvars-catalog__meta">
+      <span>{{ field_count }} fields across {{ categories|length }} categories</span>
+      <label class="v2-cvars-catalog__filter">
+        Filter:
+        <input type="search" id="cvars-catalog-search" autocomplete="off"
+               placeholder="key, label, or category…" maxlength="64">
+      </label>
+    </div>
+
+    {% for cat in categories %}
+      {% set fields = cat.fields or [] %}
+      <details class="card v2-cvars-catalog__category" data-category="{{ cat.id or cat.label }}">
+        <summary class="card__header v2-cvars-catalog__category-summary">
+          <h2 class="card__title">{{ cat.label }}</h2>
+          <span class="v2-cvars-catalog__category-count">
+            {{ fields|length }} field{{ '' if fields|length == 1 else 's' }}
+            {% if cat.override_count %}<span class="badge badge--muted">{{ cat.override_count }} override{{ '' if cat.override_count == 1 else 's' }}</span>{% endif %}
+            {% if cat.drift_count %}<span class="badge badge--warning">{{ cat.drift_count }} drift{{ '' if cat.drift_count == 1 else 's' }}</span>{% endif %}
+          </span>
+        </summary>
+        <div class="card__body">
+          <table class="v2-cvars-catalog__table">
+            <thead>
+              <tr>
+                <th scope="col">Key</th>
+                <th scope="col">Label</th>
+                <th scope="col">Type</th>
+                <th scope="col">Default</th>
+                <th scope="col">Min / Max</th>
+                <th scope="col">Effective</th>
+                <th scope="col">Notes</th>
+                <th scope="col" class="v2-cvars-catalog__col-action">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for f in fields %}
+                <tr class="v2-cvars-catalog__row"
+                    data-key="{{ f.key }}"
+                    data-label="{{ f.label }}">
+                  <td class="v2-cvars-catalog__key"><code>{{ f.key }}</code></td>
+                  <td class="v2-cvars-catalog__label">{{ f.label or '—' }}</td>
+                  <td class="v2-cvars-catalog__type">{{ f.type or '—' }}</td>
+                  <td class="v2-cvars-catalog__default"><code>{{ f.default if f.default is not none else '—' }}</code></td>
+                  <td class="v2-cvars-catalog__range">
+                    {% if f.min is not none or f.max is not none %}
+                      {{ f.min if f.min is not none else '−∞' }} / {{ f.max if f.max is not none else '+∞' }}
+                    {% else %}—{% endif %}
+                  </td>
+                  <td class="v2-cvars-catalog__effective"><code>{{ f.effective_value if f.effective_value is not none else '—' }}</code></td>
+                  <td class="v2-cvars-catalog__notes">
+                    {% if f.high_impact %}<span class="badge badge--danger" title="High player impact (Discord intel A1)">high-impact</span>{% endif %}
+                    {% if f.no_op %}<span class="badge badge--muted" title="Confirmed no-op as of GA 2026-05-25 (Discord intel A18)">no-op</span>{% endif %}
+                    {% if f.notes %}<span class="v2-cvars-catalog__note-text">{{ f.notes }}</span>
+                    {% elif f.desc %}<span class="v2-cvars-catalog__note-text">{{ f.desc }}</span>{% endif %}
+                    {% if f.confirmed == false %}<span class="badge badge--muted" title="Unconfirmed in da-tweakables schema">unconfirmed</span>{% endif %}
+                  </td>
+                  <td class="v2-cvars-catalog__action">
+                    {% if f.per_map %}
+                      <button type="button" class="btn btn-sm" disabled aria-disabled="true"
+                              title="Per-map — deferred to slice 2">Per-map</button>
+                    {% else %}
+                      <button type="button" class="btn btn-sm cvars-edit-trigger"
+                              data-cvar-section="{{ f.section }}"
+                              data-cvar-key="{{ f.key }}"
+                              data-cvar-old="{{ f.effective_value if f.effective_value is not none else '' }}"
+                              data-cvar-layer="{{ f.source_layer or '' }}"
+                              data-cvar-category="{{ cat.id or cat.label }}"
+                              data-cvar-type="{{ f.type or '' }}"
+                              data-cvar-min="{{ f.min if f.min is not none else '' }}"
+                              data-cvar-max="{{ f.max if f.max is not none else '' }}">Edit</button>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    {% endfor %}
+
+  {% endif %}
+
+</div>

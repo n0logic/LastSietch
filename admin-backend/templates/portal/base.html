@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="night">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0c0a07">
+<title>{% block title %}Last Sietch Dune Portal{% endblock %}</title>
+<link rel="icon" type="image/png" href="/assets/favicon.png">
+{# PWA: installable on phones (manifest + apple touch icon). The service worker
+   is registered from portal.js (CSP blocks inline scripts). #}
+<link rel="manifest" href="/portal/manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Last Sietch">
+<link rel="apple-touch-icon" href="/assets/icon.png">
+{# No-FOUC theme bootstrap: apply the saved theme before first paint.
+   EXTERNAL synchronous script — the portal CSP (script-src 'self') blocks
+   inline scripts, so this must never be inlined here. #}
+<script src="/admin/static/js/theme-boot.js?v=20260612a"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="/admin/static/css/design-system.css?v=20260612a">
+<link rel="stylesheet" href="/admin/static/css/portal/portal.css?v=20260630a">
+{% block extra_head %}{% endblock %}
+<script src="/admin/static/js/time-local.js?v=20260610e" defer></script>
+<script src="/admin/static/js/portal.js?v=20260615c" defer></script>
+<script src="/admin/static/js/portal-cinematic.js?v=20260611a" defer></script>
+</head>
+<body class="portal-page{% if not portal_session %} portal-page--unauth{% endif %}">
+
+<a href="#portal-main" class="portal-skip">Skip to content</a>
+
+{% set active_nav = active_nav | default('') %}
+
+{% if portal_session %}
+{# ---- Desktop left rail / mobile top bar share the same nav source ---- #}
+<aside class="portal-rail" role="navigation" aria-label="Primary">
+  <a href="/portal/account" class="portal-rail__brand" aria-label="Last Sietch Dune Portal home">
+    <img src="/assets/icon.png" alt="" class="portal-rail__brand-mark" aria-hidden="true">
+    <span class="portal-rail__brand-text">Last&nbsp;Sietch</span>
+  </a>
+
+  <nav class="portal-rail__nav">
+    {% set nav_items = [
+      ('character', '/portal/account',    'Character', true),
+      ('storage',   '/portal/storage',    'Storage',   true),
+      ('market',    '/portal/market',     'Exchange',  true),
+      ('orders',    '/portal/my-orders',  'My Orders', true),
+      ('landsraad', '/portal/landsraad',  'Landsraad', true),
+      ('guilds',    '/portal/guilds',     'Guilds',    true),
+      ('maps',      '/portal/maps',       'Maps',      true),
+      ('solido',    '/portal/solido',     'Blueprints', true),
+      ('mybases',   '/portal/my-bases',   'My Bases',  true),
+      ('server',    '/portal/server',     'Server',    true)
+    ] %}
+    {% for key, href, label, ready in nav_items %}
+      {% if ready %}
+      <a href="{{ href }}" class="portal-navlink{% if active_nav == key %} is-active{% endif %}"
+         {% if active_nav == key %}aria-current="page"{% endif %}>
+        <span class="portal-navlink__icon" aria-hidden="true">{% include "portal/_icons/" ~ key ~ ".svg" ignore missing %}</span>
+        <span class="portal-navlink__label">{{ label }}</span>
+        {% if key == 'market' and (portal_alert_count | default(0)) > 0 %}<span class="portal-navlink__badge" aria-label="{{ portal_alert_count }} new price alerts">{{ portal_alert_count }}</span>{% endif %}
+      </a>
+      {% else %}
+      <span class="portal-navlink portal-navlink--soon" aria-disabled="true" title="Coming soon">
+        <span class="portal-navlink__icon" aria-hidden="true">{% include "portal/_icons/" ~ key ~ ".svg" ignore missing %}</span>
+        <span class="portal-navlink__label">{{ label }}</span>
+        <span class="portal-navlink__soon">soon</span>
+      </span>
+      {% endif %}
+    {% endfor %}
+  </nav>
+
+  <div class="portal-rail__foot">
+    {# V1 -> V2 discovery. The href stays /portal/v2: on portal.lastsietch.com the
+       host middleware turns it into /, and on the legacy host it is still the
+       address the SPA answers on. #}
+    <a href="/portal/v2" class="portal-btn portal-btn--ghost portal-btn--sm portal-rail__tryv2"
+       aria-label="Open the new portal">Open the new portal &rarr;</a>
+
+    <div class="portal-themepicker" data-portal-theme-picker>
+      <button type="button" class="portal-themepicker__btn" data-portal-theme-current
+              aria-haspopup="listbox" aria-expanded="false" aria-label="Choose portal theme">
+        <span class="portal-themepicker__swatch portal-themepicker__swatch--night" aria-hidden="true"></span>
+        <span class="portal-themepicker__label" data-portal-theme-label>Night</span>
+        <svg class="portal-themepicker__chevron" aria-hidden="true" viewBox="0 0 10 6" width="10" height="6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg>
+      </button>
+      <ul class="portal-themepicker__menu" role="listbox" aria-label="Choose theme" hidden>
+        <li class="portal-themepicker__opt" role="option" data-theme-value="night" aria-selected="true">
+          <span class="portal-themepicker__swatch portal-themepicker__swatch--night" aria-hidden="true"></span>Night
+        </li>
+        <li class="portal-themepicker__opt" role="option" data-theme-value="day" aria-selected="false">
+          <span class="portal-themepicker__swatch portal-themepicker__swatch--day" aria-hidden="true"></span>Day
+        </li>
+        <li class="portal-themepicker__opt" role="option" data-theme-value="atreides" aria-selected="false">
+          <span class="portal-themepicker__swatch portal-themepicker__swatch--atreides" aria-hidden="true"></span>House Atreides
+        </li>
+        <li class="portal-themepicker__opt" role="option" data-theme-value="harkonnen" aria-selected="false">
+          <span class="portal-themepicker__swatch portal-themepicker__swatch--harkonnen" aria-hidden="true"></span>House Harkonnen
+        </li>
+      </ul>
+    </div>
+
+    <div class="portal-navlink portal-navlink--account" title="Signed in as {{ portal_session.discord_handle }}">
+      <span class="portal-navlink__icon" aria-hidden="true">{% include "portal/_icons/account.svg" ignore missing %}</span>
+      <span class="portal-navlink__label">{{ portal_session.discord_handle }}</span>
+    </div>
+
+    {% if logout_post_url %}
+    <form method="post" action="{{ logout_post_url }}" class="portal-rail__logout" data-portal-csrf-form>
+      <input type="hidden" name="csrf_token" value="{{ portal_csrf_token | default('', true) }}">
+      <button type="submit" class="portal-btn portal-btn--ghost portal-btn--sm portal-rail__logout-btn" data-portal-action="logout">Sign out</button>
+    </form>
+    {% endif %}
+  </div>
+</aside>
+
+{# ---- Mobile top bar (brand + theme toggle); nav lives in the bottom tab bar ---- #}
+<header class="portal-topbar" role="banner">
+  <a href="/portal/account" class="portal-topbar__brand" aria-label="Last Sietch Dune Portal home">
+    <img src="/assets/icon.png" alt="" class="portal-topbar__brand-mark" aria-hidden="true">
+    <span>Last Sietch</span>
+  </a>
+  <div class="portal-themepicker portal-themepicker--bare" data-portal-theme-picker>
+    <button type="button" class="portal-themepicker__btn" data-portal-theme-current
+            aria-haspopup="listbox" aria-expanded="false" aria-label="Choose portal theme">
+      <span class="portal-themepicker__swatch portal-themepicker__swatch--night" aria-hidden="true"></span>
+    </button>
+    <ul class="portal-themepicker__menu portal-themepicker__menu--down" role="listbox" aria-label="Choose theme" hidden>
+      <li class="portal-themepicker__opt" role="option" data-theme-value="night" aria-selected="true">
+        <span class="portal-themepicker__swatch portal-themepicker__swatch--night" aria-hidden="true"></span>Night
+      </li>
+      <li class="portal-themepicker__opt" role="option" data-theme-value="day" aria-selected="false">
+        <span class="portal-themepicker__swatch portal-themepicker__swatch--day" aria-hidden="true"></span>Day
+      </li>
+      <li class="portal-themepicker__opt" role="option" data-theme-value="atreides" aria-selected="false">
+        <span class="portal-themepicker__swatch portal-themepicker__swatch--atreides" aria-hidden="true"></span>House Atreides
+      </li>
+      <li class="portal-themepicker__opt" role="option" data-theme-value="harkonnen" aria-selected="false">
+        <span class="portal-themepicker__swatch portal-themepicker__swatch--harkonnen" aria-hidden="true"></span>House Harkonnen
+      </li>
+    </ul>
+  </div>
+</header>
+
+{# Faction opt-in band: JS populates + shows when the player is House-aligned
+   and hasn't dismissed it. Stays hidden (display:none) until JS decides. #}
+<div class="portal-houseband" id="portal-houseband" hidden>
+  <span class="portal-houseband__crest" id="portal-houseband-crest" aria-hidden="true"></span>
+  <span class="portal-houseband__msg">Wear your <strong id="portal-houseband-name">House</strong> colors?</span>
+  <button type="button" class="portal-houseband__accept" id="portal-houseband-accept">Apply theme</button>
+  <button type="button" class="portal-houseband__dismiss" id="portal-houseband-dismiss" aria-label="Dismiss">✕</button>
+</div>
+{% endif %}
+
+<div class="portal-shell{% if not portal_session %} portal-shell--unauth{% endif %}">
+  <main class="portal-main" id="portal-main" role="main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="portal-footer" role="contentinfo">
+    <p>
+      Last Sietch · Dune: Awakening community server ·
+      <a href="{{ discord_invite_url | default('https://discord.gg/your-invite', true) }}" rel="noopener">Discord</a> ·
+      <a href="https://ko-fi.com/lastsietch" rel="noopener" target="_blank">Tip Jar</a>
+    </p>
+  </footer>
+</div>
+
+{% if portal_session %}
+{# ---- Mobile bottom tab bar: 4 primary destinations + a More sheet for the
+       rest (7 tabs don't fit a phone; More is the standard overflow). ---- #}
+{% set more_keys = ['orders', 'landsraad', 'guilds', 'solido', 'mybases', 'server'] %}
+<nav class="portal-tabbar" role="navigation" aria-label="Primary">
+  {% set tab_items = [
+    ('character', '/portal/account',    'Character'),
+    ('storage',   '/portal/storage',    'Storage'),
+    ('market',    '/portal/market',     'Exchange'),
+    ('maps',      '/portal/maps',       'Maps')
+  ] %}
+  {% for key, href, label in tab_items %}
+  <a href="{{ href }}" class="portal-tab{% if active_nav == key %} is-active{% endif %}"
+     {% if active_nav == key %}aria-current="page"{% endif %}>
+    <span class="portal-tab__icon" aria-hidden="true">{% include "portal/_icons/" ~ key ~ ".svg" ignore missing %}{% if key == 'market' and (portal_alert_count | default(0)) > 0 %}<span class="portal-tab__badge" aria-hidden="true"></span>{% endif %}</span>
+    <span class="portal-tab__label">{{ label }}</span>
+  </a>
+  {% endfor %}
+  <button type="button" class="portal-tab portal-tab--more{% if active_nav in more_keys %} is-active{% endif %}"
+          data-portal-more aria-expanded="false" aria-controls="portal-more-sheet" aria-haspopup="menu">
+    <span class="portal-tab__icon" aria-hidden="true">{% include "portal/_icons/more.svg" ignore missing %}</span>
+    <span class="portal-tab__label">More</span>
+  </button>
+</nav>
+<div class="portal-moresheet" id="portal-more-sheet" hidden>
+  {% set more_items = [
+    ('orders',    '/portal/my-orders',  'My Orders'),
+    ('landsraad', '/portal/landsraad',  'Landsraad'),
+    ('guilds',    '/portal/guilds',     'Guilds'),
+    ('solido',    '/portal/solido',     'Blueprints'),
+    ('mybases',   '/portal/my-bases',   'My Bases'),
+    ('server',    '/portal/server',     'Server')
+  ] %}
+  {% for key, href, label in more_items %}
+  <a href="{{ href }}" class="portal-moresheet__link{% if active_nav == key %} is-active{% endif %}"
+     {% if active_nav == key %}aria-current="page"{% endif %}>
+    <span class="portal-tab__icon" aria-hidden="true">{% include "portal/_icons/" ~ key ~ ".svg" ignore missing %}</span>
+    <span>{{ label }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% block scripts %}{% endblock %}
+
+</body>
+</html>

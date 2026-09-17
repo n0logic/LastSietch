@@ -1,0 +1,209 @@
+{# Server — GET /portal/server  (PUBLIC · ANONYMOUS · READ-ONLY)
+   Aggregate server-wide live state. No login, no per-player data, no controls.
+   Context (routers/portal.py portal_server -> _load_server_overview):
+     status: {available, up, online_players, maps[]{name,players,up}, instances}
+     build:  {available, build_label, settings_updated_utc}
+     world:  {available, window, subfiefs, structures, vehicles, peak, play_hours}
+     board:  faction-blind shaped Landsraad board (None on failure)
+     events: {available, events[]{title,body,kind}, next_dd_reset_utc}
+   portal_session is None for anonymous visitors — base.html renders nav only
+   when signed in, so the page is fully functional logged-out.
+#}
+{% extends "portal/base.html" %}
+{% set active_nav = "server" %}
+
+{% block title %}Server — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+
+{# ============================ HERO ============================ #}
+<section class="portal-hero portal-hero--server" aria-label="Server status">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Last Sietch</span>
+    <p class="portal-hero__title">Server Status</p>
+    <p class="portal-hero__sub">
+      Live population, world activity, and this term's Landsraad — at a glance.
+    </p>
+    {% if status.available %}
+    <span class="portal-pill {% if status.up %}portal-pill--online{% else %}portal-pill--offline{% endif %}"
+          style="margin-top: var(--space-3);">
+      {% if status.up %}Server online{% else %}Server offline{% endif %}
+    </span>
+    {% endif %}
+  </div>
+</section>
+
+{# ============================ SERVER STATUS ============================ #}
+<article class="portal-card">
+  <h2 class="portal-card__title">Server status</h2>
+  {% if not status.available %}
+  <div class="portal-msg portal-msg--warning" role="status">
+    Live server status is temporarily unavailable. Please refresh in a minute.
+  </div>
+  {% else %}
+  <div class="portal-dash__stats">
+    <div class="portal-stat">
+      <span class="portal-stat__label">Players online</span>
+      <span class="portal-stat__value">
+        {% if status.online_players is not none %}{{ status.online_players }}{% else %}—{% endif %}
+      </span>
+    </div>
+    {% for m in status.maps %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">{{ m.name }}</span>
+      <span class="portal-stat__value">
+        {% if m.players is not none %}{{ m.players }}{% else %}—{% endif %}
+        {% if not m.up %}<span class="portal-pill portal-pill--offline" style="margin-left:.5rem;">down</span>{% endif %}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  {% if build.available %}
+  <p class="portal-card__subtitle portal-card__fine-print">
+    {% if build.build_label %}Build <span class="mono">{{ build.build_label }}</span>{% endif %}
+    {% if build.build_label and build.settings_updated_utc %} · {% endif %}
+    {% if build.settings_updated_utc %}Settings updated <time data-utc="{{ build.settings_updated_utc }}"></time>{% endif %}
+  </p>
+  {% endif %}
+  {% endif %}
+</article>
+
+{# ============================ WORLD PULSE (24h) ============================ #}
+<article class="portal-card">
+  <h2 class="portal-card__title">World pulse</h2>
+  <p class="portal-card__subtitle">Server-wide activity over the last 24 hours.</p>
+  {% if not world.available %}
+  <div class="portal-msg portal-msg--info" role="status">
+    World activity stats are temporarily unavailable.
+  </div>
+  {% else %}
+  <div class="portal-dash__stats">
+    <div class="portal-stat">
+      <span class="portal-stat__label">Peak online</span>
+      <span class="portal-stat__value">{% if world.peak is not none %}{{ world.peak }}{% else %}—{% endif %}</span>
+    </div>
+    <div class="portal-stat">
+      <span class="portal-stat__label">Play-hours</span>
+      <span class="portal-stat__value">{% if world.play_hours is not none %}{{ world.play_hours }}{% else %}—{% endif %}</span>
+    </div>
+    <div class="portal-stat">
+      <span class="portal-stat__label">Subfiefs</span>
+      <span class="portal-stat__value">{% if world.subfiefs is not none %}{{ world.subfiefs }}{% else %}—{% endif %}</span>
+    </div>
+    <div class="portal-stat">
+      <span class="portal-stat__label">Structures</span>
+      <span class="portal-stat__value">{% if world.structures is not none %}{{ world.structures }}{% else %}—{% endif %}</span>
+    </div>
+    <div class="portal-stat">
+      <span class="portal-stat__label">Vehicles</span>
+      <span class="portal-stat__value">{% if world.vehicles is not none %}{{ world.vehicles }}{% else %}—{% endif %}</span>
+    </div>
+  </div>
+  {% endif %}
+</article>
+
+{# ====================== LANDSRAAD THIS TERM (faction-blind) ============== #}
+<article class="portal-card">
+  <header class="lb__head">
+    <div class="lb__termline">
+      <h2 class="portal-card__title">
+        Landsraad this term{% if board and board.available %} · Term {{ board.term.term_id }}{% if board.term.test_term %} <span class="lb__testtag">test</span>{% endif %}{% endif %}
+      </h2>
+      {% if board and board.available and board.term.end_utc %}
+      <div class="lb__countdown" data-end-utc="{{ board.term.end_utc }}" data-ended-label="Term ended">
+        <span class="lb__countdown-label">Term ends in</span>
+        <span class="lb__countdown-val mono" data-countdown-out aria-live="off">—</span>
+        <time class="lb__countdown-abs" data-utc="{{ board.term.end_utc }}"></time>
+      </div>
+      {% endif %}
+    </div>
+  </header>
+
+  {% if not board or not board.available %}
+  <div class="portal-msg portal-msg--info" role="status">
+    The live Landsraad board is temporarily unavailable.
+  </div>
+  {% else %}
+  <p class="portal-card__subtitle">
+    <strong>{{ board.decided }}</strong> of 25 houses decided ·
+    <strong>{{ board.contested }}</strong> still contested.
+  </p>
+
+  <div class="portal-dash__stats">
+    {% for rail in board.rails %}
+    <div class="portal-stat">
+      <span class="portal-stat__label">House {{ rail.name }} · houses won</span>
+      <span class="portal-stat__value">{{ rail.score }}</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% set has_contrib = board.rails | selectattr('top_guilds') | list %}
+  {% if has_contrib %}
+  <p class="portal-card__subtitle" style="margin-top: var(--space-4);">Top contributing guilds</p>
+  <div class="portal-row">
+    {% for rail in board.rails %}
+    <div>
+      <p class="portal-card__subtitle"><strong>House {{ rail.name }}</strong></p>
+      {% if rail.top_guilds %}
+      <ol class="srv-guilds">
+        {% for g in rail.top_guilds %}
+        <li class="srv-guilds__item">{{ g.guild }}</li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <p class="portal-card__subtitle portal-card__fine-print">No contributors yet.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <p class="portal-hero__actions">
+    <a href="/portal/landsraad" class="portal-btn portal-btn--ghost portal-btn--sm">Open the Landsraad board →</a>
+  </p>
+  {% endif %}
+</article>
+
+{# ============================ EVENTS & ANNOUNCEMENTS ===================== #}
+<article class="portal-card">
+  <h2 class="portal-card__title">Events &amp; announcements</h2>
+
+  {% if events.next_dd_reset_utc %}
+  <div class="lb__countdown" data-end-utc="{{ events.next_dd_reset_utc }}" data-ended-label="due now"
+       style="margin-bottom: var(--space-4);">
+    <span class="lb__countdown-label">Next Deep Desert reset in</span>
+    <span class="lb__countdown-val mono" data-countdown-out aria-live="off">—</span>
+    <time class="lb__countdown-abs" data-utc="{{ events.next_dd_reset_utc }}"></time>
+  </div>
+  {% endif %}
+
+  {% if not events.available %}
+  <div class="portal-msg portal-msg--info" role="status">
+    Announcements are temporarily unavailable.
+  </div>
+  {% elif not events.events %}
+  <p class="portal-card__subtitle">No announcements right now. Check back soon.</p>
+  {% else %}
+  <ul class="srv-events">
+    {% for e in events.events %}
+    <li class="srv-events__item srv-events__item--{{ e.kind }}">
+      {% if e.title %}<p class="srv-events__title">{{ e.title }}</p>{% endif %}
+      {% if e.body %}<p class="srv-events__body">{{ e.body }}</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if not portal_session %}
+  <p class="portal-hero__actions">
+    <a href="/portal/" class="portal-btn portal-btn--ghost portal-btn--sm">Sign in to manage your character →</a>
+  </p>
+  {% endif %}
+</article>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/portal-server.js?v=20260622a" defer></script>
+{% endblock %}

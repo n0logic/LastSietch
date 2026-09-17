@@ -1,0 +1,100 @@
+{# Portal character picker — GET /portal/link
+   Context per dev-backend canonical shape:
+     request, discord_handle, discord_avatar_url, search_query,
+     matches: [{character_name, lvl, current_map, online, pick_token}],
+     too_many: bool, error: str|None, post_url
+#}
+{% extends "portal/base.html" %}
+
+{% block title %}Find your character — Last Sietch Dune Portal{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/admin/static/css/portal/portal-link-v2.css?v=20260717b">
+{% endblock %}
+
+{% block content %}
+
+<article class="portal-card">
+  <h1 class="portal-card__title">
+    {% if add_mode %}Hi {{ discord_handle }} — link another character{% else %}Hi {{ discord_handle }} — find your character{% endif %}
+  </h1>
+  <p class="portal-card__subtitle">
+    {% if skip_quiz %}
+    Search by your character's in-game name (3 characters or more). Your Discord is already verified, so we'll link this account right away.
+    {% else %}
+    Search by character name (3 characters or more). We'll ask three quick questions next so we can confirm it's yours.
+    {% endif %}
+  </p>
+
+  <form method="get" action="/portal/link" data-portal-busy-on-submit>
+    <div class="portal-field">
+      <label class="portal-label" for="character_search_input">Character name</label>
+      <div class="portal-search">
+        <input type="text" id="character_search_input" name="q"
+               class="portal-input"
+               autocomplete="off" spellcheck="false"
+               required
+               minlength="3" maxlength="64"
+               value="{{ search_query | default('', true) }}"
+               {% if error %}aria-invalid="true"{% endif %}>
+        <button type="submit" class="portal-btn portal-btn--primary">Search</button>
+      </div>
+      <p class="portal-field__hint">
+        Enter your <strong>in-game character name</strong> — the exact name shown above your character in-world and on the Dune: Awakening character-select screen. This is not your Discord or Steam name.
+      </p>
+      {% if error %}
+      <div class="portal-field__hint portal-field__hint--error" role="alert">
+        {{ error }}
+      </div>
+      {% endif %}
+    </div>
+  </form>
+</article>
+
+{% if too_many %}
+<div class="portal-msg portal-msg--warning" role="status">
+  Too many characters match that search. Try a more specific name.
+</div>
+{% endif %}
+
+{% if matches is not none and search_query and not error %}
+  {% if matches | length == 0 and not too_many %}
+  <article class="portal-card">
+    <div class="portal-error">
+      <div class="portal-error__icon" aria-hidden="true">?</div>
+      <h2 class="portal-error__title">No characters found</h2>
+      <p class="portal-error__body">
+        No character matches <span class="mono">{{ search_query }}</span>. Double-check spelling and try again.
+      </p>
+    </div>
+  </article>
+  {% elif matches | length > 0 %}
+  <article class="portal-card">
+    <h2 class="portal-card__title">Pick your character</h2>
+    <p class="portal-card__subtitle">
+      Showing {{ matches | length }} match{% if matches | length != 1 %}es{% endif %}. Pick the one that's yours.
+    </p>
+    <ul class="portal-char-list">
+      {% for match in matches %}
+      <li class="portal-char-list__item">
+        <div>
+          <div class="portal-char-list__name">{{ match.character_name }}</div>
+          <div class="portal-char-list__meta">
+            {% if match.lvl is not none %}Level {{ match.lvl }}{% else %}Level —{% endif %}
+            {% if match.current_map %} · {{ match.current_map }}{% endif %}
+            · {% if match.online %}<span class="mono">online</span>{% else %}<span class="mono">offline</span>{% endif %}
+          </div>
+        </div>
+        <form method="post" action="/portal/link/select" data-portal-csrf-form>
+          <input type="hidden" name="csrf_token" value="{{ portal_csrf_token | default('', true) }}">
+          <input type="hidden" name="pick_token" value="{{ match.pick_token }}">
+          <button type="submit" class="portal-btn portal-btn--ghost">This one</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+  </article>
+  {% endif %}
+{% endif %}
+
+{% endblock %}

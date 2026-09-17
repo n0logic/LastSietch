@@ -1,0 +1,330 @@
+{# Storage Manager — GET /portal/storage
+   3-panel offline-only manager: LEFT CHOAM Bank (Solari + transfer control + bank
+   grid), MIDDLE owned-container list, RIGHT selected container grid (read-only).
+   Context (from routers/portal.py portal_storage):
+     active_character_name: str
+     containers: {available, count, containers[{id, custom_name, type_label, map,
+                  item_count, is_bank, is_vehicle, icon, max_item_count}]} | None
+     containers_error: bool
+     bank_container_id: int | None
+     bank_items: {available, items[], ...} | None
+     bank_max_slots: int | -1 | 0 | None
+     bank_solari, bank_solari_display
+     online: true (locked) | false (writes ok) | none (undetermined -> locked)
+     withdraw_cap, withdraw_cap_display
+     storage_csrf_token
+     portal_session, portal_csrf_token (base_ctx)
+#}
+{% extends "portal/base.html" %}
+{% import "portal/_fragments/_storage_grid.html" as grid %}
+{% set active_nav = "storage" %}
+{% set can_write = (online == false) %}
+
+{% block title %}Storage Manager — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+
+<section class="portal-hero portal-hero--storage" aria-label="Storage Manager">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Last Sietch</span>
+    <p class="portal-hero__title">Storage Manager</p>
+    <p class="portal-hero__sub">
+      Move banked Solari to and from Coins while <strong>{{ active_character_name }}</strong>
+      is logged out.
+    </p>
+  </div>
+</section>
+
+{% if online == true %}
+<article class="portal-card storage-banner storage-banner--locked" role="status">
+  You are online. Log out of the game to move Solari or reorganise storage.
+  Browsing works now.
+</article>
+{% elif online is none %}
+<article class="portal-card storage-banner storage-banner--warn" role="status">
+  We could not confirm whether you are logged out. Storage edits only apply while
+  you are offline, so the transfer controls are disabled. Browsing works now.
+</article>
+{% else %}
+<article class="portal-card storage-banner storage-banner--ok" role="status">
+  You are offline. Storage edits are enabled.
+</article>
+{% endif %}
+
+<div class="storage-layout"
+     data-storage-csrf="{{ storage_csrf_token }}"
+     data-can-write="{{ '1' if can_write else '0' }}"
+     data-withdraw-cap="{{ withdraw_cap }}">
+
+  {# ---------------- TOP: owned container strip ---------------- #}
+  <article class="portal-card storage-panel storage-panel--list">
+    <div class="storage-panel__head">
+      <h2 class="portal-card__title">Containers</h2>
+      <div class="storage-panel__search">
+        <input type="search" id="cont-search-input" class="cont-search__input"
+               placeholder="Find an item across all containers" autocomplete="off"
+               aria-label="Search all your storage">
+        <div id="cont-search-results" class="cont-search__panel" aria-live="polite"></div>
+      </div>
+    </div>
+    {% if containers_error or containers is none or not containers.available %}
+      <div class="portal-msg portal-msg--warning" role="status">
+        Live storage data is temporarily unavailable. Please refresh in a minute.
+      </div>
+    {% elif containers.count == 0 %}
+      <div class="portal-msg portal-msg--info" role="status">
+        No storage containers found. Place a chest in-game and it will show up here.
+      </div>
+    {% else %}
+      <p class="portal-card__subtitle">
+        Select a container to view its contents below.
+      </p>
+      <div class="storage-conts-rail">
+        <button type="button" class="storage-conts-arrow" data-conts-prev
+                aria-label="Scroll containers left" hidden>&lsaquo;</button>
+        <div class="storage-conts-viewport" data-conts-viewport>
+        <div class="storage-conts" role="list" aria-label="Storage containers">
+        {% for c in containers.containers %}
+        <button type="button" role="listitem"
+                class="cont-tile{% if c.item_count %} cont-tile--filled{% else %} cont-tile--empty{% endif %}{% if c.is_bank %} cont-tile--bank{% endif %}{% if c.is_vehicle %} cont-tile--vehicle{% endif %}"
+                data-storage-container="{{ c.id }}"
+                data-type="{{ c.custom_name or c.type_label }}"
+                aria-label="{{ c.custom_name or c.type_label }}, {{ c.item_count }} item{{ '' if c.item_count == 1 else 's' }}{% if c.map %}, on {{ c.map }}{% endif %}">
+          <span class="cont-tile__count" aria-hidden="true">{{ c.item_count }}</span>
+          {% if c.icon %}
+          <img class="cont-tile__icon" src="/admin/static/img/containers/{{ c.icon }}.png" alt="" aria-hidden="true" loading="lazy" width="56" height="56" data-icon-fallback>
+          {% endif %}
+          {% if c.custom_name %}
+            <span class="cont-tile__name">{{ c.custom_name }}</span>
+            <span class="cont-tile__type">{{ c.type_label }}</span>
+          {% else %}
+            <span class="cont-tile__name{% if c.icon %} cont-tile__name--sub{% endif %}">{{ c.type_label }}</span>
+          {% endif %}
+          {% if c.is_bank %}<span class="cont-tile__map">Account-wide</span>
+          {% elif c.map %}<span class="cont-tile__map">{{ c.map }}</span>{% endif %}
+        </button>
+        {% endfor %}
+        </div>
+        </div>
+        <button type="button" class="storage-conts-arrow" data-conts-next
+                aria-label="Scroll containers right" hidden>&rsaquo;</button>
+      </div>
+    {% endif %}
+  </article>
+
+  {# ---------------- Repair gear controls ---------------- #}
+  <article class="portal-card storage-panel storage-repair"
+           data-repair-box-cd="{{ repair_box_cooldown }}"
+           data-repair-all-cd="{{ repair_all_cooldown }}">
+    <div class="storage-repair__head">
+      <h2 class="portal-card__title">Repair Gear</h2>
+      <p class="portal-card__subtitle">
+        Restore your gear's durability from here while you are logged out. The 24h refurbish now covers everything you own, including vehicle storage, guild and shared bases, and Deep Desert. A vehicle's installed parts, such as treads, engine and hull, are not covered yet.
+      </p>
+    </div>
+    <div class="storage-repair__actions">
+      <button type="button"
+              class="portal-btn portal-btn--ghost portal-btn--sm storage-repair__btn"
+              data-repair="gear"
+              {% if not can_write or repair_box_cooldown > 0 %}disabled{% endif %}
+              title="Repair: tops up your backpack, worn armor and hotbar weapons to their current ceiling">
+        Repair Backpack &amp; Equipped
+      </button>
+      {% if repair_all_enabled %}
+      <button type="button"
+              class="portal-btn portal-btn--primary portal-btn--sm storage-repair__btn"
+              data-repair="everything"
+              {% if not can_write or repair_all_cooldown > 0 %}disabled{% endif %}
+              title="Repair &amp; Refurbish: restore every owned item back to factory durability, once per day">
+        24h Repair &amp; Refurbish Everything
+      </button>
+      {% endif %}
+    </div>
+    {% if repair_all_enabled %}
+    <p class="storage-repair__hint storage-repair__note">
+      Guild and shared storage: this refurbish saves to the server right away, but the game only reflects it after a fresh load. Your own items may still look damaged until you log out and back in. Items in a guild or shared base will not update until every guild member with that base loaded has logged out, and the repair then applies on their next login.
+    </p>
+    {% endif %}
+    <p class="storage-repair__hint" data-repair-hint-box aria-live="polite"></p>
+    <p class="storage-repair__hint" data-repair-hint-all aria-live="polite"></p>
+    <p class="storage-repair__msg" id="repair-msg" role="status" aria-live="polite"></p>
+    <div class="storage-repair__result" id="repair-result"></div>
+  </article>
+
+  {# ---------------- BODY: 2-col (bank | selected container) ---------------- #}
+  <div class="storage-body">
+
+  {# ---------------- LEFT: CHOAM Bank ---------------- #}
+  <article class="portal-card storage-panel storage-panel--bank">
+    <h2 class="portal-card__title">CHOAM Bank</h2>
+
+    <div class="storage-bank__balance">
+      <img class="storage-bank__sol-ico" src="/admin/static/img/dune-icons/solari.png"
+           alt="Solari" aria-hidden="true">
+      <span class="storage-bank__amount mono" data-bank-balance>{{ bank_solari_display or '—' }}</span>
+      <span class="storage-bank__label">banked Solari</span>
+    </div>
+
+    <div class="storage-xfer{% if not can_write %} storage-xfer--disabled{% endif %}"
+         aria-label="Transfer Solari between bank and coins">
+      <label class="sell-modal__label" for="xfer-amount">Amount</label>
+      <div class="sell-modal__inputrow">
+        <input type="number" id="xfer-amount" class="cont-search__input sell-modal__num"
+               min="1" step="1" inputmode="numeric" placeholder="0" data-xfer-amount
+               max="{{ withdraw_cap }}"
+               {% if not can_write %}disabled{% endif %}
+               aria-label="Amount of Solari to transfer">
+        <img class="market-solari-ico" src="/admin/static/img/dune-icons/solari.png"
+             alt="Solari" aria-hidden="true">
+      </div>
+      <p class="storage-xfer__hint" data-xfer-hint>
+        Withdraw caps at {{ withdraw_cap_display }} Solari per transfer.
+      </p>
+
+      <div class="storage-xfer__arrows">
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm storage-xfer__btn"
+                data-xfer="withdraw" {% if not can_write %}disabled{% endif %}
+                title="Credit to Coin: take banked Solari out as Coins">
+          Withdraw <span aria-hidden="true">→</span> Coins
+        </button>
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm storage-xfer__btn"
+                data-xfer="deposit" {% if not can_write %}disabled{% endif %}
+                title="Coin to Credit: deposit that many Coins back to your bank">
+          <span aria-hidden="true">←</span> Deposit
+        </button>
+      </div>
+
+      <button type="button" class="portal-btn portal-btn--primary portal-btn--sm storage-xfer__sweep"
+              data-xfer="sweep" {% if not can_write %}disabled{% endif %}
+              title="Deposit every Solari Coin across your storage to your bank">
+        Deposit all Coins to Bank
+      </button>
+
+      <p class="storage-xfer__msg" id="xfer-msg" role="status" aria-live="polite"></p>
+      <div class="storage-xfer__result" id="xfer-result"></div>
+    </div>
+
+    <h3 class="storage-panel__subtitle">Bank item storage</h3>
+    <div class="storage-grid-scroll" id="bank-grid"
+         data-bank-container-id="{{ bank_container_id if bank_container_id is not none else '' }}">
+      {% if bank_container_id is none or bank_items is none or not bank_items.available %}
+        <p class="storage-grid__note">Bank item storage is unavailable right now.</p>
+      {% else %}
+        {{ grid.storage_grid(bank_items.get('items', []), bank_max_slots) }}
+      {% endif %}
+    </div>
+  </article>
+
+  {# ---------------- RIGHT: selected container grid ---------------- #}
+  <article class="portal-card storage-panel storage-panel--detail">
+    <div class="storage-detail__head">
+      <h2 class="portal-card__title" id="storage-detail-title">Selected container</h2>
+      {% if repair_box_enabled %}
+      <button type="button"
+              class="portal-btn portal-btn--ghost portal-btn--sm storage-repair__box-btn"
+              data-repair="box" hidden disabled
+              title="Repair every durable item in this container to its current ceiling">
+        Repair Items
+      </button>
+      {% endif %}
+    </div>
+    <div class="storage-detail-host" id="storage-detail">
+      <p class="storage-grid__note">Select a container above to view its contents.</p>
+    </div>
+  </article>
+
+  </div>{# /.storage-body #}
+
+</div>
+
+{# List-on-Exchange modal (opened by portal-storage.js from a right-panel slot's
+   popover "List on Exchange" action). Quantity 1..stack, price per unit, duration,
+   a LIVE exchange fee, and the offline/bank note. POSTs to /portal/market/sell with
+   CSRF; the seller's controller_id + owned-item check are enforced server-side. #}
+<div id="sell-modal-overlay" class="ls-modal-overlay" hidden></div>
+<div id="sell-modal" class="ls-modal" role="dialog" aria-modal="true"
+     aria-labelledby="sell-modal-title" hidden>
+  <header class="ls-modal__header">
+    <h2 id="sell-modal-title" class="ls-modal__title">List on Exchange</h2>
+    <button type="button" id="sell-modal-close" class="ls-drawer__close" aria-label="Close">×</button>
+  </header>
+  <div class="ls-modal__body">
+    <p class="sell-modal__item">
+      <span class="sell-modal__item-name" data-sell-itemname>Item</span>
+      <span class="sell-modal__item-stack">in stock: <span class="mono" data-sell-stackmax>1</span></span>
+    </p>
+
+    <div class="sell-modal__field">
+      <label class="sell-modal__label" for="sell-qty">Quantity</label>
+      <div class="sell-modal__inputrow">
+        <input type="number" id="sell-qty" class="cont-search__input sell-modal__num"
+               min="1" step="1" inputmode="numeric" value="1" data-sell-qty
+               aria-label="Quantity to list">
+        <span class="sell-modal__hint">/ <span data-sell-stackmax2>1</span> available</span>
+      </div>
+    </div>
+
+    <div class="sell-modal__field">
+      <label class="sell-modal__label" for="sell-price">Price per unit</label>
+      <div class="sell-modal__inputrow">
+        <input type="number" id="sell-price" class="cont-search__input sell-modal__num"
+               min="1" step="1" inputmode="numeric" placeholder="0" data-sell-price
+               aria-label="Price per unit in Solari">
+        <img class="market-solari-ico" src="/admin/static/img/dune-icons/solari.png"
+             alt="Solari" aria-hidden="true">
+      </div>
+    </div>
+
+    <div class="sell-modal__field">
+      <span class="sell-modal__label">Duration</span>
+      <div class="sell-modal__durations" role="group" aria-label="Listing duration">
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm sell-modal__dur"
+                data-sell-dur="1">1 day</button>
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm sell-modal__dur"
+                data-sell-dur="3">3 days</button>
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm sell-modal__dur sell-modal__dur--active"
+                data-sell-dur="7">7 days</button>
+        <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm sell-modal__dur"
+                data-sell-dur="14">14 days</button>
+      </div>
+    </div>
+
+    <dl class="sell-modal__summary">
+      <div class="sell-modal__sumrow">
+        <dt>Listing total</dt>
+        <dd><span class="mono" data-sell-total>0</span><img class="market-solari-ico"
+            src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true"></dd>
+      </div>
+      <div class="sell-modal__sumrow sell-modal__sumrow--fee">
+        <dt>Exchange fee</dt>
+        <dd><span class="mono" data-sell-fee>0</span><img class="market-solari-ico"
+            src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true"></dd>
+      </div>
+    </dl>
+
+    <p class="sell-modal__note">
+      Lists while you are <strong>offline</strong>. The fee is paid from your CHOAM bank Solari.
+    </p>
+
+    <div class="sell-modal__actions">
+      <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm" id="sell-cancel">Cancel</button>
+      <button type="button" class="portal-btn portal-btn--primary portal-btn--sm" id="sell-confirm">List item</button>
+    </div>
+    <p class="sell-modal__msg" id="sell-msg" role="status" aria-live="polite"></p>
+    <div class="sell-modal__result" id="sell-result"></div>
+  </div>
+</div>
+
+<noscript>
+  <article class="portal-card">
+    <div class="portal-msg portal-msg--info" role="status">
+      Enable JavaScript to use the Storage Manager (transfers and container viewing).
+    </div>
+  </article>
+</noscript>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/portal-storage.js?v=20260706a" defer></script>
+{% endblock %}

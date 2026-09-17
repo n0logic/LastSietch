@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<div class="container">
+  <!-- Add User -->
+  <div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-title">Add User</div>
+    <div class="msg" id="add-msg"></div>
+    <form id="add-form" onsubmit="return addUser(event)" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+      <div class="form-group">
+        <label for="new-username">Username</label>
+        <input type="text" id="new-username" required>
+      </div>
+      <div class="form-group">
+        <label for="new-role">Role</label>
+        <select id="new-role">
+          <option value="operator">Operator</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="new-password">Password</label>
+        <input type="password" id="new-password" required>
+        <div class="form-hint">Minimum 16 characters</div>
+      </div>
+      <div class="form-group">
+        <label for="new-password2">Confirm Password</label>
+        <input type="password" id="new-password2" required>
+      </div>
+      <div style="grid-column: 1 / -1;">
+        <button type="submit" class="btn btn-accent">Create User</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- User List -->
+  <div class="card">
+    <div class="card-title">Users</div>
+    <div class="msg" id="user-msg"></div>
+    <div style="overflow-x: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Created</th>
+            <th>Last Login</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="user-table"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('nav-users').classList.add('active');
+
+function loadUsers() {
+  apiCall('GET', '/admin/api/users').then(function(users) {
+    var tbody = document.getElementById('user-table');
+    tbody.innerHTML = '';
+    users.forEach(function(u) {
+      var tr = document.createElement('tr');
+
+      var isProtected = u.id === 1;
+      var isLocked = u.locked_until && new Date(u.locked_until) > new Date();
+      var statusText = 'Active';
+      var statusStyle = 'color: var(--green)';
+      if (!u.is_active) {
+        statusText = 'Disabled';
+        statusStyle = 'color: var(--red)';
+      } else if (isLocked) {
+        var lockTime = new Date(u.locked_until);
+        statusText = 'Locked until ' + lockTime.toLocaleTimeString();
+        statusStyle = 'color: var(--yellow)';
+      }
+
+      var created = u.created_at ? new Date(u.created_at).toLocaleDateString() : '—';
+      var lastLogin = u.last_login ? new Date(u.last_login).toLocaleString() : 'Never';
+
+      var actions = '';
+      if (isProtected) {
+        actions = '<span class="role-badge admin" style="font-size: 0.6rem;">Protected</span>';
+      } else {
+        actions += '<select onchange="changeRole(' + u.id + ', this.value)" style="width: auto; padding: 0.2rem 0.4rem; font-size: 0.7rem;">';
+        actions += '<option value="operator"' + (u.role === 'operator' ? ' selected' : '') + '>operator</option>';
+        actions += '<option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>admin</option>';
+        actions += '</select> ';
+        actions += '<button class="btn btn-sm btn-accent" onclick="resetPassword(' + u.id + ', \'' + escHtml(u.username) + '\')">Reset PW</button> ';
+        if (isLocked) {
+          actions += '<button class="btn btn-sm btn-start" onclick="unlockUser(' + u.id + ', \'' + escHtml(u.username) + '\')">Unlock</button> ';
+        }
+        actions += '<button class="btn btn-sm btn-stop" onclick="deleteUser(' + u.id + ', \'' + escHtml(u.username) + '\')">Delete</button>';
+      }
+
+      tr.innerHTML = '<td>' + escHtml(u.username) + '</td>' +
+        '<td><span class="role-badge ' + u.role + '">' + u.role + '</span></td>' +
+        '<td>' + created + '</td>' +
+        '<td>' + lastLogin + '</td>' +
+        '<td style="' + statusStyle + '">' + statusText + '</td>' +
+        '<td>' + actions + '</td>';
+
+      tbody.appendChild(tr);
+    });
+  }).catch(function(e) {
+    showMsg('user-msg', 'Failed to load users: ' + e.message, 'error');
+  });
+}
+
+function escHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function addUser(e) {
+  e.preventDefault();
+  hideMsg('add-msg');
+
+  var username = document.getElementById('new-username').value.trim();
+  var password = document.getElementById('new-password').value;
+  var password2 = document.getElementById('new-password2').value;
+  var role = document.getElementById('new-role').value;
+
+  if (password !== password2) {
+    showMsg('add-msg', 'Passwords do not match.', 'error');
+    return false;
+  }
+  if (password.length < 16) {
+    showMsg('add-msg', 'Password must be at least 16 characters.', 'error');
+    return false;
+  }
+
+  apiCall('POST', '/admin/api/users', { username: username, password: password, role: role }).then(function() {
+    showMsg('add-msg', 'User "' + username + '" created.', 'success');
+    document.getElementById('add-form').reset();
+    loadUsers();
+  }).catch(function(e) {
+    showMsg('add-msg', e.message, 'error');
+  });
+
+  return false;
+}
+
+function changeRole(userId, role) {
+  apiCall('PATCH', '/admin/api/users/' + userId + '/role', { role: role }).then(function() {
+    showMsg('user-msg', 'Role updated.', 'success');
+    loadUsers();
+  }).catch(function(e) {
+    showMsg('user-msg', e.message, 'error');
+    loadUsers();
+  });
+}
+
+function resetPassword(userId, username) {
+  showPasswordPrompt('Reset password for ' + username, function(pw) {
+    apiCall('POST', '/admin/api/users/' + userId + '/reset-password', { new_password: pw }).then(function() {
+      showMsg('user-msg', 'Password reset for ' + username + '.', 'success');
+    }).catch(function(e) {
+      showMsg('user-msg', e.message, 'error');
+    });
+  });
+}
+
+function unlockUser(userId, username) {
+  apiCall('POST', '/admin/api/users/' + userId + '/unlock').then(function() {
+    showMsg('user-msg', username + ' unlocked.', 'success');
+    loadUsers();
+  }).catch(function(e) {
+    showMsg('user-msg', e.message, 'error');
+  });
+}
+
+function deleteUser(userId, username) {
+  showConfirm('Delete user "' + username + '"? This cannot be undone.', function() {
+    apiCall('DELETE', '/admin/api/users/' + userId).then(function() {
+      showMsg('user-msg', 'User "' + username + '" deleted.', 'success');
+      loadUsers();
+    }).catch(function(e) {
+      showMsg('user-msg', e.message, 'error');
+    });
+  });
+}
+
+loadUsers();
+</script>
+{% endblock %}

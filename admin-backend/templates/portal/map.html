@@ -1,0 +1,189 @@
+{# Coordinate-accurate map renderer — GET /portal/maps/{map_key}
+   Context (routers/portal.py portal_map):
+     map: {key, name, view, cal, grid, backdrop, instances, has_spice, spice_candidates}
+   Marker/legend data is fetched client-side from /portal/maps/{key}/data (cached,
+   reusable by the public site); the live spice overlay from /portal/maps/{key}/spice.
+#}
+{% extends "portal/base.html" %}
+
+{% block title %}{{ map.name }} map — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+
+<nav class="portal-breadcrumb" aria-label="Breadcrumb">
+  <a href="/portal/maps" class="portal-link">&larr; All maps</a>
+</nav>
+
+<section class="portal-hero portal-hero--maps portal-hero--slim" aria-label="{{ map.name }}"
+         style="view-transition-name: map-hub-{{ map.key }}">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Maps</span>
+    <h1 class="portal-hero__title">{{ map.name }}</h1>
+  </div>
+</section>
+
+<article class="portal-card map-card">
+  <div class="map-toolbar">
+    <div class="map-toolbar__title">
+      <div class="map-card__title" role="heading" aria-level="2">{{ map.name }}</div>
+      {% if map.instances | length > 1 %}
+      <div class="map-instance-switch" role="tablist" aria-label="Instance">
+        {% for inst in map.instances %}
+        <button type="button" class="map-instance-btn{% if loop.first %} is-active{% endif %}"
+                role="tab" data-instance="{{ inst.key }}" data-dim="{{ inst.dim if inst.dim is not none else '' }}"
+                aria-selected="{{ 'true' if loop.first else 'false' }}">{{ inst.label }}</button>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="map-toolbar__zoom">
+      <span class="map-players-counter" id="map-players-counter" hidden
+            title="Players in this map / online server-wide">
+        <span class="map-players-counter__icon" aria-hidden="true">&#128100;</span>
+        <span id="map-players-counter__text"></span>
+      </span>
+      <button type="button" class="map-zoom-btn" id="map-zoom-out" aria-label="Zoom out">&minus;</button>
+      <button type="button" class="map-zoom-btn" id="map-zoom-reset" aria-label="Reset view">&#x2302;</button>
+      <button type="button" class="map-zoom-btn" id="map-zoom-in" aria-label="Zoom in">+</button>
+    </div>
+  </div>
+
+  {% if map.has_spice %}
+  {# Live status banners laid out as equal boxes on one row (wraps on narrow
+     screens). Each box self-hides via [hidden] and the flex row reflows. #}
+  <div class="map-status-row">
+    <div class="map-spice-banner" id="map-spice-banner" hidden>
+      <span class="map-spice-banner__pulse"></span>
+      <span id="map-spice-banner__text">Locating the active spice blow&hellip;</span>
+    </div>
+
+    {# Sandstorm ETA banner: per-dimension countdown. No map pin, time only. #}
+    <div class="map-sandstorm-banner" id="map-sandstorm-banner" hidden>
+      <span class="map-sandstorm-banner__icon" aria-hidden="true">&#x26A1;</span>
+      <span id="map-sandstorm-banner__text"></span>
+    </div>
+
+    {# Coriolis reset countdown: deterministic next-cycle time (no game-box read).
+       Reuses the sandstorm banner styling for visual parity. #}
+    <div class="map-sandstorm-banner map-coriolis-banner" id="map-coriolis-banner" hidden>
+      <span class="map-sandstorm-banner__icon" aria-hidden="true">&#x231B;</span>
+      <span id="map-coriolis-banner__text"></span>
+    </div>
+
+    <div class="map-worm-banner" id="map-worm-banner" hidden>
+      <span class="map-worm-banner__icon" aria-hidden="true">&#x1F300;</span>
+      <span id="map-worm-banner__text">Scanning for Shai-Hulud&hellip;</span>
+      <div class="map-worm-banner__right">
+        <button type="button" class="map-worm-banner__audio" id="map-worm-audio-toggle"
+                aria-label="Toggle audio cue" title="Audio alert">&#x1F515;</button>
+        <button type="button" class="map-worm-banner__toggle is-on" id="map-worm-banner__toggle"
+                aria-label="Toggle Shai-Hulud layer">shown</button>
+      </div>
+    </div>
+  </div>
+
+  {# Personal proximity warning: shown ONLY to the logged-in player when their own
+     position is on this map. Computed client-side from /me (private) + /live worms. #}
+  <div class="map-worm-proximity" id="map-worm-proximity" hidden role="status" aria-live="polite">
+    <span class="map-worm-proximity__wave" aria-hidden="true">
+      <svg viewBox="-16 -10 34 20" width="46" height="22">
+        <path class="map-worm-proximity__arrow" d="M-13 0 L-7 -4 L-8.5 0 L-7 4 Z"/>
+        <path class="map-worm-proximity__trace" d="M-5 0 L-3.3 -3 L-1.6 2 L0 -8 L1.7 9 L3.4 -7 L5.1 4 L6.8 -2 L8.5 0"/>
+      </svg>
+    </span>
+    <span id="map-worm-proximity__text"></span>
+  </div>
+  {% endif %}
+
+  {# Map body: viewport + collapsible legend sidebar #}
+  <div class="map-body">
+    <div class="map-viewport" id="map-viewport" data-map-key="{{ map.key }}">
+      <div class="map-stage" id="map-stage">
+        <div class="map-backdrop" id="map-backdrop"></div>
+        <canvas class="map-canvas" id="map-canvas"></canvas>
+        <svg class="map-overlay" id="map-overlay" xmlns="http://www.w3.org/2000/svg"
+             viewBox="0 0 {{ map.view }} {{ map.view }}" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="map-tooltip" id="map-tooltip" hidden></div>
+      <div class="map-loading" id="map-loading">Loading map&hellip;</div>
+    </div>
+
+    {# Collapsible sidebar: filter legend + waypoints.
+       On narrow screens it collapses below the viewport. #}
+    <aside class="map-sidebar" id="map-sidebar" aria-label="Map layers and waypoints">
+      <div class="map-sidebar__section">
+        {# Search / filter box #}
+        <div class="map-sidebar__filter-row">
+          <input type="search" class="map-sidebar__search" id="map-filter-search"
+                 placeholder="Filter layers&hellip;" aria-label="Filter map layers" autocomplete="off">
+        </div>
+        {# ALL / NONE / DEFAULT quick-pick row #}
+        <div class="map-sidebar__quick">
+          <button type="button" class="map-sidebar__quick-btn" id="map-filter-all">All</button>
+          <button type="button" class="map-sidebar__quick-btn" id="map-filter-none">None</button>
+          <button type="button" class="map-sidebar__quick-btn" id="map-filter-default">Default</button>
+          <button type="button" class="map-sidebar__quick-btn map-sidebar__quick-btn--accent"
+                  id="map-filter-save" aria-label="Save current layer preset">Save preset</button>
+          <button type="button" class="map-sidebar__quick-btn" id="map-filter-load"
+                  style="display:none" aria-label="Load saved preset">Saved</button>
+        </div>
+        {# Category→type tree (populated by JS from /data legend) #}
+        <div class="map-legend" id="map-legend" aria-label="Layers" role="list"></div>
+      </div>
+
+      {# Waypoints section (hidden until /me confirms auth) #}
+      <div class="map-sidebar__section map-wp-section" id="map-wp-section" hidden>
+        <div class="map-sidebar__section-title">
+          <span>Waypoints</span>
+          <span class="map-wp-section__count" id="map-wp-count"></span>
+        </div>
+        <p class="map-sidebar__hint">Click the map while holding <kbd>Alt</kbd> to drop a pin.</p>
+        <ul class="map-wp-list" id="map-wp-list" role="list"></ul>
+      </div>
+    </aside>
+  </div>
+
+  {# Per-player overlay controls. Hidden until /me confirms a logged-in session. #}
+  <div class="map-me-controls" id="map-me-controls" aria-label="My overlay" hidden>
+    <span class="map-me-controls__label">My location</span>
+    <button type="button" class="map-me-chip" data-me-layer="self">
+      <span class="map-me-chip__swatch map-me-chip__swatch--self"></span>You
+    </button>
+    <button type="button" class="map-me-chip" data-me-layer="bases">
+      <span class="map-me-chip__swatch map-me-chip__swatch--base"></span>Bases
+      <span class="map-me-chip__count">0</span>
+    </button>
+    <button type="button" class="map-me-chip" data-me-layer="vehicles">
+      <span class="map-me-chip__swatch map-me-chip__swatch--vehicle"></span>Vehicles
+      <span class="map-me-chip__count">0</span>
+    </button>
+    {# Self-rescue: teleport to your own nearest base (server-chosen). Wired by
+       portal.js -> POST /portal/rescue. Disabled while online-check pending. #}
+    <button type="button" class="map-rescue-btn" id="map-rescue-btn">
+      Help! I'm stuck
+    </button>
+  </div>
+
+  {# Self-rescue result lands here (HTML fragment swapped in by portal.js). #}
+  <div class="map-rescue-result" id="map-rescue-result" aria-live="polite"></div>
+
+  <p class="portal-card__subtitle portal-card__fine-print">
+    <span id="map-count">&nbsp;</span>
+    Positions read straight from the server.
+    {% if map.has_spice %}Deep Desert regenerates each Coriolis cycle; the active spice blow is tracked live.{% endif %}
+  </p>
+</article>
+
+{# Click popup for marker details (name, category, coords + copy) #}
+<div class="map-popup" id="map-popup" hidden role="dialog" aria-modal="false" aria-label="Marker details">
+  <button type="button" class="map-popup__close" id="map-popup-close" aria-label="Close">&times;</button>
+  <div class="map-popup__name" id="map-popup-name"></div>
+  <div class="map-popup__cat" id="map-popup-cat"></div>
+  <div class="map-popup__coords" id="map-popup-coords"></div>
+  <button type="button" class="map-popup__copy" id="map-popup-copy" aria-label="Copy coordinates">Copy coords</button>
+  <div class="map-popup__alt" id="map-popup-alt" hidden></div>
+</div>
+
+<script src="/admin/static/js/portal-maps.js?v=20260902a" defer></script>
+
+{% endblock %}

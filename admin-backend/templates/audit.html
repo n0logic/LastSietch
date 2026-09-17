@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}Audit Log{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="card">
+    <div class="card-title">Audit Log</div>
+
+    <div style="display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+      <div class="form-group" style="margin-bottom: 0; min-width: 150px;">
+        <label for="filter-user">User</label>
+        <select id="filter-user" onchange="resetAndLoad()">
+          <option value="">All users</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom: 0; min-width: 150px;">
+        <label for="filter-action">Action</label>
+        <select id="filter-action" onchange="resetAndLoad()">
+          <option value="">All actions</option>
+          <option value="login">Login</option>
+          <option value="login_failed">Login Failed</option>
+          <option value="login_blocked">Login Blocked</option>
+          <option value="logout">Logout</option>
+          <option value="setup">Setup</option>
+          <option value="change_password">Change Password</option>
+          <option value="create_user">Create User</option>
+          <option value="delete_user">Delete User</option>
+          <option value="change_role">Change Role</option>
+          <option value="reset_password">Reset Password</option>
+          <option value="unlock_user">Unlock User</option>
+          <option value="vm_start">VM Start</option>
+          <option value="vm_stop">VM Stop</option>
+          <option value="vm_reset">VM Reset</option>
+          <option value="server_start">Server Start</option>
+          <option value="server_stop">Server Stop</option>
+          <option value="server_restart">Server Restart</option>
+          <option value="scheduled_stop">Scheduled Stop</option>
+          <option value="scheduled_restart">Scheduled Restart</option>
+          <option value="cancel_scheduled">Cancel Scheduled</option>
+          <option value="broadcast">Broadcast</option>
+          <option value="config_change">Config Change</option>
+          <option value="zfs_snapshot">ZFS Snapshot</option>
+          <option value="zfs_restore">ZFS Restore</option>
+          <option value="zfs_delete">ZFS Delete</option>
+          <option value="zfs_schedule">ZFS Schedule</option>
+          <option value="rcon_command">RCON Command</option>
+          <option value="dune_grant">Dune Grant</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="overflow-x: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>User</th>
+            <th>Action</th>
+            <th>Target</th>
+            <th>IP</th>
+            <th>Status</th>
+            <th>Detail</th>
+          </tr>
+        </thead>
+        <tbody id="audit-table"></tbody>
+      </table>
+    </div>
+
+    <div class="pagination">
+      <button class="btn btn-sm" id="btn-prev" onclick="prevPage()" disabled>Previous</button>
+      <span class="pagination-info" id="page-info">Page 1</span>
+      <button class="btn btn-sm" id="btn-next" onclick="nextPage()" disabled>Next</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('nav-audit').classList.add('active');
+
+var currentPage = 0;
+var pageSize = 50;
+var autoRefreshTimer = null;
+
+function loadAudit() {
+  var filterUser = document.getElementById('filter-user').value;
+  var filterAction = document.getElementById('filter-action').value;
+  var params = '?limit=' + pageSize + '&offset=' + (currentPage * pageSize);
+  if (filterUser) params += '&username=' + encodeURIComponent(filterUser);
+  if (filterAction) params += '&action=' + encodeURIComponent(filterAction);
+
+  apiCall('GET', '/admin/api/audit' + params).then(function(d) {
+    var entries = d.entries || d;
+    var total = d.total || entries.length;
+    var tbody = document.getElementById('audit-table');
+    tbody.innerHTML = '';
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">No entries found</td></tr>';
+      document.getElementById('btn-prev').disabled = true;
+      document.getElementById('btn-next').disabled = true;
+      document.getElementById('page-info').textContent = 'Page 1';
+      return;
+    }
+
+    entries.forEach(function(e) {
+      var tr = document.createElement('tr');
+      var isFail = e.success === false || e.success === 0;
+      var isLoginFail = e.action === 'login_failed' || e.action === 'login_blocked';
+
+      var statusText = isFail ? 'FAIL' : 'OK';
+      var statusColor = isFail ? 'var(--red)' : 'var(--green)';
+      if (isLoginFail) statusColor = 'var(--yellow)';
+
+      var rowStyle = '';
+      if (isFail && !isLoginFail) rowStyle = 'background: rgba(192, 57, 43, 0.05);';
+      if (isLoginFail) rowStyle = 'background: rgba(241, 196, 15, 0.03);';
+
+      var ts = e.timestamp ? new Date(e.timestamp).toLocaleString() : '—';
+
+      // Detail column: prefer the actionable result_message captured for dune_grant rows
+      // (eg "target account 1837 cannot receive faction_rep right now: in reconnect grace
+      // period (~66s remaining)"). Falls back to the result string for non-grant rows.
+      var detailMsg = '';
+      if (e.details) {
+        try {
+          var d = (typeof e.details === 'string') ? JSON.parse(e.details) : e.details;
+          if (d && typeof d === 'object') {
+            detailMsg = d.result_message || d.result || '';
+          }
+        } catch (_) { /* leave detailMsg empty if details is not JSON */ }
+      }
+      var detailDisplay = detailMsg ? escHtml(String(detailMsg).slice(0, 240)) : '—';
+      var detailTitle = detailMsg ? ' title="' + escHtml(String(detailMsg)) + '"' : '';
+
+      tr.style.cssText = rowStyle;
+      tr.innerHTML = '<td style="font-family: var(--font-mono); font-size: 0.75rem;">' + ts + '</td>' +
+        '<td>' + escHtml(e.username || '—') + '</td>' +
+        '<td style="font-family: var(--font-mono); font-size: 0.8rem;">' + escHtml(e.action || '') + '</td>' +
+        '<td>' + escHtml(e.target || '—') + '</td>' +
+        '<td style="font-family: var(--font-mono); font-size: 0.75rem;">' + escHtml(e.ip_address || '—') + '</td>' +
+        '<td style="color: ' + statusColor + '; font-family: var(--font-mono); font-size: 0.75rem;">' + statusText + '</td>' +
+        '<td style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"' + detailTitle + '>' + detailDisplay + '</td>';
+      tbody.appendChild(tr);
+    });
+
+    var totalPages = Math.ceil(total / pageSize) || 1;
+    document.getElementById('page-info').textContent = 'Page ' + (currentPage + 1) + ' of ' + totalPages;
+    document.getElementById('btn-prev').disabled = currentPage === 0;
+    document.getElementById('btn-next').disabled = (currentPage + 1) >= totalPages;
+  }).catch(function(e) {
+    document.getElementById('audit-table').innerHTML =
+      '<tr><td colspan="7" style="text-align: center; color: var(--red);">Failed to load audit log</td></tr>';
+  });
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function prevPage() {
+  if (currentPage > 0) { currentPage--; loadAudit(); }
+}
+
+function nextPage() {
+  currentPage++;
+  loadAudit();
+}
+
+function resetAndLoad() {
+  currentPage = 0;
+  loadAudit();
+}
+
+// Populate user filter from users endpoint
+apiCall('GET', '/admin/api/users').then(function(users) {
+  var sel = document.getElementById('filter-user');
+  users.forEach(function(u) {
+    var opt = document.createElement('option');
+    opt.value = u.username;
+    opt.textContent = u.username;
+    sel.appendChild(opt);
+  });
+}).catch(function() {});
+
+loadAudit();
+autoRefreshTimer = setInterval(loadAudit, 60000);
+</script>
+{% endblock %}

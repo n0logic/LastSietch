@@ -1,0 +1,118 @@
+{# History sub-tab — paginated rows from holadmin.cvar_changes.
+
+   Column shape matches the §9 DDL: changed_at, operator_handle, section, key,
+   old_value, new_value, reason, applied_at, source_before.
+
+   "Applied" status: applied_at IS NOT NULL means the v1.1 buildwatch
+   observer confirmed the next BGD restart picked up the change. NULL means
+   the write is still pending the next maintenance window.
+#}
+{% set rows = history if history is defined else [] %}
+{% set total = history_total if history_total is defined else 0 %}
+{% set page = history_page if history_page is defined else 1 %}
+{% set page_size = history_page_size if history_page_size is defined else 50 %}
+{% set last_page = ((total - 1) // page_size + 1) if total else 1 %}
+
+<div class="v2-cvars-history">
+
+  {% if not history_available %}
+    <div class="empty-state empty-state--loading-failed">
+      <p class="empty-state__headline">History unavailable</p>
+      <p class="empty-state__body">
+        Couldn't query <code>holadmin.cvar_changes</code>. The relay or the
+        helper module is offline.
+      </p>
+      <div class="empty-state__actions">
+        <button type="button" class="btn btn-sm"
+                hx-get="/admin/v2/server/cvars/history"
+                hx-target="#cvars-subtab-body"
+                hx-swap="innerHTML"
+                hx-indicator="#v2-cvars-subtab-loading">Retry</button>
+      </div>
+    </div>
+  {% elif not rows %}
+    <div class="empty-state">
+      <p class="empty-state__headline">No CVar changes yet</p>
+      <p class="empty-state__body">
+        Once an Operator queues a write from the Catalog tab, it appears here.
+      </p>
+    </div>
+  {% else %}
+
+    <div class="v2-cvars-history__meta">
+      Page {{ page }} of {{ last_page }} · {{ total }} total change{{ '' if total == 1 else 's' }}
+    </div>
+
+    <table class="v2-cvars-history__table">
+      <thead>
+        <tr>
+          <th scope="col">Changed</th>
+          <th scope="col">Operator</th>
+          <th scope="col">Section / Key</th>
+          <th scope="col">Old → New</th>
+          <th scope="col">Source before</th>
+          <th scope="col">Reason</th>
+          <th scope="col">Applied</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr class="v2-cvars-history__row">
+            <td class="v2-cvars-history__changed-at">
+              <time datetime="{{ r.changed_at }}">{{ r.changed_at_display or r.changed_at }}</time>
+            </td>
+            <td class="v2-cvars-history__operator">
+              {{ r.operator_handle }}
+              <span class="v2-cvars-history__operator-id">#{{ r.operator_user_id }}</span>
+            </td>
+            <td class="v2-cvars-history__key">
+              <code class="v2-cvars-history__section">{{ r.section }}</code>
+              <code class="v2-cvars-history__keyname">{{ r.key }}</code>
+            </td>
+            <td class="v2-cvars-history__diff">
+              <code class="v2-cvars-history__old">{{ r.old_value if r.old_value is not none else '(unset)' }}</code>
+              <span class="v2-cvars-history__arrow" aria-hidden="true">→</span>
+              <code class="v2-cvars-history__new">{{ r.new_value if r.new_value is not none else '(cleared)' }}</code>
+            </td>
+            <td class="v2-cvars-history__source-before">
+              {% if r.source_before %}
+                <span class="cvars-layer-pill cvars-layer-pill--{{ r.source_before }} cvars-layer-pill--sm">{{ r.source_before }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td class="v2-cvars-history__reason">{{ r.reason or '—' }}</td>
+            <td class="v2-cvars-history__applied">
+              {% if r.applied_at %}
+                <span class="badge badge--success" title="Restart observed via {{ r.applied_observed_via or 'manual' }}">applied</span>
+                <time datetime="{{ r.applied_at }}" class="v2-cvars-history__applied-at">{{ r.applied_at_display or r.applied_at }}</time>
+              {% else %}
+                <span class="badge badge--muted">pending restart</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if last_page > 1 %}
+      <nav class="v2-cvars-history__pager" aria-label="History pagination">
+        {% if page > 1 %}
+          <button type="button" class="btn btn-sm"
+                  hx-get="/admin/v2/server/cvars/history?page={{ page - 1 }}"
+                  hx-target="#cvars-subtab-body"
+                  hx-swap="innerHTML"
+                  hx-indicator="#v2-cvars-subtab-loading">← prev</button>
+        {% endif %}
+        <span class="v2-cvars-history__pager-label">page {{ page }} / {{ last_page }}</span>
+        {% if page < last_page %}
+          <button type="button" class="btn btn-sm"
+                  hx-get="/admin/v2/server/cvars/history?page={{ page + 1 }}"
+                  hx-target="#cvars-subtab-body"
+                  hx-swap="innerHTML"
+                  hx-indicator="#v2-cvars-subtab-loading">next →</button>
+        {% endif %}
+      </nav>
+    {% endif %}
+
+  {% endif %}
+
+</div>

@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Solido Preview Backfill{% endblock %}
+{% block content %}
+<style>
+.thumb-wrap { max-width: 820px; }
+.thumb-intro { color: var(--text-muted); font-size: 0.9rem; line-height: 1.5; margin: 0.25rem 0 1rem; }
+.thumb-bar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+.thumb-summary { color: var(--text-muted); font-size: 0.85rem; }
+.thumb-list { list-style: none; padding: 0; margin: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.thumb-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--border); }
+.thumb-row:last-child { border-bottom: 0; }
+.thumb-name { font-size: 0.9rem; }
+.thumb-name em { color: var(--text-muted); font-style: normal; font-size: 0.78rem; }
+.thumb-status { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; }
+.thumb-status.busy { color: var(--accent); }
+.thumb-status.ok { color: #4caf72; }
+.thumb-status.err { color: #d8674f; }
+</style>
+
+<div class="thumb-wrap">
+  <h1>Solido Preview Backfill</h1>
+  <p class="thumb-intro">
+    Re-renders the 3D preview photo (textured real meshes) for published market
+    listings that have no thumbnail yet, and saves it as the gallery card image.
+    Rendering runs in your browser from each listing's public blueprint, one at a
+    time. New publishes already auto-generate a preview at publish time; this is
+    only for older listings.
+  </p>
+
+  <div class="thumb-bar">
+    <button id="thumb-run" class="btn btn-accent" disabled>Generate previews</button>
+    <span id="thumb-summary" class="thumb-summary">Loading…</span>
+  </div>
+
+  <ul id="thumb-list" class="thumb-list"></ul>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  // Bump to bust the dynamically-imported viewer module cache if it changes.
+  var V = '20260629a';
+  var VIEWER_URL = '/admin/static/js/portal-solido-viewer.js?v=' + V;
+  var CATALOG_URL = '/admin/static/js/data/solido-piece-catalog.json';
+
+  var listEl = document.getElementById('thumb-list');
+  var runBtn = document.getElementById('thumb-run');
+  var summaryEl = document.getElementById('thumb-summary');
+  var rows = [];
+  var _catalog = null, _mod = null;
+
+  function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+
+  function catalog() {
+    if (_catalog) return Promise.resolve(_catalog);
+    return fetch(CATALOG_URL, { credentials: 'same-origin' })
+      .then(function (r) { if (!r.ok) throw new Error('catalog ' + r.status); return r.json(); })
+      .then(function (d) { _catalog = d; return d; });
+  }
+  function viewer() {
+    if (_mod) return Promise.resolve(_mod);
+    return import(VIEWER_URL).then(function (m) { _mod = m; return m; });
+  }
+
+  function setRowStatus(pid, text, cls) {
+    var cell = document.querySelector('[data-status="' + pid + '"]');
+    if (cell) { cell.textContent = text; cell.className = 'thumb-status ' + (cls || ''); }
+  }
+
+  function renderList(total) {
+    listEl.innerHTML = '';
+    if (!rows.length) {
+      summaryEl.textContent = 'All ' + total + ' published listings already have a preview. Nothing to backfill.';
+      runBtn.disabled = true;
+      return;
+    }
+    summaryEl.textContent = rows.length + ' of ' + total + ' published listings are missing a preview.';
+    runBtn.disabled = false;
+    rows.forEach(function (r) {
+      var li = document.createElement('li');
+      li.className = 'thumb-row';
+      li.innerHTML =
+        '<span class="thumb-name">#' + r.publish_id + ' &middot; ' + escapeHtml(r.title) +
+        ' <em>by ' + escapeHtml(r.author_name) + ' &middot; ' + (r.piece_count || 0) + ' pcs</em></span>' +
+        '<span class="thumb-status" data-status="' + r.publish_id + '">queued</span>';
+      listEl.appendChild(li);
+    });
+  }
+
+  function loadMissing() {
+    return fetch('/admin/api/dune/solido/missing-thumbs', { credentials: 'same-origin' })
+      .then(function (r) {
+        if (r.status === 401) { window.location = '/admin/login'; throw new Error('unauthorized'); }
+        if (!r.ok) throw new Error('list ' + r.status);
+        return r.json();
+      })
+      .then(function (d) { rows = d.missing || []; renderList(d.total_published || 0); })
+      .catch(function (e) { summaryEl.textContent = 'Failed to load: ' + (e.message || e); });
+  }
+
+  // Render one listing offscreen (real meshes, textured), snapshot, upload.
+  // Mirrors the portal publish-time generateThumb, but reads the public market
+  // blueprint and posts to the admin (any-listing) thumbnail endpoint.
+  function genOne(r) {
+    var pid = r.publish_id;
+    setRowStatus(pid, 'rendering…', 'busy');
+    var cv = document.createElement('canvas');
+    cv.style.cssText = 'position:fixed;left:-10000px;top:0;width:800px;height:500px;';
+    document.body.appendChild(cv);
+    var handle = null;
+    function cleanup() { if (handle) { try { handle.dispose(); } catch (e) {} } cv.remove(); }
+
+    return Promise.all([
+      fetch('/admin/api/dune/solido/' + pid + '/blueprint', { credentials: 'same-origin' })
+        .then(function (r2) { if (!r2.ok) throw new Error('blueprint ' + r2.status); return r2.json(); }),
+      catalog(),
+      viewer(),
+    ]).then(function (res) {
+      var bp = res[0], cat = res[1], mod = res[2];
+      if (bp && bp.available === false) throw new Error('blueprint unavailable');
+      handle = mod.mount(cv, bp, cat, {});
+      return handle.getManifest();
+    }).then(function (manifest) {
+      if (!manifest || !manifest.pieces) throw new Error('no real meshes');
+      return handle.setTextured(true).then(function () { return handle.switchMode('real', manifest); });
+    }).then(function () {
+      return new Promise(function (res) { setTimeout(res, 400); });  // let textures land on the GPU
+    }).then(function () {
+      var dataUrl = handle.snapshot(800, 500);
+      var b64 = (dataUrl || '').split(',')[1];
+      if (!b64) throw new Error('empty snapshot');
+      return apiCall('POST', '/admin/api/dune/solido/' + pid + '/thumbnail', { png_base64: b64 });
+    }).then(function () {
+      setRowStatus(pid, '✓ done', 'ok');
+    }).catch(function (e) {
+      setRowStatus(pid, '✗ ' + (e.message || 'failed'), 'err');
+    }).then(cleanup);
+  }
+
+  // Sequential — one heavy WebGL render at a time keeps GPU memory sane.
+  function runAll() {
+    runBtn.disabled = true;
+    var i = 0;
+    (function next() {
+      if (i >= rows.length) {
+        runBtn.disabled = false;
+        summaryEl.textContent = 'Done. Reload the market to see the new previews.';
+        return;
+      }
+      genOne(rows[i++]).then(next);
+    })();
+  }
+
+  runBtn.addEventListener('click', runAll);
+  loadMissing();
+})();
+</script>
+{% endblock %}

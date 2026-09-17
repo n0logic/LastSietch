@@ -1,0 +1,49 @@
+{% extends "v2/base.html" %}
+{% block title %}Bases — Players{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="/admin/static/css/v2/player-tools.css">
+{% endblock %}
+{% block content %}
+<main class="v2-main v2-player-bases" id="v2-player-bases">
+
+  <header class="v2-player-bases__header">
+    <h1 class="v2-player-bases__title">BRT backups</h1>
+    <p class="v2-player-bases__subtitle">
+      Packed base backups from the Base Reconstruction Tool, available as G20 handoff and G21 clone sources.
+      Read-only catalog. Filter by name, owner, or account; open a row for its composition.
+      For placed bases and archived saved state, <a href="/admin/v2/players/vault">open Base Vault</a>.
+    </p>
+  </header>
+
+  <div class="v2-bases-toolbar">
+    <input type="search" id="v2-bases-filter" class="input v2-bases-toolbar__filter"
+           placeholder="Filter by base name, owner, or account..." autocomplete="off"
+           aria-label="Filter base backups">
+    <button type="button" class="btn btn-sm" id="v2-bases-refresh"
+            hx-get="/admin/api/dune/v2/players/_bases"
+            hx-target="#v2-bases-body" hx-swap="innerHTML">Refresh</button>
+  </div>
+
+  <section id="v2-bases-body" aria-live="polite">
+    {% include "v2/_fragments/bases_list.html" %}
+  </section>
+
+  <aside class="v2-bases-drawer" id="v2-bases-drawer" aria-hidden="true">
+    <div class="v2-bases-drawer__panel" role="dialog" aria-modal="true"
+         aria-labelledby="v2-bases-drawer-title">
+      <header class="v2-bases-drawer__head">
+        <h2 class="v2-bases-drawer__title" id="v2-bases-drawer-title">Base detail</h2>
+        <button type="button" class="v2-bases-drawer__close" id="v2-bases-drawer-close"
+                aria-label="Close detail">&times;</button>
+      </header>
+      <div class="v2-bases-drawer__body" id="v2-bases-drawer-body">
+        <p class="v2-bases-detail__hint">Select a base to view its composition.</p>
+      </div>
+    </div>
+  </aside>
+
+</main>
+{% endblock %}
+{% block scripts %}
+<script src="/admin/static/js/v2/player-bases.js" defer></script>
+{% endblock %}

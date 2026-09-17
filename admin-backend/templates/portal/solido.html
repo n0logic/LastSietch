@@ -1,0 +1,137 @@
+{# Sietch Community Blueprint Market — GET /portal/solido (public).
+   Context (routers/solido.py solido_hub): listings[], sort, tag, is_linked,
+   my_publish_ids (set), gallery_limit, has_more, solido_site.
+   First page is server-rendered; portal-solido.js handles sort/tag/paging.
+   Publishing happens from /portal/my-bases (session-gated); no upload field. #}
+{% extends "portal/base.html" %}
+
+{% block title %}Blueprint Market — Last Sietch Dune Portal{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/admin/static/css/portal/portal-solido.css?v={{ solido_css_v }}">
+{% endblock %}
+
+{% block content %}
+
+<section class="portal-hero portal-hero--solido" aria-label="Sietch blueprint market">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Last Sietch</span>
+    <h1 class="portal-hero__title">Blueprint Market</h1>
+    <p class="portal-hero__sub">
+      Browse base designs shared by other Sleepers, preview them in 3D, and
+      download the blueprint. Publish your own from <a href="/portal/my-bases">My Bases</a>.
+    </p>
+  </div>
+</section>
+
+<div class="solido-hub">
+  <article class="portal-card solido-hub__card">
+    <h2 class="portal-card__title">My Bases</h2>
+    <p>Preview your own saved bases in 3D, download them, and publish any one to
+       the community market.</p>
+    <a class="portal-btn portal-btn--primary" href="/portal/my-bases">Open My Bases</a>
+  </article>
+
+  <article class="portal-card solido-hub__card">
+    <h2 class="portal-card__title">Public Solido Market</h2>
+    <p>Browse community base designs from across all servers on the public Solido
+       Market, and upload your exported blueprints there too.</p>
+    <a class="portal-btn" href="{{ solido_site }}" rel="noopener" target="_blank">
+      Visit dune.layout.tools &rarr;</a>
+  </article>
+
+  <article class="portal-card solido-hub__card">
+    <h2 class="portal-card__title">Import a Solido</h2>
+    <p>Bring a blueprint into the game as a new Solido tool — from a public
+       market link, our market, or a saved <code>.json</code> — into your CHOAM
+       bank or backpack.</p>
+    <a class="portal-btn portal-btn--primary" href="/portal/solido/import">Import to my character</a>
+  </article>
+</div>
+
+<section class="solido-gallery"
+         data-solido-gallery
+         data-sort="{{ sort }}"
+         data-tag="{{ tag }}"
+         data-limit="{{ gallery_limit }}"
+         data-has-more="{{ '1' if has_more else '0' }}"
+         data-linked="{{ '1' if is_linked else '0' }}"
+         data-loaded="{{ listings|length }}">
+  <div class="solido-toolbar">
+    <div class="solido-sorts" role="tablist" aria-label="Sort blueprints">
+      <button type="button" class="solido-sort {{ 'is-active' if sort == 'new' else '' }}"
+              data-solido-sort="new" role="tab" aria-selected="{{ 'true' if sort == 'new' else 'false' }}">Newest</button>
+      <button type="button" class="solido-sort {{ 'is-active' if sort == 'popular' else '' }}"
+              data-solido-sort="popular" role="tab" aria-selected="{{ 'true' if sort == 'popular' else 'false' }}">Most downloaded</button>
+    </div>
+    <label class="solido-tagfilter">
+      <span class="solido-tagfilter__label">Filter tag</span>
+      <input type="text" data-solido-tagfilter value="{{ tag }}"
+             placeholder="Foundation, Storage, Large…" autocomplete="off">
+    </label>
+  </div>
+
+  <p class="solido-status" data-solido-status hidden></p>
+
+  <div class="solido-grid" data-solido-grid>
+    {% for bp in listings %}
+    <article class="solido-card" data-publish-id="{{ bp.publish_id }}">
+      <a class="solido-card__link" href="/portal/solido/{{ bp.publish_id }}">
+        <div class="solido-card__art{% if not bp.thumb_url %} is-empty{% endif %}" data-faction="{{ bp.faction or 'neutral' }}">
+          {% if bp.thumb_url %}<img class="solido-card__shot" src="{{ bp.thumb_url }}" alt="" loading="lazy">{% endif %}
+          {% if bp.has_paid_pieces %}<span class="solido-card__badge solido-card__badge--mtx">MTX</span>{% endif %}
+          {% if bp.publish_id in my_publish_ids %}<span class="solido-card__badge solido-card__badge--mine">Yours</span>{% endif %}
+        </div>
+        <div class="solido-card__body">
+          <h3 class="solido-card__title">{{ bp.title }}</h3>
+          <div class="solido-card__meta">
+            <span class="solido-card__author">by {{ bp.author_name }}</span>
+            <span class="solido-card__stats">
+              <span>{{ bp.piece_count }} pcs</span>
+              <span title="downloads">&darr; {{ bp.download_count }}</span>
+            </span>
+          </div>
+          {% if bp.tags %}
+          <div class="solido-card__tags">
+            {% for t in bp.tags %}<span class="solido-chip">{{ t }}</span>{% endfor %}
+          </div>
+          {% endif %}
+        </div>
+      </a>
+      {% if is_linked %}
+      <a class="solido-card__save portal-btn portal-btn--sm"
+         href="/portal/solido/import?from={{ bp.publish_id }}&amp;title={{ bp.title | urlencode }}"
+         title="Save this blueprint to your character">Save</a>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+
+  {% if not listings %}
+  <div class="solido-empty" data-solido-empty>
+    <p class="solido-empty__headline">No community blueprints yet</p>
+    <p>Be the first to share a base — publish one from My Bases.</p>
+    <a class="portal-btn portal-btn--primary" href="/portal/my-bases">Open My Bases</a>
+  </div>
+  {% endif %}
+
+  <div class="solido-loadmore">
+    <button type="button" class="portal-btn" data-solido-loadmore
+            {{ 'hidden' if not has_more else '' }}>Load more</button>
+  </div>
+</section>
+
+<footer class="solido-credit">
+  <p>
+    The public <a href="{{ solido_site }}" rel="noopener" target="_blank">Solido Market</a>
+    (dune.layout.tools) is built and run by icehunter. Blueprints shared here use the
+    Solido blueprint format for compatibility — download one and upload it to the
+    public market yourself.
+  </p>
+</footer>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/portal-solido.js?v={{ solido_js_v }}" defer></script>
+{% endblock %}

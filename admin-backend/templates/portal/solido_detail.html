@@ -1,0 +1,83 @@
+{# Blueprint listing detail — GET /portal/solido/{publish_id} (public).
+   Context (routers/solido.py solido_detail): bp (row, tags as list), is_owner,
+   solido_site. The 3D viewer is lazy-imported only when "View in 3D" is clicked
+   (bundle discipline — three.js never loads on the gallery list). #}
+{% extends "portal/base.html" %}
+
+{% block title %}{{ bp.title }} — Blueprint Market — Last Sietch{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/admin/static/css/portal/portal-solido.css?v={{ solido_css_v }}">
+{% endblock %}
+
+{% block content %}
+
+<section class="solido-detail" data-solido-detail data-publish-id="{{ bp.publish_id }}">
+  <a class="solido-detail__back" href="/portal/solido">&larr; Back to the market</a>
+
+  <div class="solido-detail__head">
+    <div class="solido-detail__snap {% if not thumb_url %}is-empty{% endif %}" data-faction="{{ bp.faction or 'neutral' }}">
+      {% if thumb_url %}<img class="solido-detail__shot" src="{{ thumb_url }}" alt="">{% endif %}
+      <canvas class="solido-canvas" data-solido-canvas hidden></canvas>
+    </div>
+
+    <div class="solido-detail__info">
+      <h1 class="solido-detail__title">{{ bp.title }}</h1>
+      <div class="solido-detail__by">
+        <span>Shared by {{ bp.author_name }}</span>
+        <span class="solido-detail__stat">&darr; {{ bp.download_count }} downloads</span>
+      </div>
+
+      {% if bp.description %}
+      <p class="solido-detail__desc">{{ bp.description }}</p>
+      {% endif %}
+
+      <ul class="solido-detail__census">
+        <li><strong>{{ bp.piece_count }}</strong> pieces total</li>
+        <li>{{ bp.instance_count }} structural · {{ bp.placeable_count }} placeables · {{ bp.pentashield_count }} Pentashields</li>
+      </ul>
+
+      {% if bp.tags %}
+      <div class="solido-detail__tags">
+        {% for t in bp.tags %}<span class="solido-chip">{{ t }}</span>{% endfor %}
+        {% if bp.has_paid_pieces %}<span class="solido-chip solido-chip--mtx">Includes event/paid pieces</span>{% endif %}
+      </div>
+      {% endif %}
+
+      <div class="solido-detail__actions">
+        <button type="button" class="portal-btn portal-btn--primary"
+                data-solido-view>View in 3D</button>
+        <a class="portal-btn" href="/portal/solido/{{ bp.publish_id }}/download"
+           download="{{ bp.title }}.json">Download blueprint</a>
+        {% if is_linked %}
+        <a class="portal-btn portal-btn--primary"
+           href="/portal/solido/import?from={{ bp.publish_id }}&amp;title={{ bp.title | urlencode }}">Import to my character</a>
+        {% endif %}
+        {% if is_owner %}
+        <button type="button" class="portal-btn portal-btn--ghost"
+                data-solido-unpublish data-publish-id="{{ bp.publish_id }}"
+                data-portal-confirm="Unpublish this blueprint from the market?">Unpublish</button>
+        {% endif %}
+      </div>
+      <p class="solido-detail__viewnote" data-solido-viewnote hidden></p>
+    </div>
+  </div>
+
+  <p class="solido-detail__hint">
+    Want it on the public Solido Market? Download the blueprint above, then upload
+    the JSON to <a href="{{ solido_site }}" rel="noopener" target="_blank">dune.layout.tools</a>
+    yourself.
+  </p>
+</section>
+
+<footer class="solido-credit">
+  <p>3D preview is a Last Sietch box-massing render. Blueprints use the Solido
+     format (<a href="{{ solido_site }}" rel="noopener" target="_blank">dune.layout.tools</a>,
+     by icehunter) for compatibility.</p>
+</footer>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/portal-solido.js?v={{ solido_js_v }}" defer></script>
+{% endblock %}

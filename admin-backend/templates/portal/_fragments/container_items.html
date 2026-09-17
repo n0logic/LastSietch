@@ -1,0 +1,91 @@
+{# Items inside one container — GET /portal/containers/{id}/items?page=N
+   Rendered into #cont-drawer-body by portal-containers.js.
+   Context:
+     container_items = {available, error, stale, container_id,
+                        items:[{id, template_id, name, icon, stack_size,
+                                quality, cur_dur, max_dur}],
+                        total_count, page, page_size}
+#}
+{% set ci = container_items if container_items is defined else {} %}
+{% set rows = ci.get('items', []) if ci else [] %}
+{% set available = ci.get('available', False) if ci else False %}
+{% set cid = ci.get('container_id', container_id if container_id is defined else '') %}
+{% set page = ci.get('page', 1) if ci else 1 %}
+{% set page_size = ci.get('page_size', 100) if ci else 100 %}
+{% set total = ci.get('total_count', rows|length) if ci else 0 %}
+{% set total_pages = ((total + page_size - 1) // page_size) if total else 1 %}
+{% set stale = ci.get('stale', False) if ci else False %}
+
+{% if not available %}
+  <div class="portal-msg portal-msg--warning" role="status">
+    Couldn't load this container's contents right now. Please try again in a moment.
+  </div>
+{% elif rows %}
+  <div class="cont-items__meta">
+    {{ total }} item{{ '' if total == 1 else 's' }}{% if total_pages > 1 %} · page {{ page }} of {{ total_pages }}{% endif %}
+    {% if stale %}<span class="cont-items__stale" title="Served from cache">cached</span>{% endif %}
+  </div>
+
+  <div class="cont-items__filter">
+    <input type="search" class="cont-items__search" autocomplete="off"
+           placeholder="Search items on this page…" aria-label="Search items">
+  </div>
+
+  <ul class="cont-items" role="list">
+    {% for it in rows %}
+    <li class="cont-item" data-filter="{{ ((it.name or '') ~ ' ' ~ (it.template_id or ''))|lower }}"
+        data-item-id="{{ it.id }}">
+      <span class="cont-item__icon-wrap">
+        <img class="cont-item__icon" loading="lazy" alt="" data-icon-fallback
+             src="/admin/static/img/dune-icons/{{ it.icon }}.png">
+        {% if it.quality and it.quality > 0 %}<span class="cont-item__grade quality-tier-{{ it.quality }}" title="Quality tier {{ it.quality }}">{{ it.quality }}</span>{% endif %}
+      </span>
+      <span class="cont-item__name">{{ it.name }}</span>
+      <span class="cont-item__meta">
+        {% if it.stack_size and it.stack_size > 1 %}<span class="cont-item__qty">×{{ it.stack_size }}</span>{% endif %}
+        {% set mx = it.max_dur | float(0) %}
+        {% if mx > 0 %}
+          {% set cur = it.cur_dur | float(0) %}
+          {% set pct = [((cur / mx * 100) | round(0, 'floor') | int), 100] | min %}
+          <span class="cont-item__dura {% if pct < 25 %}is-low{% elif pct < 60 %}is-mid{% else %}is-high{% endif %}"
+                title="Durability {{ cur | round(0) | int }} / {{ mx | round(0) | int }}">
+            <span class="cont-item__dura-tag">DUR</span>
+            <span class="cont-item__dura-bar"><span class="cont-item__dura-fill" style="width: {{ pct }}%"></span></span>
+            <span class="cont-item__dura-pct">{{ pct }}%</span>
+          </span>
+        {% elif it.durable %}
+          {# Durable item never used yet (no per-instance durability recorded) -> full. #}
+          <span class="cont-item__dura is-high" title="Durability: full (undamaged)">
+            <span class="cont-item__dura-tag">DUR</span>
+            <span class="cont-item__dura-bar"><span class="cont-item__dura-fill" style="width: 100%"></span></span>
+            <span class="cont-item__dura-pct">100%</span>
+          </span>
+        {% endif %}
+      </span>
+      <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm cont-item__sell"
+              data-sell-item="{{ it.id }}"
+              data-sell-container="{{ cid }}"
+              data-sell-tpl="{{ it.template_id }}"
+              data-sell-name="{{ it.name }}"
+              data-sell-stack="{{ it.stack_size or 1 }}"
+              data-sell-quality="{{ it.quality or 0 }}"
+              aria-label="List {{ it.name }} on the CHOAM exchange">List</button>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="cont-items__empty-filter" hidden>No items match your search.</p>
+
+  {% if total_pages > 1 %}
+  <nav class="cont-items__pager" aria-label="Container items pagination">
+    <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm"
+            data-cont-page="{{ page - 1 }}" data-cont-id="{{ cid }}"
+            {% if page <= 1 %}disabled{% endif %}>Previous</button>
+    <span class="cont-items__pager-label">Page {{ page }} of {{ total_pages }}</span>
+    <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm"
+            data-cont-page="{{ page + 1 }}" data-cont-id="{{ cid }}"
+            {% if page >= total_pages %}disabled{% endif %}>Next</button>
+  </nav>
+  {% endif %}
+{% else %}
+  <div class="portal-msg portal-msg--info" role="status">This container is empty.</div>
+{% endif %}

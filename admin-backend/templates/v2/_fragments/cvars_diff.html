@@ -1,0 +1,115 @@
+{# Diff sub-tab — two cards:
+
+   1. Drift vs canonical: effective values diff'd against Last Sietch's curated
+      cvars-canonical.json (formerly .yaml; switched to JSON to avoid the
+      PyYAML new-dep blocker per brief §10 hard rule 11).
+
+   2. Funcom settingsUpdate drift: latest output of
+      /opt/lastsietch-rmq-bridge/diff-settingsupdate.sh. Server-side cached 60s
+      (cache lives in the helper module). Refresh button forces re-shell.
+#}
+{% set canonical_drift = canonical_diff.drifts if canonical_diff.drifts is defined else [] %}
+{% set canonical_total = canonical_drift|length %}
+{% set settings_text = settings_diff.diff_text if settings_diff.diff_text is defined else '' %}
+{% set settings_cached_at = settings_diff.cached_at if settings_diff.cached_at is defined else None %}
+{% set settings_exit_code = settings_diff.exit_code if settings_diff.exit_code is defined else None %}
+
+<div class="v2-cvars-diff">
+
+  {# ── Drift vs canonical ── #}
+  <section class="card v2-cvars-diff__canonical">
+    <header class="card__header">
+      <h2 class="card__title">Drift vs canonical</h2>
+      <p class="card__subtitle">
+        Effective values that diverge from <code>data/cvars-canonical.json</code>.
+        Empty cells in canonical mean Last Sietch has no opinion on that key — drift
+        is not flagged.
+      </p>
+    </header>
+    <div class="card__body">
+      {% if not canonical_diff_available %}
+        <div class="empty-state empty-state--loading-failed">
+          <p class="empty-state__headline">Canonical diff unavailable</p>
+          <p class="empty-state__body">
+            Helper module didn't return drift data. Check
+            <code>lib/dune_ini.py</code> is committed and admin-backend
+            restarted.
+          </p>
+        </div>
+      {% elif canonical_total == 0 %}
+        <div class="empty-state empty-state--ok">
+          <p class="empty-state__headline">✓ No drift</p>
+          <p class="empty-state__body">Every canonical-tracked key matches.</p>
+        </div>
+      {% else %}
+        <table class="v2-cvars-diff__table">
+          <thead>
+            <tr>
+              <th scope="col">Key</th>
+              <th scope="col">Expected (canonical)</th>
+              <th scope="col">Actual (effective)</th>
+              <th scope="col">Source layer</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in canonical_drift %}
+              <tr class="v2-cvars-diff__row">
+                <td><code>{{ d.key }}</code></td>
+                <td><code>{{ d.expected }}</code></td>
+                <td><code class="v2-cvars-diff__actual">{{ d.actual }}</code></td>
+                <td>
+                  {% if d.source_layer %}
+                    <span class="cvars-layer-pill cvars-layer-pill--{{ d.source_layer }} cvars-layer-pill--sm">{{ d.source_layer }}</span>
+                  {% else %}—{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </div>
+  </section>
+
+  {# ── Funcom settingsUpdate drift ── #}
+  <section class="card v2-cvars-diff__settings">
+    <header class="card__header">
+      <h2 class="card__title">Funcom settingsUpdate drift</h2>
+      <p class="card__subtitle">
+        Output of <code>diff-settingsupdate.sh</code> on the two most recent
+        captures in <code>/var/lib/lastsietch-rmq-bridge/captures-admin/settingsUpdate/</code>.
+        Funcom-owned plane — Last Sietch only observes (Discord intel A10).
+      </p>
+      {% if settings_cached_at %}
+        <p class="card__meta">cached <time datetime="{{ settings_cached_at }}">{{ settings_cached_at }}</time></p>
+      {% endif %}
+    </header>
+    <div class="card__body">
+      {% if not settings_diff_available %}
+        <div class="empty-state empty-state--loading-failed">
+          <p class="empty-state__headline">settingsUpdate diff unavailable</p>
+          <p class="empty-state__body">
+            Helper didn't return diff output. Either captures dir is empty or
+            the shell helper isn't deployed.
+          </p>
+        </div>
+      {% elif settings_exit_code == 0 %}
+        <div class="empty-state empty-state--ok">
+          <p class="empty-state__headline">✓ No Funcom-side drift</p>
+          <p class="empty-state__body">
+            Latest two settingsUpdate captures match. No silent Funcom push detected.
+          </p>
+        </div>
+      {% else %}
+        <pre class="v2-cvars-diff__text">{{ settings_text }}</pre>
+      {% endif %}
+      <div class="v2-cvars-diff__actions">
+        <button type="button" class="btn btn-sm"
+                hx-get="/admin/v2/server/cvars/diff"
+                hx-target="#cvars-subtab-body"
+                hx-swap="innerHTML"
+                hx-indicator="#v2-cvars-subtab-loading">Refresh</button>
+      </div>
+    </div>
+  </section>
+
+</div>

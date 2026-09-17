@@ -1,0 +1,100 @@
+{% set rows = entries if entries is defined else (initial_entries if initial_entries is defined else []) %}
+{% set page = current_page if current_page is defined else 1 %}
+{% set total = total_count if total_count is defined else (rows|length) %}
+{% set page_size = page_size if page_size is defined else 50 %}
+{% set total_pages = ((total + page_size - 1) // page_size) if total else 1 %}
+{% set qs = filter_qs if filter_qs is defined else '' %}
+
+{% if grants_available is defined and not grants_available %}
+  {# Half this trail lives in the game database and arrives over the relay. When
+     that is down the table is admin.db only, and a page that does not say so
+     looks like a quiet day rather than a missing source. #}
+  <p class="v2-audit__source-warn" role="status">
+    Grant feed unreachable. These rows are the admin database only; game-side
+    grants are missing from this view until the relay answers again.
+  </p>
+{% endif %}
+
+<div style="overflow-x: auto;">
+  <table class="table table--compact table--dense audit-log">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>User</th>
+        <th>Action</th>
+        <th>Target</th>
+        <th>Details</th>
+        <th>IP</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody id="v2-audit-body">
+      {% if rows %}
+        {% for e in rows %}
+          {% set is_fail = (e.success is defined and (e.success == false or e.success == 0)) %}
+          {% set is_login_fail = e.action in ('login_failed', 'login_blocked') %}
+          {% set status_class = 'audit-row--fail' if (is_fail and not is_login_fail) else ('audit-row--warn' if is_login_fail else 'audit-row--ok') %}
+          <tr class="audit-row {{ status_class }}">
+            <td class="audit-row__time">
+              {% if e.timestamp_iso %}<time datetime="{{ e.timestamp_iso }}">{{ e.timestamp_display or e.timestamp_iso }}</time>
+              {% elif e.timestamp %}{{ e.timestamp }}
+              {% else %}<span class="audit-row__none">no timestamp</span>{% endif %}
+            </td>
+            <td>{{ e.username or '-' }}</td>
+            <td class="audit-row__action">{{ e.action or '' }}</td>
+            <td>{{ e.target or '-' }}</td>
+            {# The reason and the before/after state every lever writes. Rendered
+               through Jinja autoescape, JSON pretty-printed by the route when it
+               parses, summary truncated so one large payload cannot own the
+               table. <details> is the toggle: no script, keyboard reachable. #}
+            <td class="audit-row__details">
+              {% if e.details_summary %}
+                <details>
+                  <summary>{{ e.details_summary }}</summary>
+                  <pre>{{ e.details_body }}</pre>
+                </details>
+              {% elif e.details %}
+                {{ e.details }}
+              {% else %}
+                <span class="audit-row__none">-</span>
+              {% endif %}
+            </td>
+            <td class="audit-row__ip">{{ e.ip_address or '-' }}</td>
+            <td class="audit-row__status">
+              {% if is_login_fail %}<span class="status-badge status-badge--pending">WARN</span>
+              {% elif is_fail %}<span class="status-badge status-badge--failed">FAIL</span>
+              {% else %}<span class="status-badge status-badge--applied">OK</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="7">
+            <div class="empty-state">
+              <p>No audit entries match your filters.</p>
+              <a class="btn btn-sm" href="/admin/v2/audit">Reset filters</a>
+            </div>
+          </td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<nav class="pagination" aria-label="Audit log pagination">
+  <button type="button" class="btn btn-sm"
+          {% if page <= 1 %}disabled{% endif %}
+          hx-get="/admin/api/dune/v2/audit-fragment?page={{ page - 1 }}{{ qs }}"
+          hx-target="#v2-audit-body-wrap"
+          hx-swap="innerHTML"
+          hx-indicator="#v2-audit-loading"
+          hx-push-url="/admin/v2/audit?page={{ page - 1 }}{{ qs }}">Previous</button>
+  <span class="pagination__total">Page {{ page }} of {{ total_pages }} · {{ total }} entries</span>
+  <button type="button" class="btn btn-sm"
+          {% if page >= total_pages %}disabled{% endif %}
+          hx-get="/admin/api/dune/v2/audit-fragment?page={{ page + 1 }}{{ qs }}"
+          hx-target="#v2-audit-body-wrap"
+          hx-swap="innerHTML"
+          hx-indicator="#v2-audit-loading"
+          hx-push-url="/admin/v2/audit?page={{ page + 1 }}{{ qs }}">Next</button>
+</nav>

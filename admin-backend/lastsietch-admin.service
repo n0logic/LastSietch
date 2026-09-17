@@ -1,0 +1,18 @@
+[Unit]
+Description=Last Sietch Admin Panel
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/lastsietch-admin
+# The port is a variable so the API server can share a host with the telemetry
+# API (which also defaults to 8078): override LASTSIETCH_ADMIN_PORT in the .env file.
+Environment=LASTSIETCH_ADMIN_PORT=8078
+EnvironmentFile=/opt/lastsietch-admin/.env
+ExecStart=/opt/lastsietch-admin/venv/bin/uvicorn main:app --host 127.0.0.1 --port ${LASTSIETCH_ADMIN_PORT}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

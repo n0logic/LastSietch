@@ -1,0 +1,46 @@
+{# Reusable single-question partial. Not used by v1 quiz.html (which inlines
+   all 3); kept for v1.1 HTMX-style flow.
+   Context: question {index, kind, prompt, format, choices, input_name}, total. #}
+<fieldset class="portal-quiz__question-block">
+  <legend class="sr-only">Question {{ question.index + 1 }}</legend>
+  <div class="portal-quiz__progress">Question {{ question.index + 1 }} of {{ total }}</div>
+  <p class="portal-quiz__question">{{ question.prompt }}</p>
+
+  {% if question.format == "radio" %}
+    <div class="portal-radio-group" role="radiogroup" aria-required="true">
+      {% for choice in question.choices %}
+      <label class="portal-radio">
+        <input type="radio"
+               name="{{ question.input_name }}"
+               value="{{ choice }}"
+               required>
+        <span>{{ choice }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  {% elif question.format == "numeric" %}
+    <input type="text"
+           class="portal-input"
+           name="{{ question.input_name }}"
+           required
+           maxlength="32"
+           inputmode="numeric"
+           autocomplete="off">
+  {% elif question.format == "text" %}
+    <input type="text"
+           class="portal-input"
+           name="{{ question.input_name }}"
+           required
+           maxlength="64"
+           autocomplete="off"
+           spellcheck="false">
+  {% else %}{# defensive fallback #}
+    <input type="text"
+           class="portal-input"
+           name="{{ question.input_name }}"
+           required
+           maxlength="64"
+           autocomplete="off"
+           spellcheck="false">
+  {% endif %}
+</fieldset>

@@ -1,0 +1,5 @@
+{# World & Maps tab sub-tabs. Active state comes from `nav_path` (set in base.html). #}
+<nav class="v2-subnav" aria-label="World and Maps sub-tabs">
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/world/map') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/world/map">Live Map</a>
+  <a class="v2-subnav__tab{% if nav_path.startswith('/v2/server/cvars') %} v2-subnav__tab--active{% endif %}" href="/admin/v2/server/cvars">CVars</a>
+</nav>

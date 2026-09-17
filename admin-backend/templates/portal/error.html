@@ -1,0 +1,20 @@
+{# Generic error fallback for backend exception handlers.
+   Context: request, title, message, back_url #}
+{% extends "portal/base.html" %}
+
+{% block title %}{{ title | default('Something went wrong', true) }} — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+<article class="portal-card">
+  <div class="portal-error">
+    <div class="portal-error__icon" aria-hidden="true">!</div>
+    <h1 class="portal-error__title">{{ title | default('Something went wrong', true) }}</h1>
+    <p class="portal-error__body">
+      {{ message | default('We hit an unexpected snag. Please try again. If it keeps happening, ping us on Discord #help-and-feedback.', true) }}
+    </p>
+    <p class="portal-error__body portal-error__back">
+      <a href="{{ back_url | default('/portal/', true) }}">Back to the start</a>
+    </p>
+  </div>
+</article>
+{% endblock %}

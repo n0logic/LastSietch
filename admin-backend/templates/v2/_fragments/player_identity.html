@@ -1,0 +1,223 @@
+{% set ident = identity if identity is defined else {} %}
+{% set snap = ident.snapshot_row if ident.snapshot_row is defined else None %}
+{% set snap_ok = ident.snapshot_available if ident.snapshot_available is defined else False %}
+{% set tags = ident.tags if ident.tags is defined else [] %}
+{% set tags_ok = ident.tags_available if ident.tags_available is defined else False %}
+
+{# Faction standing comes from REPUTATION (routers/v2_player._load_identity_data
+   -> portal._faction_rank), never from Faction.X.TierN tags.
+
+   This card used to take the highest tier tag, and that ranks players BACKWARDS:
+   `dune.set_player_faction_reputation` writes the whole Tier0..N set during a
+   G12 grant, so a granted player shows Tier 20 while someone who earned the rank
+   normally shows Tier 5. Measured 2026-07-27 — one player read "Tier 20" while
+   locked at 19, another read "Tier 5" while genuinely rank 20.
+
+   If the standing read fails we show the faction with NO tier rather than
+   falling back to tags: no number is honest, a tag-derived number is not. #}
+{% set fac = ident.faction if ident.faction is defined else {} %}
+{% set fac_ok = fac.available if fac.available is defined else False %}
+{% set faction_label = fac.name if fac_ok else None %}
+{% set faction_tier = fac.rank if fac_ok else None %}
+{% set faction_rank_name = fac.rank_name if fac_ok else None %}
+
+{# Top "noteworthy" tags = faction tiers + journey/act completions + first 12 others #}
+{% set ns2 = namespace(notable=[], others=[]) %}
+{% for t in tags %}
+  {% if t.startswith('Faction.') or t.startswith('Journey.') or 'ActComplete' in t or t.startswith('Landsraad.') %}
+    {% set _ = ns2.notable.append(t) %}
+  {% else %}
+    {% set _ = ns2.others.append(t) %}
+  {% endif %}
+{% endfor %}
+{% set top_tags = (ns2.notable + ns2.others)[:12] %}
+
+<div class="v2-player-identity">
+
+  <section class="v2-player-identity__stats" aria-label="Progression at a glance">
+    {% if not snap_ok %}
+      <div class="empty-state empty-state--loading-failed">
+        <p class="empty-state__headline">Progression snapshot unavailable</p>
+        <p class="empty-state__body">The relay returned an error for /dune/progression/snapshot. Other tabs may still load.</p>
+      </div>
+    {% elif snap %}
+      <div class="v2-player-identity__primary-strip">
+        <div class="stat-card">
+          <div class="stat-card__value">{{ snap.lvl if snap.lvl is not none else '—' }}</div>
+          <div class="stat-card__label">Level</div>
+          {% if snap.xp is defined and snap.xp is not none %}
+            <div class="stat-card__hint">{{ snap.xp }} XP</div>
+          {% endif %}
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__value">{{ snap.total_sp if snap.total_sp is not none else '—' }}</div>
+          <div class="stat-card__label">Total SP</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__value">{{ snap.intel if snap.intel is not none else '—' }}</div>
+          <div class="stat-card__label">Intel</div>
+        </div>
+      </div>
+      <div class="v2-player-identity__secondary-strip">
+        <div class="stat-card">
+          <div class="stat-card__value">{{ snap.unspent_sp if snap.unspent_sp is not none else '—' }}</div>
+          <div class="stat-card__label">Unspent SP</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__value">{{ snap.keystone_sp if snap.keystone_sp is not none else '—' }}</div>
+          <div class="stat-card__label">Keystone SP</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__value">
+            {% if faction_label %}
+              <span class="status-badge status-badge--applied">{{ faction_label }}</span>
+            {% else %}
+              —
+            {% endif %}
+          </div>
+          <div class="stat-card__label">Faction</div>
+          {% if faction_tier is not none %}
+            {# Standing shown alongside the rank: the rank alone hides "one point
+               short of 20", which is a real case we hit and could not see. #}
+            <div class="stat-card__hint">
+              Rank {{ faction_tier }}{% if faction_rank_name and faction_rank_name != 'Tier ' ~ faction_tier %} · {{ faction_rank_name }}{% endif %}
+              {%- if fac.reputation is not none %} · {{ '{:,}'.format(fac.reputation) }} rep{% endif %}
+              {%- if not fac.at_max and fac.to_next %} · {{ '{:,}'.format(fac.to_next) }} to next{% endif %}
+            </div>
+          {% elif faction_label %}
+            <div class="stat-card__hint">standing unavailable</div>
+          {% endif %}
+        </div>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <p class="empty-state__headline">No progression data</p>
+        <p class="empty-state__body">Account #{{ ident.account_id or account_id }} has no snapshot row yet.</p>
+      </div>
+    {% endif %}
+  </section>
+
+  {# --- Economy + Activity (player-vitals endpoint) --- #}
+  {% set vit = ident.vitals if ident.vitals is defined else {} %}
+  {% set econ = vit.economy if vit.economy is defined else {} %}
+  {% set act = vit.activity if vit.activity is defined else {} %}
+  {% if vit.available %}
+    <section class="v2-player-identity__vitals" aria-label="Economy and activity">
+      <div class="v2-player-identity__primary-strip">
+        <div class="stat-card">
+          <div class="stat-card__value">{% if econ.solari is not none %}{{ "{:,}".format(econ.solari) }}{% else %}—{% endif %}</div>
+          <div class="stat-card__label">Solari</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__value">{% if econ.scrip is not none %}{{ "{:,}".format(econ.scrip) }}{% else %}—{% endif %}</div>
+          <div class="stat-card__label">Scrip</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__value">{% if act.total_hours is not none %}{{ act.total_hours }}h{% else %}—{% endif %}</div>
+          <div class="stat-card__label">Playtime</div>
+          {% if act.active_days is not none %}
+            <div class="stat-card__hint">{{ act.active_days }} active day{{ '' if act.active_days == 1 else 's' }}</div>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+  {% endif %}
+
+  {# --- Specialization Tracks (progression_state) --- #}
+  {% set prog = ident.progression if ident.progression is defined else {} %}
+  {% set tracks = prog.spec_tracks if prog.spec_tracks is defined else {} %}
+  {% if prog.available and tracks %}
+    <section class="v2-player-identity__specs" aria-label="Specialization tracks">
+      <div class="card-title">
+        Specialization Tracks · {{ prog.keystone_count }} keystone{{ '' if prog.keystone_count == 1 else 's' }} · {{ prog.skill_count }} skill{{ '' if prog.skill_count == 1 else 's' }}
+      </div>
+      <div class="v2-spec-tracks">
+        {% for tname in ['Combat', 'Crafting', 'Gathering', 'Exploration', 'Sabotage'] %}
+          {% set tr = tracks.get(tname) %}
+          {% if tr %}
+            {% set lvl = (tr.level | float) %}
+            <div class="v2-spec-track">
+              <div class="v2-spec-track__head">
+                <span class="v2-spec-track__name">{{ tname }}</span>
+                <span class="v2-spec-track__lvl">Lv {{ lvl | int }} <span class="v2-spec-track__cap">/ 100</span></span>
+              </div>
+              <div class="v2-spec-track__bar" role="progressbar"
+                   aria-valuenow="{{ lvl | int }}" aria-valuemin="0" aria-valuemax="100">
+                <span style="width: {{ [lvl, 100] | min | round(0, 'floor') | int }}%"></span>
+              </div>
+              <div class="v2-spec-track__xp">{{ "{:,}".format(tr.xp) if tr.xp is not none else 0 }} XP</div>
+            </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  <section class="v2-player-identity__tags" aria-label="Top progression tags">
+    <div class="card-title">Top tags{% if tags %} · {{ tags|length }} total{% endif %}</div>
+    {% if not tags_ok %}
+      <div class="empty-state empty-state--loading-failed">
+        <p class="empty-state__headline">Tags unavailable</p>
+        <p class="empty-state__body">The relay returned an error for /dune/player/{{ account_id }}/tags.</p>
+      </div>
+    {% elif tags %}
+      <ul class="v2-player-identity__tag-list" role="list">
+        {% for tag in top_tags %}
+          <li class="grant-badge">{{ tag }}</li>
+        {% endfor %}
+      </ul>
+      {% if tags|length > top_tags|length %}
+        <details class="v2-player-identity__all-tags">
+          <summary>View all {{ tags|length }} tags</summary>
+          <ul class="v2-player-identity__tag-list v2-player-identity__tag-list--full" role="list">
+            {% for tag in tags %}
+              <li class="grant-badge grant-badge--system">{{ tag }}</li>
+            {% endfor %}
+          </ul>
+        </details>
+      {% endif %}
+
+      {# Glossary: explain the tag prefixes this player actually has. #}
+      {% set glossary = {
+        'Faction': 'Faction standing and rank (e.g. Atreides Tier 17)',
+        'Journey': 'Main-story act and quest progress',
+        'Landsraad': 'Landsraad council contributions',
+        'Contract': 'Contract and mission completions',
+        'Exploration': 'Points of interest discovered',
+        'BigMoments': 'Milestone firsts (first base, bike, stillsuit)',
+        'JourneySets': 'Journey and starter-kit item sets earned',
+        'Character': 'Character states and keystones (e.g. spice addiction)',
+        'DialogueFlags': 'NPC dialogue progress',
+        'DunipediaFlags': 'Codex (Dunipedia) entries unlocked',
+        'NPE': 'New-player tutorial completion',
+        'ActComplete': 'Story act completion'
+      } %}
+      {% set ns_pref = namespace(present=[]) %}
+      {% for tag in tags %}
+        {% set pfx = tag.split('.')[0] %}
+        {% if pfx in glossary and pfx not in ns_pref.present %}
+          {% set _ = ns_pref.present.append(pfx) %}
+        {% endif %}
+      {% endfor %}
+      {% if ns_pref.present %}
+        <details class="v2-player-identity__tag-glossary">
+          <summary>What do these mean?</summary>
+          <dl class="v2-tag-glossary">
+            {% for pfx in ns_pref.present %}
+              <div class="v2-tag-glossary__row">
+                <dt class="grant-badge grant-badge--system">{{ pfx }}</dt>
+                <dd>{{ glossary[pfx] }}</dd>
+              </div>
+            {% endfor %}
+          </dl>
+        </details>
+      {% endif %}
+    {% else %}
+      <div class="empty-state">
+        <p class="empty-state__headline">No tags yet</p>
+        <p class="empty-state__body">This account has not earned any progression tags.</p>
+      </div>
+    {% endif %}
+  </section>
+
+</div>

@@ -1,0 +1,81 @@
+{# Portal landing — GET /portal/
+   Context (canonical, from routers/portal.py portal_landing):
+     discord_login_url: str
+     discord_invite_url: str
+     honest_disclosure: str
+     banner_kind: "session_expired"|"oauth_cancelled"|"logged_out"|"link_revoked"|None
+     portal_session: None (logged-in users 302 to /portal/account before this renders)
+     portal_csrf_token: str
+#}
+{% extends "portal/base.html" %}
+
+{% block title %}Sign in — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+
+{# Cinematic landing hero — same key art as the account page (hero-{night,day}.jpg).
+   Sand drift canvas + parallax are wired by portal-cinematic.js. #}
+<section class="portal-hero" aria-label="Last Sietch">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Last Sietch</span>
+    <p class="portal-hero__title">Dune: Awakening Companion</p>
+    <p class="portal-hero__sub">Character, storage, market &amp; Landsraad &mdash; anywhere.</p>
+  </div>
+</section>
+
+{# Team-lead verbatim disclosure (mandatory on landing + dashboard) #}
+<section class="portal-banner" aria-label="Portal disclosure">
+  This is the public player portal. Identity verification ties your Discord account to your Last Sietch character. Last Sietch admins maintain the underlying server state — see Discord <strong>#help-and-feedback</strong> if anything looks wrong.
+</section>
+
+{% if banner_kind == "session_expired" %}
+<div class="portal-msg portal-msg--info" role="status">
+  Your session expired. Sign in again to continue.
+</div>
+{% elif banner_kind == "oauth_cancelled" %}
+<div class="portal-msg portal-msg--warning" role="status">
+  You cancelled the Discord sign-in. No problem — try again whenever you're ready.
+</div>
+{% elif banner_kind == "logged_out" %}
+<div class="portal-msg portal-msg--success" role="status">
+  Signed out. See you next time.
+</div>
+{% elif banner_kind == "link_revoked" %}
+<div class="portal-msg portal-msg--warning" role="status">
+  Your account link was removed by an admin. You can re-verify a character below.
+</div>
+{% endif %}
+
+<article class="portal-card">
+  <h1 class="portal-card__title">Verify your Last Sietch character</h1>
+  <p class="portal-card__subtitle">
+    Sign in with Discord, then answer three quick questions about your character so we can confirm it's yours. Once linked, you can view your account info here any time.
+  </p>
+
+  <div class="portal-card__body">
+    <a href="{{ discord_login_url | default('/portal/login', true) }}"
+       class="portal-btn portal-btn--discord portal-btn--block"
+       data-portal-action="discord-login">
+      <svg class="portal-discord-icon" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+        <path d="M20.317 4.369A19.79 19.79 0 0 0 16.558 3a.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.249a18.36 18.36 0 0 0-5.487 0 12.683 12.683 0 0 0-.617-1.249A.077.077 0 0 0 9.688 3 19.736 19.736 0 0 0 5.93 4.369a.07.07 0 0 0-.032.027C2.534 9.046 1.65 13.58 2.066 18.061a.082.082 0 0 0 .031.057 19.876 19.876 0 0 0 5.992 3.03.078.078 0 0 0 .084-.028 14.21 14.21 0 0 0 1.226-1.994.076.076 0 0 0-.041-.105 13.108 13.108 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 0 1 .077-.01c3.927 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.009c.12.099.246.198.373.292a.077.077 0 0 1-.006.128 12.299 12.299 0 0 1-1.873.891.077.077 0 0 0-.041.106c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.029 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .031-.056c.5-5.177-.838-9.673-3.548-13.665a.06.06 0 0 0-.031-.028zM8.02 15.331c-1.182 0-2.157-1.085-2.157-2.419 0-1.333.956-2.418 2.157-2.418 1.21 0 2.176 1.094 2.157 2.418 0 1.334-.956 2.419-2.157 2.419zm7.974 0c-1.182 0-2.157-1.085-2.157-2.419 0-1.333.956-2.418 2.157-2.418 1.21 0 2.176 1.094 2.157 2.418 0 1.334-.946 2.419-2.157 2.419z"/>
+      </svg>
+      <span>Sign in with Discord</span>
+    </a>
+
+    <p class="portal-card__subtitle portal-card__fine-print">
+      We use Discord only to confirm your identity. We don't post on your behalf and we don't read your servers.
+    </p>
+  </div>
+</article>
+
+{# Architect-mandated honest disclosure (§6 #9) — server-supplied string #}
+{% if honest_disclosure %}
+<article class="portal-card">
+  <h2 class="portal-card__title">How this works</h2>
+  <div class="portal-card__body">
+    <p>{{ honest_disclosure }}</p>
+  </div>
+</article>
+{% endif %}
+
+{% endblock %}

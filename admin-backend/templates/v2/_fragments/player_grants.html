@@ -1,0 +1,104 @@
+{% set payload = grants if grants is defined else {} %}
+{% set rows = payload.grants if payload.grants is defined else [] %}
+{% set page = payload.page if payload.page is defined else 1 %}
+{% set page_size = payload.page_size if payload.page_size is defined else 50 %}
+{% set total = payload.total_count if payload.total_count is defined else (rows|length) %}
+{% set total_pages = ((total + page_size - 1) // page_size) if total else 1 %}
+
+{# Grant-type family color mapping. Falls back to --system if no prefix matches.
+   Keys match the .grant-badge--* classes defined in design-system.css 3.16. #}
+{% set family_map = {
+  'char': 'char', 'spec': 'spec', 'intel': 'intel',
+  'landsraad': 'landsraad', 'item': 'item', 'system': 'system'
+} %}
+
+<div class="v2-player-grants">
+
+  <div style="overflow-x: auto;">
+    <table class="table table--compact table--dense audit-log v2-player-grants__table">
+      <thead>
+        <tr>
+          <th style="width: 1.5rem;" aria-label="Expand"></th>
+          <th>Time</th>
+          <th>Grant type</th>
+          <th>Detail</th>
+          <th>Result</th>
+          <th>Operator</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if rows %}
+          {% for g in rows %}
+            {% set is_fail = (g.success == false or g.success == 0) %}
+            {% set status_class = 'audit-row--fail' if is_fail else 'audit-row--ok' %}
+            {% set row_id = 'grant-row-' ~ (g.id if g.id is not none else loop.index) %}
+            {% set gt = g.grant_type or '' %}
+            {% set fam_key = gt.split('_')[0]|lower if '_' in gt else gt|lower %}
+            {% set fam = family_map.get(fam_key, 'system') %}
+            <tr class="audit-row {{ status_class }}" data-grant-row="{{ row_id }}">
+              <td>
+                <button type="button"
+                        class="audit-row__expand-btn"
+                        aria-expanded="false"
+                        aria-controls="{{ row_id }}-detail"
+                        data-expand-target="{{ row_id }}-detail">▸</button>
+              </td>
+              <td class="audit-row__time">
+                {% if g.timestamp %}<time datetime="{{ g.timestamp }}">{{ g.timestamp }}</time>
+                {% else %}—{% endif %}
+              </td>
+              <td><span class="grant-badge grant-badge--{{ fam }}">{{ gt or '—' }}</span></td>
+              <td class="v2-player-grants__detail-cell">{{ g.detail or '—' }}</td>
+              <td class="audit-row__status">
+                {% if is_fail %}<span class="status-badge status-badge--failed">FAIL</span>
+                {% else %}<span class="status-badge status-badge--applied">{{ g.result or 'OK' }}</span>{% endif %}
+              </td>
+              <td>{{ g.username or '—' }}</td>
+            </tr>
+            <tr class="audit-detail" id="{{ row_id }}-detail" hidden>
+              <td colspan="6">
+                <pre class="audit-detail__json">{% if g.details_parsed %}{{ g.details_parsed | tojson(indent=2) }}{% elif g.details_raw %}{{ g.details_raw }}{% else %}(no details){% endif %}</pre>
+                {# /admin/dune-grant has no query-param pre-fill (verified 2026-05-24);
+                   omit the re-run CTA from per-row detail to avoid a misleading link.
+                   v1.1 can add it once the grant form picks up `recipient=`/`grant_type=`. #}
+              </td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="6">
+              <div class="empty-state empty-state--zero-results">
+                <p class="empty-state__headline">No grants for this player</p>
+                <p class="empty-state__body">Nothing has been granted to account #{{ account_id }} yet.</p>
+                <div class="empty-state__actions">
+                  <a class="btn btn-sm btn-accent" href="/admin/dune-grant">Open grant form →</a>
+                </div>
+              </div>
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if rows %}
+    <nav class="pagination" aria-label="Player grants pagination">
+      <button type="button" class="btn btn-sm"
+              {% if page <= 1 %}disabled{% endif %}
+              hx-get="/admin/api/dune/v2/player/{{ account_id }}/_grants?page={{ page - 1 }}"
+              hx-target="#player-subtab-body"
+              hx-swap="innerHTML"
+              hx-indicator="#v2-player-subtab-loading"
+              hx-push-url="/admin/v2/players/{{ account_id }}?tab=grants&page={{ page - 1 }}">Previous</button>
+      <span class="pagination__total">Page {{ page }} of {{ total_pages }} · {{ total }} grants</span>
+      <button type="button" class="btn btn-sm"
+              {% if page >= total_pages %}disabled{% endif %}
+              hx-get="/admin/api/dune/v2/player/{{ account_id }}/_grants?page={{ page + 1 }}"
+              hx-target="#player-subtab-body"
+              hx-swap="innerHTML"
+              hx-indicator="#v2-player-subtab-loading"
+              hx-push-url="/admin/v2/players/{{ account_id }}?tab=grants&page={{ page + 1 }}">Next</button>
+    </nav>
+  {% endif %}
+
+</div>

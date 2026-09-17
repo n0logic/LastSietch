@@ -1,0 +1,17 @@
+{# Context: request, title, message, back_url #}
+{% extends "portal/base.html" %}
+
+{% block title %}{{ title | default('Login link expired', true) }} — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+<article class="portal-card">
+  <div class="portal-error">
+    <div class="portal-error__icon" aria-hidden="true">⏱</div>
+    <h1 class="portal-error__title">{{ title | default('Login link expired', true) }}</h1>
+    <p class="portal-error__body">
+      {{ message | default('That sign-in link is too old or did not match what we issued. This usually happens if you waited more than 10 minutes between starting the sign-in and finishing it on Discord.', true) }}
+    </p>
+    <a href="{{ back_url | default('/portal/', true) }}" class="portal-btn portal-btn--primary">Start over</a>
+  </div>
+</article>
+{% endblock %}

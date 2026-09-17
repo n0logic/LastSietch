@@ -1,0 +1,25 @@
+{# Context: request, title, message, reason, back_url #}
+{% extends "portal/base.html" %}
+
+{% block title %}{{ title | default('Account link revoked', true) }} — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+<article class="portal-card">
+  <div class="portal-error">
+    <div class="portal-error__icon" aria-hidden="true">⚠</div>
+    <h1 class="portal-error__title">{{ title | default('Account link revoked', true) }}</h1>
+    <p class="portal-error__body">
+      {{ message | default('Your account link has been revoked.', true) }}
+    </p>
+    {% if reason %}
+    <p class="portal-error__body">
+      Reason: <strong>{{ reason }}</strong>
+    </p>
+    {% endif %}
+    <p class="portal-error__body">
+      You can verify a character again below. If you think this was a mistake, ping us on Discord <strong>#help-and-feedback</strong>.
+    </p>
+    <a href="{{ back_url | default('/portal/', true) }}" class="portal-btn portal-btn--primary">Verify a character</a>
+  </div>
+</article>
+{% endblock %}

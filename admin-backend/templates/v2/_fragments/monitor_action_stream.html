@@ -1,0 +1,28 @@
+{# Live Action Stream — merged + sorted recent events.
+   Data source: aggregator d.recent.{combat,levelups,grants,map_lifecycle,transfers}.
+   JS hydrator: renderActionStreamFromAgg (prepends new rows, honours
+   user-scroll guard so we don't yank the viewport when the operator is
+   reading older entries). Filter pills are pure CSS toggles — no re-fetch. #}
+<div class="monitor-panel span-12" id="panel-action-stream"
+     data-source="completions,events,transfers,levelups">
+  <div class="monitor-panel__header">
+    <span class="monitor-panel__title">Live Action Stream</span>
+    <nav class="action-stream__filters" id="action-stream-filters" aria-label="Action stream filters">
+      <button type="button" class="action-stream__pill action-stream__pill--active" data-filter="all">All</button>
+      <button type="button" class="action-stream__pill" data-filter="pvp">PvP</button>
+      <button type="button" class="action-stream__pill" data-filter="pve">PvE</button>
+      <button type="button" class="action-stream__pill" data-filter="grants">Grants</button>
+      <button type="button" class="action-stream__pill" data-filter="maps">Maps</button>
+    </nav>
+  </div>
+  <div class="monitor-panel__body monitor-panel__body--scroll">
+    <ol class="action-stream__list" id="panel-action-stream-body" role="log" aria-live="off" aria-relevant="additions">
+      <li class="action-stream__empty" id="action-stream-empty">No events yet — waiting on first aggregator response.</li>
+    </ol>
+  </div>
+  <div class="monitor-panel__footer">
+    <span class="monitor-panel__ts" data-ts="0" id="panel-action-stream-ts">refreshed —</span>
+    <span class="monitor-panel__count" id="action-stream-count">0 events</span>
+    <span class="monitor-panel__stale" id="panel-action-stream-stale" hidden>feed unavailable</span>
+  </div>
+</div>

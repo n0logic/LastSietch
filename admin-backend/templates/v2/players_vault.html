@@ -1,0 +1,50 @@
+{% extends "v2/base.html" %}
+{% block title %}Base Vault{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="/admin/static/css/v2/base-vault.css?v=20260911b">
+{% endblock %}
+{% block content %}
+<main class="v2-main bv-page" id="bv-directory">
+  <header class="bv-page__head">
+    <p class="bv-eyebrow">Players / Placed bases</p>
+    <h1>Base Vault</h1>
+    <p>Capture a placed base and inspect its snapshot history. Each archive preserves saved structures, items and ownership without changing the game world.</p>
+    <p class="bv-note">Looking for packed bases? <a href="/admin/v2/players/bases">Open BRT backups</a>. Vault snapshots do not use a BRT slot.</p>
+  </header>
+  <details class="bv-help">
+    <summary>Using Base Vault</summary>
+    <ol>
+      <li>Find the placed base by its owner, totem and map instance, then open its vault.</li>
+      <li>Choose Take snapshot. Capture reads saved database state while the game keeps running. Recent unsaved changes may be absent.</li>
+      <li>Wait for capture and checksum verification, then inspect the saved timestamp, table counts and archive checksums in history.</li>
+      <li>Choose Stage for restore on the intended snapshot. Review its original owner and location, compatibility, ID collisions, dependencies and map lifecycle checks. Staging only records a plan.</li>
+    </ol>
+    <p>A database round-trip validates the archived graph in an isolated database. It does not prove an in-game restore. If a request times out, Check status reads the existing operation without submitting another capture. An uncertain outcome blocks further capture for operator review.</p>
+    <p class="bv-note">Added September 11, 2026: placed-base snapshots and history are available here, from Claims, and from World map claim selection.</p>
+    <p class="bv-note">Restore planning added September 11, 2026: snapshots can be checked for original-location recovery. Plans show expiry and blockers; live apply remains unavailable until the controlled restore workflow is ready.</p>
+  </details>
+  <div class="bv-toolbar">
+    <label class="bv-search">Find a placed base
+      <input class="input" id="bv-search" type="search" autocomplete="off" placeholder="Base, owner, account or totem">
+    </label>
+    <label>Map instance
+      <select class="input" id="bv-map-filter"><option value="">All map instances</option></select>
+    </label>
+    <button class="btn btn-sm" type="button" id="bv-directory-refresh">Refresh directory</button>
+  </div>
+  <p class="bv-note" id="bv-directory-status" role="status" aria-live="polite"></p>
+  <div id="bv-directory-list" aria-busy="true"></div>
+  <form class="bv-lookup" id="bv-lookup">
+    <label for="bv-lookup-totem">Archived totem</label>
+    <p class="bv-note" id="bv-lookup-help">If a base is no longer placed, open its recorded history using the original totem ID.</p>
+    <div class="bv-actions">
+      <input class="input" id="bv-lookup-totem" name="totem" type="text" inputmode="numeric" pattern="[1-9][0-9]{0,18}" maxlength="19" required aria-describedby="bv-lookup-help" placeholder="Totem ID">
+      <button type="submit" class="btn btn-sm">Open history</button>
+    </div>
+  </form>
+</main>
+{% include "v2/_includes/base_vault.html" %}
+{% endblock %}
+{% block scripts %}
+<script src="/admin/static/js/v2/base-vault.js?v=20260911b" defer></script>
+{% endblock %}

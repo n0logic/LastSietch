@@ -1,0 +1,90 @@
+{# CHOAM Exchange hub — GET /portal/market
+   Context (from routers/portal.py portal_market):
+     active_character_name: str
+     market_tabs: [(key, label), ...]   top-level category tabs (incl. all/other)
+     watches, watch_count, watch_cap, alerts  (the folded-in watchlist card)
+     portal_session, portal_csrf_token (base_ctx)
+   Listings load on demand from GET /portal/market/search?q=&sort=&category=&page=
+   (portal-market.js -> results panel, with Load more paging).
+   Read-only: browse + price alerts only. No buying or selling here.
+#}
+{% extends "portal/base.html" %}
+{% set active_nav = "market" %}
+
+{% block title %}CHOAM Exchange — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+
+<section class="portal-hero portal-hero--market" aria-label="CHOAM Exchange">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Last Sietch</span>
+    <p class="portal-hero__title">CHOAM Exchange</p>
+    <p class="portal-hero__sub">Browse the live market, track prices, and get alerted when a deal drops.</p>
+  </div>
+</section>
+
+{# ---- Watchlist, folded in as a card (anchor target for the nav bell) ---- #}
+<article class="portal-card" id="watches">
+  {% include "portal/_fragments/market_watches.html" %}
+</article>
+
+{# ---- Browse the exchange: category tabs + sort + paged results ---- #}
+<article class="portal-card">
+  <h2 class="portal-card__title">Browse the exchange</h2>
+  <input type="search" id="market-search-input" class="cont-search__input"
+         placeholder="Search items, e.g. Granite Stone" autocomplete="off" maxlength="64"
+         aria-label="Search the CHOAM exchange by item name">
+
+  <div class="market-tabs" role="tablist" aria-label="Item categories">
+    {% for key, label in market_tabs %}
+    <button type="button" class="market-tab{% if key == 'all' %} market-tab--active{% endif %}"
+            role="tab" aria-selected="{{ 'true' if key == 'all' else 'false' }}"
+            data-market-cat="{{ key }}">{{ label }}</button>
+    {% endfor %}
+  </div>
+
+  <div class="market-controls">
+    <div class="market-sort" role="group" aria-label="Show">
+      <span class="market-sort__label">Show</span>
+      <button type="button" class="market-sort__btn market-sort__btn--active" data-market-kind="all">All</button>
+      <button type="button" class="market-sort__btn" data-market-kind="item">Items</button>
+      <button type="button" class="market-sort__btn" data-market-kind="schematic">Blueprints</button>
+    </div>
+
+    <div class="market-sort" role="group" aria-label="Sort listings">
+      <span class="market-sort__label">Sort</span>
+      <button type="button" class="market-sort__btn market-sort__btn--active" data-market-sort="active">Most listed</button>
+      <button type="button" class="market-sort__btn" data-market-sort="price">Cheapest</button>
+      <button type="button" class="market-sort__btn" data-market-sort="expensive">Most expensive</button>
+      <button type="button" class="market-sort__btn" data-market-sort="name">A–Z</button>
+    </div>
+  </div>
+
+  <div id="market-results" class="cont-search__panel" aria-live="polite">
+    <div class="cont-drawer__loading">Loading the exchange…</div>
+  </div>
+</article>
+
+{# Item price-ladder drawer (slides in on row click; fetches listings on demand). #}
+<div id="market-drawer-overlay" class="ls-drawer-overlay" hidden></div>
+<aside id="market-drawer" class="ls-drawer" role="dialog" aria-modal="true" aria-labelledby="market-drawer-title" hidden>
+  <header class="ls-drawer__header">
+    <h2 id="market-drawer-title" class="ls-drawer__title">Item</h2>
+    <button type="button" id="market-drawer-close" class="ls-drawer__close" aria-label="Close">×</button>
+  </header>
+  <div id="market-drawer-body" class="ls-drawer__body"></div>
+</aside>
+
+<noscript>
+  <article class="portal-card">
+    <div class="portal-msg portal-msg--info" role="status">
+      Enable JavaScript to browse the live exchange listings.
+    </div>
+  </article>
+</noscript>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/portal-market.js?v=20260606b" defer></script>
+{% endblock %}

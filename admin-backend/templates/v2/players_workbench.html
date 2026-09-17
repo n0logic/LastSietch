@@ -1,0 +1,297 @@
+{% extends "v2/base.html" %}
+{% block title %}Workbench{% if player %} / {{ player.character_name or player.name or aid }}{% endif %}{% endblock %}
+{% block extra_css %}
+{# The admin edge sends no Cache-Control, so the ?v= key IS the cache bust. The
+   item rows are one change across both files: bump the two keys together. #}
+<link rel="stylesheet" href="/admin/static/css/v2/workbench.css?v=20260903a">
+{% endblock %}
+{% block content %}
+<main class="v2-main v2-workbench" id="v2-workbench" data-aid="{{ aid or '' }}" data-max-batch="{{ max_batch }}">
+
+  <header class="v2-workbench__header">
+    <div class="v2-workbench__header-row">
+      <h1 class="v2-workbench__title">Grant Workbench</h1>
+      {% if aid %}
+      <a class="btn btn-sm btn-accent v2-workbench__drilldown-link"
+         href="/admin/v2/players/{{ aid }}"
+         title="Open the full Player Detailed View (stats, specializations, economy, containers)">
+        &larr; Player Detailed View
+      </a>
+      {% endif %}
+    </div>
+    <p class="v2-workbench__subtitle">
+      Build a recipient batch on the left. Search or browse grants in the middle, configure, and add to cart.
+      Fire the cart to apply all queued grants for every recipient at once (max {{ max_batch }} recipients per batch).
+    </p>
+  </header>
+
+  <section class="v2-workbench__grid">
+
+    <!-- Col 1: batch picker + current player context (unchanged) -->
+    <aside class="v2-workbench__col v2-workbench__col--batch">
+
+      <div class="v2-batch" id="v2-batch">
+        <div class="v2-batch__header">
+          <h2 class="v2-batch__title">Batch</h2>
+          <span class="v2-batch__count" id="batch-count">0 / {{ max_batch }}</span>
+        </div>
+
+        <div class="v2-batch__search">
+          <input
+            type="text"
+            id="batch-search"
+            placeholder="Type aid or character name..."
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="Search players to add to batch"
+          />
+          <ul class="v2-batch__suggest" id="batch-suggest" role="listbox"></ul>
+        </div>
+
+        {% if aid %}
+        <button type="button" class="btn btn-sm v2-batch__quickadd" id="batch-add-current"
+                data-aid="{{ aid }}"
+                data-name="{{ (player.character_name or player.name or 'aid ' ~ aid) if player else 'aid ' ~ aid }}">
+          + add current ({{ player.character_name or player.name or aid }})
+        </button>
+        {% endif %}
+
+        <ul class="v2-batch__chips" id="batch-chips" aria-live="polite"></ul>
+
+        <button type="button" class="btn btn-sm btn-ghost" id="batch-clear" hidden>clear all</button>
+      </div>
+
+      {% if aid %}
+      <div class="v2-workbench__current" id="workbench-live-state"
+           hx-get="/admin/v2/players/grants/_live_state?aid={{ aid }}"
+           hx-trigger="every 30s"
+           hx-swap="innerHTML">
+        {% include "v2/_fragments/workbench_live_state.html" %}
+      </div>
+      {% endif %}
+
+    </aside>
+
+    <!-- Col 2: grant search + presets shelf + browse accordion mount + config panel -->
+    <section class="v2-workbench__col v2-workbench__col--add">
+
+      <!-- Unified grant search -->
+      <div class="v2-batch__search">
+        <input
+          type="text"
+          id="wb-grant-search"
+          placeholder="Search grants..."
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Search grants"
+          aria-owns="wb-grant-suggest"
+          aria-autocomplete="list"
+          aria-haspopup="listbox"
+        />
+        <ul id="wb-grant-suggest" class="v2-batch__suggest" role="listbox" hidden></ul>
+      </div>
+      <label class="v2-grant-filter" title="Hide RAM-fragile grants that require the player to be offline">
+        <input type="checkbox" id="wb-grant-online-safe">
+        <span>Online-safe only</span>
+      </label>
+
+      <!-- Browse accordion: Presets roll-up (open by default) + catalog categories.
+           Rendered client-side from /_index by workbench.js renderBrowse(). The old
+           server-rendered preset card shelf was removed in favor of the Presets roll-up. -->
+      <div id="wb-browse"></div>
+
+      <!-- Per-grant config panel: hidden until a grant is picked from search or presets -->
+      <div id="wb-config" class="v2-card v2-workbench__config" hidden
+           data-source="" data-key="" data-fields="[]" data-params="[]">
+        <div class="v2-config__hd">
+          <span id="wb-config-title" class="v2-config__name">Configure grant</span>
+          <span id="wb-config-offline" class="v2-catalog__tile-flag" hidden>offline-only</span>
+        </div>
+        <p id="wb-config-desc" class="v2-preset-modal__desc"></p>
+        <div id="wb-config-fields"></div>
+        <div id="wb-config-status" class="msg"></div>
+        <div class="btn-group v2-config__actions">
+          <button type="button" class="btn btn-ghost" id="wb-config-cancel">Cancel</button>
+          <button type="button" class="btn btn-accent" id="wb-config-add">Add to cart</button>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Col 3: cart + live query preview + sticky fire bar -->
+    <section class="v2-workbench__col v2-workbench__col--cart">
+
+      <!-- Multi-grant cart -->
+      <div class="v2-cart v2-card" id="wb-cart">
+        <div class="v2-cart__hd">
+          <span class="v2-cart__hd-label">Cart (<span id="wb-cart-count">0</span>)</span>
+          <button type="button" class="btn btn-sm btn-ghost" id="wb-cart-clear" hidden>clear</button>
+        </div>
+        <ul id="wb-cart-lines" aria-live="polite">
+          <li class="v2-cart--empty">no grants queued; search or pick a preset above</li>
+        </ul>
+      </div>
+
+      <!-- Live query preview (collapsible) -->
+      <details id="wb-query" class="v2-catalog__group">
+        <summary class="v2-catalog__summary">
+          <span class="v2-catalog__category">Query preview</span>
+          <span id="wb-query-summary" class="v2-catalog__count"></span>
+        </summary>
+        <pre id="wb-query-body" class="v2-query-body"></pre>
+      </details>
+
+      <!-- Sticky fire bar -->
+      <div id="wb-fire-bar" class="v2-fire-bar">
+        <span id="wb-fire-summary" class="v2-fire-bar__summary"></span>
+        <button type="button" id="wb-fire-btn" class="btn btn-accent" disabled>Review and fire</button>
+      </div>
+
+    </section>
+
+  </section>
+
+  {% if aid %}
+  <section class="v2-workbench__recent">
+    <h2 class="v2-workbench__col-title">Recent grants - {{ player.character_name or player.name or aid }}
+      <button class="btn btn-xs"
+              hx-get="/admin/v2/players/grants/_recent?aid={{ aid }}"
+              hx-target="#workbench-recent"
+              hx-swap="innerHTML"
+              title="Refresh">&#x27F3;</button>
+    </h2>
+    <div id="workbench-recent">
+      {% include "v2/_fragments/workbench_recent.html" %}
+    </div>
+  </section>
+  {% endif %}
+
+</main>
+
+<!-- Spec / Skill grant picker overlay. Body is htmx-loaded by workbench.js when a
+     catalog tile carrying opens="spec_picker"/"skill_picker" is clicked. The picker
+     pushes standard custom cart lines; it never fires a grant itself. -->
+<div id="wb-picker-overlay" class="confirm-overlay">
+  <div class="confirm-dialog v2-preset-modal v2-picker-modal">
+    <div id="wb-picker-body" aria-live="polite"></div>
+  </div>
+</div>
+
+<!-- Cart confirm overlay (new unified modal for cart fire) -->
+<div id="cart-confirm-overlay" class="confirm-overlay">
+  <div class="confirm-dialog v2-preset-modal">
+    <h3 id="cart-confirm-title">Review and fire</h3>
+    <p id="cart-confirm-desc" class="v2-preset-modal__desc"></p>
+
+    <div class="v2-preset-modal__section">
+      <div class="v2-preset-modal__label">Operations</div>
+      <ol id="cart-confirm-ops" class="v2-preset-modal__ops"></ol>
+    </div>
+
+    <div class="v2-preset-modal__section">
+      <div class="v2-preset-modal__label">Recipients (<span id="cart-confirm-recipient-count">0</span>)</div>
+      <ul id="cart-confirm-recipient-list" class="v2-preset-modal__recipients"></ul>
+    </div>
+
+    <div id="cart-confirm-offline" class="msg warning" hidden>
+      One or more grants require recipients to be offline. These are queued until the player is offline and grace has elapsed (30s safe / ~5 min Deep Desert PvP).
+    </div>
+
+    <div class="form-group">
+      <label class="form-check">
+        <input type="checkbox" id="cart-confirm-live" />
+        Deliver live where possible (online recipients)
+      </label>
+      <p class="form-hint">
+        Base items and character XP push instantly in-world via RMQ to online
+        recipients. Graded items, offline players, and other grant types fall back
+        to the offline DB grant automatically.
+      </p>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="cart-confirm-token">Type <strong>FIRE</strong> to confirm</label>
+      <input type="text" id="cart-confirm-token" autocomplete="off" />
+    </div>
+
+    <div id="cart-confirm-status" class="msg"></div>
+    <div class="btn-group" style="justify-content: flex-end;">
+      <button class="btn" type="button" onclick="closeCartConfirm()">Cancel</button>
+      <button class="btn btn-accent" type="button" id="cart-confirm-submit">Fire</button>
+    </div>
+  </div>
+</div>
+
+<!-- Legacy custom-grant confirm modal (no longer referenced by the new flow) -->
+<div id="custom-confirm-overlay" class="confirm-overlay">
+  <div class="confirm-dialog v2-preset-modal">
+    <h3 id="custom-confirm-title">Fire grant</h3>
+    <p id="custom-confirm-desc" class="v2-preset-modal__desc"></p>
+
+    <div class="v2-preset-modal__section">
+      <div class="v2-preset-modal__label">Detail</div>
+      <div id="custom-confirm-fields"></div>
+    </div>
+
+    <div class="v2-preset-modal__section">
+      <div class="v2-preset-modal__label">Recipients (<span id="custom-confirm-recipient-count">0</span>)</div>
+      <ul id="custom-confirm-recipient-list" class="v2-preset-modal__recipients"></ul>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="custom-confirm-token">Type <strong>FIRE</strong> to confirm</label>
+      <input type="text" id="custom-confirm-token" autocomplete="off" />
+    </div>
+
+    <div id="custom-confirm-status" class="msg"></div>
+    <div class="btn-group" style="justify-content: flex-end;">
+      <button class="btn" type="button" onclick="closeCustomConfirm()">Cancel</button>
+      <button class="btn btn-accent" type="button" id="custom-confirm-submit">Fire</button>
+    </div>
+  </div>
+</div>
+
+<!-- Legacy preset confirm modal (no longer referenced by the new flow) -->
+<div id="preset-confirm-overlay" class="confirm-overlay">
+  <div class="confirm-dialog v2-preset-modal">
+    <h3 id="preset-confirm-title">Fire preset</h3>
+    <p id="preset-confirm-desc" class="v2-preset-modal__desc"></p>
+
+    <div class="v2-preset-modal__section">
+      <div class="v2-preset-modal__label">Operations</div>
+      <ol id="preset-confirm-ops" class="v2-preset-modal__ops"></ol>
+    </div>
+
+    <div class="v2-preset-modal__section" id="preset-confirm-params-section" hidden>
+      <div class="v2-preset-modal__label">Parameters</div>
+      <div id="preset-confirm-params"></div>
+    </div>
+
+    <div class="v2-preset-modal__section">
+      <div class="v2-preset-modal__label">Recipients (<span id="preset-confirm-recipient-count">0</span>)</div>
+      <ul id="preset-confirm-recipient-list" class="v2-preset-modal__recipients"></ul>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="preset-confirm-token">Type <strong>FIRE</strong> to confirm</label>
+      <input type="text" id="preset-confirm-token" autocomplete="off" />
+    </div>
+
+    <div id="preset-confirm-status" class="msg"></div>
+    <div class="btn-group" style="justify-content: flex-end;">
+      <button class="btn" type="button" onclick="closePresetConfirm()">Cancel</button>
+      <button class="btn btn-accent" type="button" id="preset-confirm-submit">Fire</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+  // Server-rendered globals consumed by workbench.js. Keep tiny and parse-safe.
+  window.WORKBENCH_MAX_BATCH = {{ max_batch }};
+  window.WORKBENCH_MAX_CART = 25;
+  window.WORKBENCH_DEFAULT_AID = {{ aid|tojson if aid else 'null' }};
+</script>
+<script src="/admin/static/js/v2/workbench.js?v=20260903a" defer></script>
+{% endblock %}

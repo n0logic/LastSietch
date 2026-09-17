@@ -1,0 +1,26 @@
+{# Preset library grid. Click a tile to open the confirm modal. #}
+{% if presets %}
+<div class="v2-preset-grid">
+  {% for p in presets %}
+  <button type="button"
+          class="v2-preset-card"
+          data-preset-name="{{ p.name }}"
+          data-preset-display="{{ p.display }}"
+          data-preset-desc="{{ p.description or '' }}"
+          data-preset-ops='{{ p.ops | tojson | safe }}'
+          data-preset-params='{{ (p.parameters or []) | tojson | safe }}'>
+    <span class="v2-preset-card__title">{{ p.display }}</span>
+    <span class="v2-preset-card__meta">
+      {{ p.ops_count }} op{{ 's' if p.ops_count != 1 }}
+      {% if p.parameters %} · {{ p.parameters | length }} param{{ 's' if (p.parameters | length) != 1 }}{% endif %}
+      {% if p.reversible %} · reversible{% endif %}
+    </span>
+    {% if p.description %}<span class="v2-preset-card__desc">{{ p.description }}</span>{% endif %}
+  </button>
+  {% endfor %}
+</div>
+{% else %}
+<div class="v2-card v2-card--empty">
+  <div class="v2-card__body">no presets available (relay or DB unreachable)</div>
+</div>
+{% endif %}

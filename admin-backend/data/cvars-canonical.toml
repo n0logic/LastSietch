@@ -1,0 +1,63 @@
+# P8 — Last Sietch-curated canonical CVar values.
+#
+# Source of truth: docs/dune-research/P8-EXECUTION-BRIEF.md §7 Diff sub-tab.
+# Format: TOML (stdlib tomllib, no PyYAML dep). Section names match the
+# Unreal-style [/Script/...] section headers in DefaultGame.ini /
+# UserOverrides.ini; values are stringified to match what Funcom's INI parser
+# accepts ("True" / "False", numeric strings, etc.).
+#
+# Seed entries cover the Discord intel CVars cited in brief §8. Empty / absent
+# entries = "Last Sietch has no opinion; drift not flagged."
+#
+# The operator iterates this file. Edits apply on next admin-backend reload
+# (mtime-cached on load).
+#
+# Note: TOML disallows duplicate section headers — each [/Script/...]
+# section block lists ALL Last Sietch-canonical fields under that section, even if
+# they belong to different intel IDs. Comments inline tag the intel source.
+
+# ──────────────────────────────────────────────────────────────────────────
+# Building / staking
+#   A1: m_bBuildingRestrictionLimitsEnabled       (high player impact)
+#       Removes the 5000-piece build cap. icehunter community standard.
+#       DISCORD-INTEL-2026-05-25-LATE.
+#   B14: m_StakingUnitVerticalExtensionDefaultTimes (s1berain, 2026-05-25 AM)
+#       Default 12 reported too long; community converged on 4.
+# ──────────────────────────────────────────────────────────────────────────
+["/Script/DuneSandbox.BuildingSettings"]
+m_bBuildingRestrictionLimitsEnabled = "False"
+m_StakingUnitVerticalExtensionDefaultTimes = "4"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Vehicles
+#   A18: dw.VehicleDurabilityDamageMultiplier no-op caveat
+#       Confirmed no-op as of GA 2026-05-25 per DISCORD-INTEL-2026-05-25-LATE.
+#       Engine-source (DefaultEngine.ini), no [/Script/...] section header.
+#       The empty-section TOML table represents the no-section bucket.
+# ──────────────────────────────────────────────────────────────────────────
+[""]
+"dw.VehicleDurabilityDamageMultiplier" = "1.0"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Taxation
+#   B7: morcristmeleth, DISCORD-INTEL-2026-05-23.
+#       Last Sietch baseline = taxation OFF for v1. Operators flip on once the
+#       economy guild requests it.
+# ──────────────────────────────────────────────────────────────────────────
+["/Script/DuneSandbox.TaxationSettings"]
+m_bTaxationEnabled = "False"
+m_TaxationCycleLengthSeconds = "3600"
+m_SpicePerHour = "100"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Sandstorm
+#   B15: puppet2353, 2026-05-25 LATE.
+#       Exact CVar names pending da-tweakables type-discovery pass. Seed
+#       below when upstream confirms naming.
+# ──────────────────────────────────────────────────────────────────────────
+# ["/Script/DuneSandbox.SandstormSettings"]
+# m_<TBD>SandstormDamageMultiplier = "1.0"
+
+# A10 — silent Funcom remote-config push is a DRIFT DETECTION concern, not
+# a canonical-value concern. Tracked via /opt/lastsietch-rmq-bridge/diff-settingsupdate.sh
+# and surfaced in the Diff sub-tab "Funcom settingsUpdate drift" card.

@@ -1,0 +1,538 @@
+{% extends "v2/base.html" %}
+{% block title %}Overview{% endblock %}
+{% block extra_css %}
+{# The admin edge sends no Cache-Control, so the ?v= key IS the cache-bust
+   mechanism. Bump it in the same commit as any content change to this file. #}
+<link rel="stylesheet" href="/admin/static/css/v2/overview.css?v=20260903c">
+{% endblock %}
+{% block content %}
+<main class="v2-overview" id="v2-overview">
+
+  <div class="v2-overview__hero" role="banner">
+    <div class="v2-overview__hero-inner">
+      <span class="v2-overview__hero-kicker">Last Sietch</span>
+      <p class="v2-overview__hero-title">Command Overview</p>
+    </div>
+  </div>
+
+  {% if dlc_warning %}
+  <div class="v2-banner__dlc-warning" role="status" aria-label="DLC pod stability warning"
+       title="Lost Harvest map pod(s) not ready/alive in farm_state. Hotfix-1.4.0.2 should have stopped the crashloop; investigate via kubectl get pods on <game-host> if persistent.">
+    <span aria-hidden="true">⚠</span>
+    DLC pods unstable: {{ dlc_warning.count }} Lost Harvest map{{ '' if dlc_warning.count == 1 else 's' }} not ready
+    <span style="color: var(--text-muted);">({{ dlc_warning.unstable_maps | join(', ') }})</span>
+  </div>
+  {% endif %}
+
+  {# An unreachable feed and a real zero are different facts. The route hands
+     each stat {value, available, stale} and this macro refuses to print a
+     number it was not given: "0 active players" during a relay outage reads as
+     a dead server, and that is the one thing this row must never invent. #}
+  {% macro stat(key, label) %}
+    {% set s = initial_stats[key] if initial_stats and key in initial_stats else none %}
+    <div class="stat-card{% if not (s and s.available) %} stat-card--unavailable{% endif %}"
+         id="stat-{{ key | replace('_', '-') }}">
+      {% if s and s.available %}
+        <div class="stat-card__value">{{ s.value }}</div>
+        {% if s.stale %}
+        <div class="stat-card__hint" title="The relay did not answer; this is the last cached value.">cached</div>
+        {% endif %}
+      {% else %}
+        <div class="stat-card__value stat-card__value--na"
+             title="This panel's source did not answer, so there is no number to show. It is not a zero.">n/a</div>
+        <div class="stat-card__hint">source unreachable</div>
+      {% endif %}
+      <div class="stat-card__label">{{ label }}</div>
+    </div>
+  {% endmacro %}
+
+  <section class="v2-overview__stats" aria-label="At-a-glance metrics">
+    {{ stat('active_players', 'Active players') }}
+    {{ stat('l200_club', 'L200 club') }}
+    {{ stat('total_chars', 'Total characters') }}
+    {{ stat('levelups_24h', 'Level-ups · 24h') }}
+    {{ stat('grants_24h', 'Grants · 24h') }}
+  </section>
+
+  <section class="v2-overview__presence" aria-label="Players online history">
+    <div class="v2-overview__presence-head">
+      <div class="card-title">Players online · history</div>
+      <div class="btn-group" role="group" aria-label="History window">
+        <button type="button" class="btn btn-sm v2-overview__win is-active" data-window="24h">24h</button>
+        <button type="button" class="btn btn-sm v2-overview__win" data-window="7d">7d</button>
+        <button type="button" class="btn btn-sm v2-overview__win" data-window="30d">30d</button>
+      </div>
+    </div>
+    <div class="v2-overview__presence-chart" id="v2-presence-chart" aria-live="polite">
+      <p class="v2-overview__presence-empty">Loading history…</p>
+    </div>
+    <div class="v2-overview__presence-meta" id="v2-presence-meta" hidden>
+      <span>Peak: <strong id="v2-presence-peak">-</strong></span>
+      <span>Play hours: <strong id="v2-presence-hours">-</strong></span>
+    </div>
+  </section>
+
+  {# Projection comes from map_model, not from a literal in the script below.
+     Players > Claims draws the same terrain from the same source; when those
+     two disagree, one of them is silently wrong and nothing says which. #}
+  <section class="v2-overview__map" aria-label="Live player positions"
+           id="v2-overview-map"
+           data-origin-x="{{ cal.originX }}" data-span-x="{{ cal.spanX }}"
+           data-origin-y="{{ cal.originY }}" data-span-y="{{ cal.spanY }}"
+           data-flip-y="{{ 1 if cal.flipY else 0 }}">
+    <div class="v2-overview__map-header">
+      <div class="card-title">Live positions</div>
+      {# Players on maps with no panel (PitDungeon, SandfliesFortress, ...) are
+         counted here rather than dropped: a dot that lands nowhere reads as
+         "nobody is there" and that is exactly the bug this section had. #}
+      <span class="v2-overview__map-elsewhere" id="v2-map-elsewhere" hidden></span>
+      {# Same marker as the live map's wm__stale. The two feeds behind these
+         dots used to end in .catch(function(){}), so a dead relay froze the
+         board on its last good frame and every dot kept saying "now". #}
+      <span class="v2-overview__stale" id="v2-map-stale" hidden
+            title="The positions or vehicle feed stopped answering. These dots are the last frame that arrived, not live.">feed stale</span>
+    </div>
+
+    <div class="v2-overview__map-grid">
+    {% for panel in map_panels %}
+    {# The thumbnail is the way into World & Maps at this exact instance. The
+       whole panel is the target rather than a separate "open" link: the map is
+       what the operator is already looking at. #}
+    <a class="v2-overview__map-panel v2-overview__map-panel--link"
+       href="/admin/v2/world/map?map={{ panel.map_key }}&amp;instance={{ panel.instance }}"
+       title="Open {{ panel.map_name }} {{ panel.label }} in the live map">
+    <p class="v2-overview__map-title">
+      {{ panel.map_name }}{% if panel.label != panel.map_name %} · {{ panel.label }}{% endif %}{% if panel.sub %} <span>{{ panel.sub }}</span>{% endif %}
+    </p>
+    <div class="v2-overview__map-canvas{% if panel.backdrop.type == 'sand' %} v2-overview__map-canvas--sand{% endif %}"
+         data-panel="{{ panel.id }}"
+         data-engine-map="{{ panel.engine_map }}"
+         data-dim="{{ panel.dim if panel.dim is not none else '' }}"
+         data-part="{{ panel.part if panel.part is not none else '' }}"
+         data-origin-x="{{ panel.cal.originX }}" data-span-x="{{ panel.cal.spanX }}"
+         data-origin-y="{{ panel.cal.originY }}" data-span-y="{{ panel.cal.spanY }}"
+         data-flip-y="{{ 1 if panel.cal.flipY else 0 }}"
+         {% if panel.grid %}data-grid-rows="{{ panel.grid.rows }}" data-grid-cols="{{ panel.grid.cols }}"
+         data-grid-letters="{{ panel.grid.row_letters }}" data-grid-top="{{ panel.grid.row_top_is }}"{% endif %}
+         role="img" aria-label="{{ panel.map_name }} {{ panel.label }} with player position dots">
+      {% if panel.backdrop.type == 'image' %}
+      <img src="{{ panel.backdrop.src }}" alt="" draggable="false">
+      {% endif %}
+      <svg class="v2-overview__grid" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+      {% if panel.vehicles %}
+      <svg class="v2-overview__veh-layer" id="v2-veh-overlay-{{ panel.id }}"
+           viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+      {% endif %}
+      <svg class="v2-overview__dot-layer" id="v2-map-overlay-{{ panel.id }}"
+           viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+    </div>
+    </a>
+    {% endfor %}
+    </div>
+
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+      <filter id="v2-veh-tint" x="-40%" y="-40%" width="180%" height="180%">
+        <!-- black outline: dilate the icon alpha + flood black -->
+        <feMorphology in="SourceAlpha" operator="dilate" radius="0.22" result="d"/>
+        <feFlood flood-color="#000000" result="blk"/>
+        <feComposite in="blk" in2="d" operator="in" result="outline"/>
+        <!-- amber fill from the original icon shape -->
+        <feFlood flood-color="#e6a532" result="amber"/>
+        <feComposite in="amber" in2="SourceAlpha" operator="in" result="fill"/>
+        <feMerge><feMergeNode in="outline"/><feMergeNode in="fill"/></feMerge>
+      </filter>
+    </defs></svg>
+  </section>
+
+  <section class="v2-overview__roster" aria-label="Live roster">
+    <div class="v2-overview__roster-header">
+      <div class="card-title">Roster</div>
+      <span class="v2-overview__stale" id="v2-roster-stale" hidden
+            title="The roster poll failed. The names below are the last set that arrived.">feed stale</span>
+      <span id="v2-roster-loading" class="htmx-indicator" aria-live="polite">refreshing</span>
+    </div>
+    <div style="overflow-x: auto;">
+      {# No "Last login" column: the roster feed carries no such field, the route
+         set it to None on every row, and a column of blanks is worse than no
+         column. Who is online is what this table knows. #}
+      <table class="table table--compact table--zebra">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Name</th>
+            <th>Map</th>
+            <th>Faction</th>
+          </tr>
+        </thead>
+        {# 15s, not 5s. Every tick is a relay round trip, and a page left open on
+           a second monitor was making 12 of them a minute for a table that
+           changes when somebody logs in. #}
+        <tbody id="v2-roster-tbody"
+               hx-get="/admin/api/dune/v2/roster-fragment"
+               hx-trigger="load, every 15s"
+               hx-target="this"
+               hx-swap="innerHTML"
+               hx-indicator="#v2-roster-loading"
+               hx-sync="this:replace">
+          {% if initial_roster is defined %}
+            {% include "v2/_fragments/overview_roster.html" %}
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  /* One panel per map INSTANCE, built from map_model by the route. Each panel
+     carries its OWN calibration: Hagga's two sietches share a cal, but Deep
+     Desert / Arrakeen / Harko do not, and a shared cal applied to all of them
+     would draw every dot in the wrong place instead of failing visibly.
+     Still a separate copy in website/dune/index.html; that is the public
+     static site, a different deployment with no access to map_model. */
+  var SVGNS = 'http://www.w3.org/2000/svg', XLINK = 'http://www.w3.org/1999/xlink';
+  var panels = [];
+  Array.prototype.forEach.call(
+    document.querySelectorAll('.v2-overview__map-canvas[data-panel]'), function (el) {
+      var d = el.dataset;
+      var cal = {
+        originX: parseFloat(d.originX), originY: parseFloat(d.originY),
+        spanX: parseFloat(d.spanX), spanY: parseFloat(d.spanY),
+        flipY: d.flipY === '1'
+      };
+      /* Skip a miscalibrated panel rather than fill it with NaN dots, which
+         renders as an empty map and reads as "nobody is here". */
+      if (!isFinite(cal.spanX) || !isFinite(cal.spanY) || !cal.spanX || !cal.spanY) {
+        console.error('overview map: calibration missing for panel', d.panel);
+        return;
+      }
+      panels.push({
+        id: d.panel, engineMap: d.engineMap, cal: cal,
+        dim: d.dim === '' ? null : parseInt(d.dim, 10),
+        part: d.part === '' ? null : parseInt(d.part, 10),
+        grid: d.gridRows ? { rows: parseInt(d.gridRows, 10), cols: parseInt(d.gridCols, 10),
+                             letters: d.gridLetters || '', top: d.gridTop || '' } : null,
+        gridEl: el.querySelector('.v2-overview__grid'),
+        dots: document.getElementById('v2-map-overlay-' + d.panel),
+        veh: document.getElementById('v2-veh-overlay-' + d.panel)
+      });
+    });
+  if (!panels.length) return;
+
+  function project(cal, x, y) {
+    return {
+      cx: (x - cal.originX) / cal.spanX * 100,
+      cy: cal.flipY ? (1 - (y - cal.originY) / cal.spanY) * 100
+                    : (y - cal.originY) / cal.spanY * 100
+    };
+  }
+
+  function placeDot(panel, p) {
+    var cx, cy;
+    if (typeof p.x === 'number' && typeof p.y === 'number'
+        && (Math.abs(p.x) > 100 || Math.abs(p.y) > 100)) {
+      var q = project(panel.cal, p.x, p.y);
+      cx = q.cx; cy = q.cy;
+    } else if (typeof p.x === 'number' && typeof p.y === 'number') {
+      cx = p.x; cy = p.y;
+    } else {
+      cx = (p.norm_x || 0) * 100;
+      cy = (p.norm_y || 0) * 100;
+    }
+    var dot = document.createElementNS(SVGNS, 'circle');
+    dot.setAttribute('cx', cx);
+    dot.setAttribute('cy', cy);
+    dot.setAttribute('r', '0.7');
+    dot.setAttribute('class', 'v2-overview__dot');
+    return dot;
+  }
+
+  /* Route a live actor onto a panel. `m` (engine map) is the outer key; within a
+     map, partition discriminates Hagga's sietches and dimension discriminates
+     Deep Desert's. A player whose map has no panel matches nothing and is
+     counted in the "elsewhere" pill instead of being dropped. */
+  function panelFor(p) {
+    if (!p) return null;
+    for (var i = 0; i < panels.length; i++) {
+      var pa = panels[i];
+      /* Legacy payloads carry no `m`; treat them as Hagga, which is what the
+         feed used to return exclusively. */
+      var pm = p.m || 'HaggaBasin';
+      if (pm !== pa.engineMap) continue;
+      if (pa.part !== null) { if (p.p === pa.part) return pa; continue; }
+      if (pa.dim !== null) { if ((p.d || 0) === pa.dim) return pa; continue; }
+      return pa;
+    }
+    return null;
+  }
+
+  var elsewhereEl = document.getElementById('v2-map-elsewhere');
+
+  function renderPositions(payload) {
+    /* /api/dune/positions returns { map, count, players: [{x,y,p,m,d}], by_map };
+       the SSE stream emits the same shape. Accept either `players` (canonical)
+       or `positions` (defensive fallback) plus a bare-array form for tests. */
+    var list = [];
+    if (payload) {
+      if (Array.isArray(payload.players)) list = payload.players;
+      else if (Array.isArray(payload.positions)) list = payload.positions;
+      else if (Array.isArray(payload)) list = payload;
+    }
+    panels.forEach(function (pa) {
+      if (pa.dots) { while (pa.dots.firstChild) pa.dots.removeChild(pa.dots.firstChild); }
+    });
+    var elsewhere = {};
+    list.forEach(function (p) {
+      var pa = panelFor(p);
+      if (pa && pa.dots) { pa.dots.appendChild(placeDot(pa, p)); return; }
+      var k = p.m || 'unknown';
+      elsewhere[k] = (elsewhere[k] || 0) + 1;
+    });
+    if (elsewhereEl) {
+      var keys = Object.keys(elsewhere).sort();
+      if (!keys.length) { elsewhereEl.hidden = true; elsewhereEl.textContent = ''; }
+      else {
+        var n = keys.reduce(function (a, k) { return a + elsewhere[k]; }, 0);
+        elsewhereEl.hidden = false;
+        elsewhereEl.textContent = n + ' elsewhere · ' + keys.map(function (k) {
+          return k + ' ' + elsewhere[k];
+        }).join(', ');
+      }
+    }
+  }
+
+  /* Survey grid for maps that declare one (Deep Desert 9x9). Sand alone has no
+     landmarks, so a dot on it is unreadable without the A1..I9 reference. Rows
+     run south->north in world space and the registry names which letter is at
+     the top, so the letter column is derived, never assumed. */
+  panels.forEach(function (pa) {
+    if (!pa.grid || !pa.gridEl) return;
+    var g = pa.grid, step = 100 / g.cols, i;
+    var letters = g.letters.split('');
+    /* row_top_is names the NORTH row; if that is the last letter, the column
+       reads top-to-bottom reversed. */
+    if (letters.length && g.top && letters[letters.length - 1] === g.top) letters.reverse();
+    for (i = 1; i < g.cols; i++) {
+      var vl = document.createElementNS(SVGNS, 'line');
+      vl.setAttribute('x1', i * step); vl.setAttribute('x2', i * step);
+      vl.setAttribute('y1', 0); vl.setAttribute('y2', 100);
+      vl.setAttribute('class', 'v2-overview__gridline');
+      pa.gridEl.appendChild(vl);
+    }
+    for (i = 1; i < g.rows; i++) {
+      var hl = document.createElementNS(SVGNS, 'line');
+      hl.setAttribute('y1', i * (100 / g.rows)); hl.setAttribute('y2', i * (100 / g.rows));
+      hl.setAttribute('x1', 0); hl.setAttribute('x2', 100);
+      hl.setAttribute('class', 'v2-overview__gridline');
+      pa.gridEl.appendChild(hl);
+    }
+    for (i = 0; i < g.rows && i < letters.length; i++) {
+      for (var j = 0; j < g.cols; j++) {
+        var t = document.createElementNS(SVGNS, 'text');
+        t.setAttribute('x', j * step + 0.8);
+        t.setAttribute('y', i * (100 / g.rows) + 3.2);
+        t.setAttribute('class', 'v2-overview__gridlabel');
+        t.textContent = letters[i] + (j + 1);
+        pa.gridEl.appendChild(t);
+      }
+    }
+  });
+
+  /* Stale marker, one per feed, same idea as the live map's wm__stale. Both
+     loaders used to end in .catch(function(){}): the dots froze on the last good
+     frame and the page went on presenting them as live. A feed clears only its
+     own flag on the next success, so one recovering does not hide the other. */
+  var staleEl = document.getElementById('v2-map-stale');
+  var staleFeeds = {};
+  function setFeedStale(feed, isStale) {
+    if (isStale) { staleFeeds[feed] = true; } else { delete staleFeeds[feed]; }
+    if (!staleEl) return;
+    var names = Object.keys(staleFeeds);
+    staleEl.hidden = names.length === 0;
+    staleEl.textContent = names.length ? (names.join(' + ') + ' feed stale') : '';
+  }
+
+  /* Poll the live DB positions feed at 20s (same cadence as vehicles) so players
+     and vehicles refresh together. Avoids the telemetry SSE stream, which was
+     laggy (5-min sample, ~10-min online linger) and left ghost dots after logoff. */
+  function loadPlayerPositions() {
+    apiCall('GET', '/admin/api/dune/positions')
+      .then(function (payload) { setFeedStale('positions', false); renderPositions(payload); })
+      .catch(function () { setFeedStale('positions', true); });
+  }
+  loadPlayerPositions();
+  setInterval(loadPlayerPositions, 20000);
+
+  /* Vehicle layer (admin: always on). Coords + type only. Separate SVG overlays
+     so the positions redraw never wipes them. Polls /admin/api/dune/vehicles,
+     which covers every map and tags each row with `m` + `d`, so vehicles route
+     through exactly the same panelFor() as players rather than a partition
+     special case. */
+  var vehPanels = panels.filter(function (pa) { return pa.veh; });
+  /* Real in-game vehicle map-markers (extracted client textures); tinted amber
+     via the #v2-veh-tint SVG filter (defined in a standalone defs svg so the
+     overlay redraw never wipes it). type -> icon file; unknown -> buggy. */
+  var VEH_ICON = { ornithopter: 'ornithopter', sandbike: 'sandbike', buggy: 'buggy', sandcrawler: 'sandcrawler', container: 'container', vehicle: 'buggy' };
+
+  function placeVehicle(panel, v) {
+    var q = project(panel.cal, v.x, v.y);
+    var cx = q.cx, cy = q.cy;
+    if (cx < 0 || cx > 100 || cy < 0 || cy > 100) return null;
+    var SZ = 3.6;
+    var href = '/assets/vehicle-icons/' + (VEH_ICON[v.t] || 'buggy') + '.png';
+    var img = document.createElementNS(SVGNS, 'image');
+    img.setAttributeNS(XLINK, 'href', href);
+    img.setAttribute('href', href);
+    img.setAttribute('x', cx - SZ / 2);
+    img.setAttribute('y', cy - SZ / 2);
+    img.setAttribute('width', SZ);
+    img.setAttribute('height', SZ);
+    img.setAttribute('filter', 'url(#v2-veh-tint)');
+    img.setAttribute('class', 'v2-overview__veh');
+    return img;
+  }
+
+  function renderVehicles(payload) {
+    var list = (payload && Array.isArray(payload.vehicles)) ? payload.vehicles : [];
+    vehPanels.forEach(function (pa) {
+      while (pa.veh.firstChild) pa.veh.removeChild(pa.veh.firstChild);
+    });
+    list.forEach(function (v) {
+      var pa = panelFor(v);
+      if (!pa || !pa.veh) return;
+      var el = placeVehicle(pa, v);
+      if (el) pa.veh.appendChild(el);
+    });
+  }
+
+  function loadVehicles() {
+    apiCall('GET', '/admin/api/dune/vehicles')
+      .then(function (payload) { setFeedStale('vehicles', false); renderVehicles(payload); })
+      .catch(function () { setFeedStale('vehicles', true); });
+  }
+  if (vehPanels.length) {
+    loadVehicles();
+    setInterval(loadVehicles, 20000);
+  }
+})();
+</script>
+
+<script>
+/* Roster stale marker. The 15s poll swaps a fragment; when the request itself
+   fails htmx leaves the previous rows in place, which is the right behaviour
+   only if the page admits the names are no longer current. The route also marks
+   a relay that answered with available:false inside the fragment itself. */
+(function () {
+  var body = document.getElementById('v2-roster-tbody');
+  var mark = document.getElementById('v2-roster-stale');
+  if (!body || !mark) return;
+  function set(isStale) { mark.hidden = !isStale; }
+  body.addEventListener('htmx:responseError', function () { set(true); });
+  body.addEventListener('htmx:sendError', function () { set(true); });
+  body.addEventListener('htmx:timeout', function () { set(true); });
+  body.addEventListener('htmx:afterSwap', function () { set(false); });
+})();
+</script>
+
+<script>
+/* Presence history chart, ported from v1 dune_dashboard.html and restyled to
+   design tokens. Window toggle (24h/7d/30d) fetches independently of the 10s
+   monitor poll. Empty state on {available:false} (relay down). */
+(function () {
+  var chart = document.getElementById('v2-presence-chart');
+  if (!chart) return;
+  var meta = document.getElementById('v2-presence-meta');
+  var peakEl = document.getElementById('v2-presence-peak');
+  var hoursEl = document.getElementById('v2-presence-hours');
+  var win = '24h';
+
+  function escHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  function fmtTime(ts, w) {
+    var d = new Date(ts * 1000);
+    if (w === '24h') return d.getHours() + ':' + ('0' + d.getMinutes()).slice(-2);
+    return (d.getMonth() + 1) + '/' + d.getDate();
+  }
+
+  function renderChart(d) {
+    var series = (d && d.series) || [];
+    if (!series.length) {
+      chart.innerHTML = '<p class="v2-overview__presence-empty">No history for this window yet.</p>';
+      meta.hidden = true;
+      return;
+    }
+
+    var W = 600, H = 180, padL = 32, padR = 12, padT = 14, padB = 26;
+    var counts = series.map(function (p) { return p.count || 0; });
+    var maxC = Math.max(1, Math.max.apply(null, counts));
+    var n = series.length;
+
+    /* Plot x by real timestamp, not index: sampler series can be non-contiguous
+       (server-down gaps), so equal index spacing would lie. */
+    var t0 = series[0].ts, tN = series[n - 1].ts, span = tN - t0;
+    function xAt(i) {
+      return (n === 1 || span <= 0)
+        ? (padL + (W - padL - padR) / 2)
+        : padL + (W - padL - padR) * ((series[i].ts - t0) / span);
+    }
+    function yAt(c) { return padT + (H - padT - padB) * (1 - c / maxC); }
+
+    var line = '', area = '';
+    for (var i = 0; i < n; i++) {
+      var x = xAt(i).toFixed(1), y = yAt(counts[i]).toFixed(1);
+      line += (i === 0 ? 'M' : 'L') + x + ' ' + y + ' ';
+      area += (i === 0 ? 'M' : 'L') + x + ' ' + y + ' ';
+    }
+    area += 'L' + xAt(n - 1).toFixed(1) + ' ' + (H - padB) + ' '
+          + 'L' + xAt(0).toFixed(1) + ' ' + (H - padB) + ' Z';
+
+    var baseY = (H - padB).toFixed(1);
+    var firstLbl = escHtml(fmtTime(series[0].ts, win));
+    var lastLbl = escHtml(fmtTime(series[n - 1].ts, win));
+
+    chart.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="Players online over ' + win + '">'
+      + '<line class="v2-overview__presence-axis" x1="' + padL + '" y1="' + padT + '" x2="' + padL + '" y2="' + baseY + '"/>'
+      + '<line class="v2-overview__presence-axis" x1="' + padL + '" y1="' + baseY + '" x2="' + (W - padR) + '" y2="' + baseY + '"/>'
+      + '<path class="v2-overview__presence-area" d="' + area + '"/>'
+      + '<path class="v2-overview__presence-line" d="' + line + '"/>'
+      + '<text class="v2-overview__presence-axis-label" x="2" y="' + (padT + 4) + '">' + maxC + '</text>'
+      + '<text class="v2-overview__presence-axis-label" x="2" y="' + baseY + '">0</text>'
+      + '<text class="v2-overview__presence-axis-label" x="' + padL + '" y="' + (H - 8) + '">' + firstLbl + '</text>'
+      + '<text class="v2-overview__presence-axis-label" x="' + (W - padR) + '" y="' + (H - 8) + '" text-anchor="end">' + lastLbl + '</text>'
+      + '</svg>';
+
+    peakEl.textContent = (d.peak == null) ? maxC : d.peak;
+    hoursEl.textContent = (d.play_hours == null) ? '-' : d.play_hours;
+    meta.hidden = false;
+  }
+
+  function loadPresence() {
+    fetch('/admin/api/dune/stats/presence?window=' + win, { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(renderChart)
+      .catch(function () { renderChart({ series: [] }); });
+  }
+
+  var btns = document.querySelectorAll('.v2-overview__win');
+  for (var b = 0; b < btns.length; b++) {
+    btns[b].addEventListener('click', function () {
+      win = this.getAttribute('data-window');
+      for (var j = 0; j < btns.length; j++) {
+        btns[j].classList.toggle('is-active', btns[j] === this);
+      }
+      loadPresence();
+    });
+  }
+
+  loadPresence();
+})();
+</script>
+{% endblock %}

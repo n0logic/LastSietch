@@ -1,0 +1,152 @@
+{% extends "v2/base.html" %}
+{% block title %}Live Map{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="/admin/static/css/v2/base-vault.css?v=20260911b">
+{# The admin edge sends no Cache-Control, so the ?v= key IS the cache-bust
+   mechanism. Bump it in the same commit as any content change to these two. #}
+<link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin/static/css/v2/world-map.css?v=20260911a">
+{% endblock %}
+{% block content %}
+{# The whole map model is emitted here rather than re-fetched: instances,
+   calibration, grid and backdrop all come from map_model, so the page and the
+   /layers payload cannot disagree about where a coordinate lands.
+   It rides in a JSON script block, not a data- attribute: `tojson` returns
+   Markup, so `|e` is a no-op on it and the first quote in the payload ends the
+   attribute, leaving the script with an empty model and no visible error. #}
+<script type="application/json" id="wm-maps">{{ maps | tojson }}</script>
+<main class="wm" id="wm" data-view="{{ view }}">
+
+  <div class="wm__bar">
+    <p class="wm__title">Live Map</p>
+
+    <div class="wm__picker">
+      <label for="wm-map">Server</label>
+      <select id="wm-map">
+        {% for m in maps %}
+        <option value="{{ m.key }}">{{ m.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="wm__picker">
+      <label for="wm-instance">Instance</label>
+      <select id="wm-instance"></select>
+    </div>
+
+    <div class="wm__counts">
+      {# Ibad blue lives on these two and their dot markers only: both are
+         repolled on the live timer, so the colour means "this is now". #}
+      <div class="wm__count">
+        <span class="wm__count-value" id="wm-count-players">0</span>
+        <span class="wm__count-label">Players</span>
+      </div>
+      <div class="wm__count">
+        <span class="wm__count-value" id="wm-count-vehicles">0</span>
+        <span class="wm__count-label">Vehicles</span>
+      </div>
+      <div class="wm__count">
+        <span class="wm__count-value" id="wm-count-bases" style="color: var(--accent);">0</span>
+        <span class="wm__count-label">Claims</span>
+      </div>
+    </div>
+
+    <span class="wm__stale" id="wm-stale" hidden>serving stale feed</span>
+  </div>
+
+  <div class="wm__body">
+    <aside class="wm__rail" aria-label="Map layers">
+      <p class="wm__rail-head">Layers</p>
+      <div class="wm__legend" id="wm-legend" role="list"></div>
+
+      <p class="wm__rail-head" id="wm-layout-head" hidden>Deep Desert layout</p>
+      <div class="wm__layout" id="wm-layout" hidden>
+        <dl>
+          <dt>Effective</dt><dd id="wm-layout-id">...</dd>
+          <dt>Cycle</dt><dd id="wm-layout-cycle">...</dd>
+          <dt>Source</dt><dd><span class="wm__source" id="wm-layout-source">...</span></dd>
+          <dt>Confidence</dt><dd id="wm-layout-conf">...</dd>
+          {# The matcher verdict is kept beside the effective one on purpose: with
+             a pin in place they disagree, and "the matcher says 7 at 0.31, you
+             pinned 3" is the only readable way to show that. #}
+          <dt>Matcher</dt><dd id="wm-layout-matcher">...</dd>
+          <dt>Pinned</dt><dd id="wm-layout-override">...</dd>
+        </dl>
+        <p class="wm__layout-note" id="wm-layout-note" hidden></p>
+      </div>
+
+      {% if is_owner %}
+      {# Owner-only. The server enforces the same gate on both POSTs, so hiding
+         this is a courtesy to the other admins, never the control itself. #}
+      <p class="wm__rail-head" id="wm-pin-head" hidden>Pin a layout</p>
+      <div class="wm__pin" id="wm-pin" hidden>
+        <p class="wm__pin-copy">
+          A pin overrides the matcher for every player, with no restart. It
+          expires by itself at the next Coriolis reset.
+        </p>
+        <div class="wm__pin-grid" id="wm-pin-grid" role="radiogroup" aria-label="Coriolis layout">
+          {% for lid in layout_ids %}
+          <button type="button" class="wm__pin-thumb" data-layout-id="{{ lid }}"
+                  role="radio" aria-checked="false" aria-label="Layout {{ lid }}">
+            <img src="{{ layout_thumb.format(id=lid) }}" alt="" loading="lazy" width="72" height="72">
+            <span>{{ lid }}</span>
+          </button>
+          {% endfor %}
+        </div>
+        <label class="wm__pin-label" for="wm-pin-note">Note (optional, 200 max)</label>
+        <input class="wm__pin-input" id="wm-pin-note" type="text" maxlength="200"
+               placeholder="why this id">
+        <label class="wm__pin-label" for="wm-pin-confirm">Type PIN or CLEAR to arm</label>
+        <input class="wm__pin-input" id="wm-pin-confirm" type="text" autocomplete="off"
+               spellcheck="false" placeholder="PIN">
+        <div class="btn-group wm__pin-actions">
+          <button type="button" class="btn btn-sm btn-accent" id="wm-pin-apply" disabled>Pin</button>
+          <button type="button" class="btn btn-sm btn-destructive" id="wm-pin-clear" disabled>Clear</button>
+        </div>
+        <p class="wm__pin-status" id="wm-pin-status" role="status" aria-live="polite"></p>
+      </div>
+      {% endif %}
+
+      <p class="wm__rail-head">Refreshed</p>
+      <div class="wm__layout">
+        <dl>
+          <dt>Live layers</dt><dd id="wm-refreshed">...</dd>
+        </dl>
+      </div>
+    </aside>
+
+    <div class="wm__viewport" id="wm-viewport">
+      <div class="wm__stage" id="wm-stage">
+        <div class="wm__backdrop" id="wm-backdrop"></div>
+        <svg class="wm__svg" id="wm-svg" viewBox="0 0 1000 1000"
+             preserveAspectRatio="xMidYMid meet"
+             role="group" aria-label="Live map with player, vehicle, claim, waypoint and rescue markers"></svg>
+      </div>
+
+      <div class="wm__banner" id="wm-banner" hidden></div>
+
+      <div class="btn-group wm__zoom">
+        <button type="button" class="btn btn-sm" id="wm-zoom-out" aria-label="Zoom out">-</button>
+        <button type="button" class="btn btn-sm" id="wm-zoom-reset">Fit</button>
+        <button type="button" class="btn btn-sm" id="wm-zoom-in" aria-label="Zoom in">+</button>
+      </div>
+
+      <div class="wm__popover" id="wm-popover" hidden>
+        <button type="button" class="wm__popover-close" id="wm-popover-close"
+                aria-label="Close details">&times;</button>
+        <p class="wm__popover-title" id="wm-popover-title"></p>
+        <dl id="wm-popover-body"></dl>
+        <a class="btn btn-sm btn-accent" id="wm-popover-link" href="#" hidden>Open player</a>
+        <button type="button" class="btn btn-sm bv-open" id="wm-popover-vault" hidden>Open Base Vault</button>
+      </div>
+    </div>
+  </div>
+
+</main>
+{% include "v2/_includes/base_vault.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/v2/base-vault.js?v=20260911b" defer></script>
+<script src="/admin/static/js/v2/world-map.js?v=20260911a" defer></script>
+{% endblock %}

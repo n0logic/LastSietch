@@ -1,0 +1,117 @@
+{# Portal identity quiz — GET /portal/link/quiz (rendered by /portal/link/select),
+   POST /portal/link/quiz (submit).
+   Context (canonical, from routers/portal_link.py):
+     discord_handle: str
+     character_name: str
+     character_name_snapshot: str (alias)
+     attempt_token: str                — empty on fail re-render
+     questions: [{index, kind, prompt, format, choices, input_name}]  — empty on fail re-render
+     error_banner: str | None
+     show_error_banner: bool
+     attempts_remaining: None         — deliberately not surfaced
+     post_url: "/portal/link/quiz"
+     portal_csrf_token: str
+     portal_session: {discord_handle} | None
+   On a failed submission the backend re-renders this template with
+   questions=[] + attempt_token="" + a banner asking the user to return to
+   the picker. We special-case that branch and show a clean CTA back.
+#}
+{% extends "portal/base.html" %}
+
+{% block title %}Confirm your character — Last Sietch Dune Portal{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/admin/static/css/portal/portal-link-v2.css?v=20260717b">
+{% endblock %}
+
+{% block content %}
+
+<article class="portal-card">
+  <h1 class="portal-card__title">Confirm it's you</h1>
+  {% if character_name %}
+  <p class="portal-card__subtitle">
+    Verifying character: <span class="mono">{{ character_name }}</span>.
+    Answer these three questions about your character — all visible in-game.
+  </p>
+  {% else %}
+  <p class="portal-card__subtitle">
+    Verifying your character.
+  </p>
+  {% endif %}
+
+  {% if show_error_banner and error_banner %}
+  <div class="portal-msg portal-msg--error" role="alert" aria-live="assertive">
+    {{ error_banner }}
+  </div>
+  {% endif %}
+
+  {% if questions and questions | length > 0 %}
+  <form method="post" action="{{ post_url | default('/portal/link/quiz', true) }}"
+        data-portal-csrf-form data-portal-busy-on-submit>
+    <input type="hidden" name="csrf_token" value="{{ portal_csrf_token | default('', true) }}">
+    <input type="hidden" name="attempt_token" value="{{ attempt_token }}">
+
+    {% for question in questions %}
+    <fieldset class="portal-quiz__question-block">
+      <legend class="sr-only">Question {{ loop.index }}</legend>
+      <div class="portal-quiz__progress">Question {{ loop.index }} of {{ questions | length }}</div>
+      <p class="portal-quiz__question">{{ question.prompt }}</p>
+
+      {% if question.format == "radio" %}
+        <select class="portal-input portal-quiz__select"
+                name="{{ question.input_name }}"
+                required aria-required="true"
+                autocomplete="off">
+          <option value="" disabled selected>— Select an answer —</option>
+          {% for choice in question.choices %}
+          <option value="{{ choice }}">{{ choice }}</option>
+          {% endfor %}
+        </select>
+      {% elif question.format == "numeric" %}
+        <input type="text"
+               class="portal-input"
+               name="{{ question.input_name }}"
+               required
+               maxlength="32"
+               inputmode="numeric"
+               autocomplete="off">
+      {% elif question.format == "text" %}
+        <input type="text"
+               class="portal-input"
+               name="{{ question.input_name }}"
+               required
+               maxlength="64"
+               autocomplete="off"
+               spellcheck="false">
+      {% else %}{# defensive fallback for unknown formats #}
+        <input type="text"
+               class="portal-input"
+               name="{{ question.input_name }}"
+               required
+               maxlength="64"
+               autocomplete="off"
+               spellcheck="false">
+      {% endif %}
+    </fieldset>
+    {% endfor %}
+
+    <div class="portal-btn-row">
+      <a href="/portal/link" class="portal-btn portal-btn--ghost">Cancel</a>
+      <button type="submit" class="portal-btn portal-btn--primary">Submit answers</button>
+    </div>
+  </form>
+  {% else %}
+    {# Fail re-render path — no questions, just the banner + back CTA. #}
+    <div class="portal-btn-row">
+      <a href="/portal/link" class="portal-btn portal-btn--primary">Back to character picker</a>
+    </div>
+  {% endif %}
+</article>
+
+{% if questions and questions | length > 0 %}
+<p class="portal-card__subtitle">
+  We pick three quiz questions per attempt from data you can see in-game (level, current map, faction). Internal IDs and coordinates are never used.
+</p>
+{% endif %}
+
+{% endblock %}

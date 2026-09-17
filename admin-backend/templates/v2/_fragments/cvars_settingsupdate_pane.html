@@ -1,0 +1,108 @@
+{# Funcom Live Settings pane — read-only buildOverrides display.
+
+   Surfaced from the latest settingsUpdate capture in
+   /var/lib/lastsietch-rmq-bridge/captures-admin/settingsUpdate/. Top-level shape
+   per brief §6:
+     - MaxDemoPlayTimeSeconds (scalar)
+     - PasswordProtected (per-partition map)
+     - PerMapConfig (57 maps × 9 sub-fields)
+
+   This plane is Funcom-owned. Last Sietch does NOT write here — display only.
+#}
+{% set max_demo = funcom.MaxDemoPlayTimeSeconds if funcom is defined and funcom.MaxDemoPlayTimeSeconds is defined else None %}
+{% set passwords = funcom.PasswordProtected if funcom is defined and funcom.PasswordProtected is defined else {} %}
+{% set per_map = funcom.PerMapConfig if funcom is defined and funcom.PerMapConfig is defined else {} %}
+
+<section class="card v2-cvars-live__funcom-pane">
+  <header class="card__header">
+    <h2 class="card__title">Funcom Live Settings</h2>
+    <p class="card__subtitle">
+      Read-only buildOverrides plane — Funcom pushes these via
+      <code>settingsUpdate</code> RMQ. Last Sietch never writes here.
+    </p>
+    {% if capture_ts %}
+      <p class="card__meta">latest capture <time datetime="{{ capture_ts }}">{{ capture_ts }}</time></p>
+    {% endif %}
+  </header>
+  <div class="card__body">
+
+    {% if not funcom %}
+      <div class="empty-state">
+        <p class="empty-state__headline">No capture yet</p>
+        <p class="empty-state__body">
+          The <code>settingsUpdate</code> capture loop has not landed a payload yet.
+          Funcom emits these on a ~30s heartbeat once BGD is up.
+        </p>
+      </div>
+    {% else %}
+
+      {# MaxDemoPlayTimeSeconds scalar #}
+      <div class="v2-cvars-live__funcom-scalar">
+        <span class="v2-cvars-live__funcom-label">MaxDemoPlayTimeSeconds</span>
+        <code>{{ max_demo if max_demo is not none else '—' }}</code>
+      </div>
+
+      {# PasswordProtected per-partition #}
+      {% if passwords %}
+        <details class="v2-cvars-live__funcom-section">
+          <summary>PasswordProtected ({{ passwords|length }} partition{{ '' if passwords|length == 1 else 's' }})</summary>
+          <table class="v2-cvars-live__funcom-table">
+            <thead><tr><th>Partition</th><th>Password-protected</th></tr></thead>
+            <tbody>
+              {% for partition, protected in passwords.items() %}
+                <tr>
+                  <td><code>{{ partition }}</code></td>
+                  <td>
+                    {% if protected %}<span class="badge badge--warning">protected</span>
+                    {% else %}<span class="badge badge--muted">open</span>{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </details>
+      {% endif %}
+
+      {# PerMapConfig table (57 maps, 9 sub-fields each) #}
+      {% if per_map %}
+        <details class="v2-cvars-live__funcom-section">
+          <summary>PerMapConfig ({{ per_map|length }} map{{ '' if per_map|length == 1 else 's' }})</summary>
+          <table class="v2-cvars-live__funcom-table">
+            <thead>
+              <tr>
+                <th>Map</th>
+                <th>AllowGroupTravel</th>
+                <th>DauCap</th>
+                <th>ForceLock</th>
+                <th>HbsCap</th>
+                <th>PlayerHardCap</th>
+                <th>WauCap</th>
+                <th>IgnoreFlowIdOnCompletion</th>
+                <th>ShouldUpdatePlayerCountOnFls</th>
+                <th>ValidateGmbTokenOnCompletion</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for map_name, cfg in per_map.items() %}
+                <tr>
+                  <td><code>{{ map_name }}</code></td>
+                  <td>{{ cfg.AllowGroupTravel }}</td>
+                  <td>{{ cfg.DauCap }}</td>
+                  <td>{{ cfg.ForceLock }}</td>
+                  <td>{{ cfg.HbsCap }}</td>
+                  <td>{{ cfg.PlayerHardCap }}</td>
+                  <td>{{ cfg.WauCap }}</td>
+                  <td>{{ cfg.IgnoreFlowIdOnCompletion }}</td>
+                  <td>{{ cfg.ShouldUpdatePlayerCountOnFls }}</td>
+                  <td>{{ cfg.ValidateGmbTokenOnCompletion }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </details>
+      {% endif %}
+
+    {% endif %}
+
+  </div>
+</section>

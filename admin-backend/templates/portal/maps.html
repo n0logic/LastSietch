@@ -1,0 +1,55 @@
+{# Maps hub — GET /portal/maps (public, global server data)
+   Context (routers/portal.py portal_maps):
+     maps: [{key, name, instances:[{key,label,dim}], backdrop, has_spice, ...}]
+#}
+{% extends "portal/base.html" %}
+
+{% block title %}Maps — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+
+<section class="portal-hero portal-hero--maps" aria-label="Maps">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Last Sietch</span>
+    <h1 class="portal-hero__title">Maps</h1>
+    <p class="portal-hero__sub">
+      Live, coordinate-accurate maps built from our own server data &mdash; every
+      cave, wreck, ore node, spice field and landmark at its true position.
+      Pick a map.
+    </p>
+  </div>
+</section>
+
+<div class="map-hub-grid">
+  {% for m in maps %}
+  <a class="map-hub-card map-hub-card--{{ m.key }}" href="/portal/maps/{{ m.key }}"
+     style="view-transition-name: map-hub-{{ m.key }}">
+    <div class="map-hub-card__art" aria-hidden="true">
+      {% if m.card_image %}
+        <img src="{{ m.card_image }}" alt="" loading="lazy">
+      {% elif m.backdrop.type == 'image' %}
+        <img src="{{ m.backdrop.src }}" alt="" loading="lazy">
+      {% else %}
+        <div class="map-hub-card__sand"></div>
+      {% endif %}
+      <span class="map-hub-card__scrim"></span>
+    </div>
+    <div class="map-hub-card__body">
+      <h2 class="map-hub-card__title">{{ m.name }}</h2>
+      <div class="map-hub-card__chips">
+        {% for inst in m.instances %}
+        <span class="map-hub-card__chip">{{ inst.label }}</span>
+        {% endfor %}
+        {% if m.has_spice %}<span class="map-hub-card__chip map-hub-card__chip--spice">Live spice</span>{% endif %}
+      </div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+<p class="portal-card__subtitle portal-card__fine-print" style="margin-top:1rem;">
+  Static layer refreshes each Coriolis cycle. Live overlays (active spice, players,
+  bases) update straight from the server.
+</p>
+
+{% endblock %}

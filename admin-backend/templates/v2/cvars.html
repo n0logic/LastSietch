@@ -1,0 +1,121 @@
+{% extends "v2/base.html" %}
+{% block title %}CVars{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="/admin/static/css/v2/cvars.css">
+{% endblock %}
+{% block content %}
+<main class="v2-cvars" id="v2-cvars" data-queued-banner="{{ queued_banner }}">
+
+  <header class="v2-cvars__header">
+    <h1 class="v2-cvars__title">CVars</h1>
+    <p class="v2-cvars__subtitle">
+      Server config (5-layer INI hierarchy) + Funcom live settings + da-tweakables catalog.
+      Writes are queued — they apply at the next maintenance restart, never live.
+    </p>
+  </header>
+
+  <nav class="v2-cvars__subtabs" aria-label="CVars sub-tabs" role="tablist">
+    <button type="button"
+            class="v2-cvars__subtab {% if active_subtab == 'live' %}active{% endif %}"
+            id="subtab-cvars-live"
+            role="tab"
+            aria-selected="{{ 'true' if active_subtab == 'live' else 'false' }}"
+            aria-controls="cvars-subtab-body"
+            hx-get="/admin/v2/server/cvars/live"
+            hx-target="#cvars-subtab-body"
+            hx-swap="innerHTML"
+            hx-indicator="#v2-cvars-subtab-loading"
+            hx-push-url="/admin/v2/server/cvars?sub=live"
+            data-subtab="live">Live</button>
+    <button type="button"
+            class="v2-cvars__subtab {% if active_subtab == 'catalog' %}active{% endif %}"
+            id="subtab-cvars-catalog"
+            role="tab"
+            aria-selected="{{ 'true' if active_subtab == 'catalog' else 'false' }}"
+            aria-controls="cvars-subtab-body"
+            hx-get="/admin/v2/server/cvars/catalog"
+            hx-target="#cvars-subtab-body"
+            hx-swap="innerHTML"
+            hx-indicator="#v2-cvars-subtab-loading"
+            hx-push-url="/admin/v2/server/cvars?sub=catalog"
+            data-subtab="catalog">Catalog</button>
+    <button type="button"
+            class="v2-cvars__subtab {% if active_subtab == 'history' %}active{% endif %}"
+            id="subtab-cvars-history"
+            role="tab"
+            aria-selected="{{ 'true' if active_subtab == 'history' else 'false' }}"
+            aria-controls="cvars-subtab-body"
+            hx-get="/admin/v2/server/cvars/history"
+            hx-target="#cvars-subtab-body"
+            hx-swap="innerHTML"
+            hx-indicator="#v2-cvars-subtab-loading"
+            hx-push-url="/admin/v2/server/cvars?sub=history"
+            data-subtab="history">History</button>
+    <button type="button"
+            class="v2-cvars__subtab {% if active_subtab == 'diff' %}active{% endif %}"
+            id="subtab-cvars-diff"
+            role="tab"
+            aria-selected="{{ 'true' if active_subtab == 'diff' else 'false' }}"
+            aria-controls="cvars-subtab-body"
+            hx-get="/admin/v2/server/cvars/diff"
+            hx-target="#cvars-subtab-body"
+            hx-swap="innerHTML"
+            hx-indicator="#v2-cvars-subtab-loading"
+            hx-push-url="/admin/v2/server/cvars?sub=diff"
+            data-subtab="diff">Diff</button>
+    <span id="v2-cvars-subtab-loading" class="htmx-indicator" aria-live="polite">loading…</span>
+  </nav>
+
+  <section id="cvars-subtab-body" class="v2-cvars__body" role="tabpanel" aria-labelledby="subtab-cvars-{{ active_subtab }}">
+    {% if active_subtab == 'live' %}
+      {% include "v2/_fragments/cvars_live.html" %}
+    {% elif active_subtab == 'catalog' %}
+      {% include "v2/_fragments/cvars_catalog.html" %}
+    {% elif active_subtab == 'history' %}
+      {% include "v2/_fragments/cvars_history.html" %}
+    {% elif active_subtab == 'diff' %}
+      {% include "v2/_fragments/cvars_diff.html" %}
+    {% endif %}
+  </section>
+
+</main>
+
+{# Confirmation modal — "Type CONFIRM to submit" gate per brief §11 test #3.
+   Hidden until JS triggers it from a per-row Edit button. #}
+<div class="cvars-confirm-overlay" id="cvars-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="cvars-confirm-title" hidden>
+  <div class="cvars-confirm-dialog">
+    <h2 class="cvars-confirm-dialog__title" id="cvars-confirm-title">Confirm CVar write</h2>
+    <p class="cvars-confirm-dialog__warning">
+      This write is queued. It applies at the next announced maintenance restart, not live.
+    </p>
+    <dl class="cvars-confirm-dialog__details">
+      <dt>Section</dt><dd id="cvars-confirm-section">—</dd>
+      <dt>Key</dt><dd id="cvars-confirm-key">—</dd>
+      <dt>Current source layer</dt><dd id="cvars-confirm-source">—</dd>
+      <dt>Old value</dt><dd id="cvars-confirm-old">—</dd>
+      <dt>New value</dt><dd id="cvars-confirm-new">—</dd>
+    </dl>
+    <label class="cvars-confirm-dialog__newval-label" for="cvars-confirm-newval">New value</label>
+    <input type="text" id="cvars-confirm-newval" class="cvars-confirm-dialog__input" autocomplete="off" maxlength="4096">
+    <label class="cvars-confirm-dialog__label" for="cvars-confirm-token">
+      Type <code>CONFIRM</code> to submit
+    </label>
+    <input type="text" id="cvars-confirm-token" class="cvars-confirm-dialog__input" autocomplete="off" maxlength="16">
+    <label class="cvars-confirm-dialog__reason-label" for="cvars-confirm-reason">Reason (optional, logged to history)</label>
+    <textarea id="cvars-confirm-reason" class="cvars-confirm-dialog__reason" rows="2" maxlength="500"></textarea>
+    <p class="cvars-confirm-dialog__help">
+      Writes go to <code>UserOverrides.ini</code> on disk. No <code>dune.*</code> table is mutated; sidesteps DISCORD-INTEL A7 + A8.
+    </p>
+    <div class="cvars-confirm-dialog__actions">
+      <button type="button" class="btn" id="cvars-confirm-cancel">Cancel</button>
+      <button type="button" class="btn btn-accent" id="cvars-confirm-submit" disabled>Queue write</button>
+    </div>
+    <p class="cvars-confirm-dialog__status" id="cvars-confirm-status" aria-live="polite"></p>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/v2/cvars.js" defer></script>
+{% endblock %}

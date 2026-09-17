@@ -1,0 +1,148 @@
+{# Admin wave 1, Set B: Systems & Health.
+
+   Nine cards, nine sources, nine routes. Each card fetches its own URL, so a
+   dead source paints one card and leaves the rest of the board reading. Server
+   rendered shell, vanilla JS hydration, no new dependencies.
+
+   Colour: amber is chrome. Ibad blue marks a value that this poll just read off
+   a live system (services, RMQ captures, telemetry). Anything read out of the
+   config module or a file on disk stays neutral, however recent the fetch was.
+#}
+{% extends "v2/base.html" %}
+{% block title %}Systems & Health{% endblock %}
+{% block extra_css %}
+{# The admin edge sends no Cache-Control, so the ?v= key IS the cache bust.
+   Bump it in the same commit as any content change to systems.css. #}
+<link rel="stylesheet" href="/admin/static/css/v2/systems.css?v=20260904a">
+{% endblock %}
+{% block content %}
+<main class="v2-sys" data-sys-root data-poll-interval="15000"
+      data-page-size="{{ page_size }}"
+      data-owner="{{ 1 if is_owner else 0 }}">
+
+  <header class="v2-sys__header">
+    <div>
+      <h1 class="v2-sys__title">Systems &amp; Health</h1>
+      <p class="v2-sys__subtitle">
+        Feature gates, portal versions, service state, RMQ captures, telemetry,
+        the nightly reporters, database sizes and the rewards ledger. Each card
+        reads one source; a source that is down degrades its own card and nothing
+        else. The two flag boards are the only write levers here, they are owner
+        only, and every one of them answers with a fresh read of its own source
+        rather than an echo of the change you just asked for.
+      </p>
+    </div>
+    <div class="v2-sys__meta">
+      <span class="v2-sys__poll" id="sys-poll-state" data-state="idle" aria-live="polite">idle</span>
+      <span id="sys-poll-ts">refreshed never</span>
+    </div>
+  </header>
+
+  <section class="sys-grid" aria-label="Systems and health cards">
+
+    <article class="sys-card sys-span-8" data-sys-card data-render="flags"
+             data-src="/admin/api/dune/v2/systems/flags">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Feature flags: portal process (<web-host>)</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading the running process.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-12" data-sys-card data-render="host_flags"
+             data-src="/admin/api/dune/v2/systems/host-flags">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Feature flags: game host files (<game-host>)</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading the game host through the relay.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-4" data-sys-card data-render="versions"
+             data-src="/admin/api/dune/v2/systems/versions">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Portal versions</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading the served build.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-6" data-sys-card data-render="services"
+             data-src="/admin/api/dune/v2/systems/services">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Services</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading systemd.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-6" data-sys-card data-render="rmq"
+             data-src="/admin/api/dune/v2/systems/rmq">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">RMQ captures</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading the relay.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-3" data-sys-card data-render="telemetry"
+             data-src="/admin/api/dune/v2/systems/telemetry">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Telemetry</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading the relay.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-5" data-sys-card data-render="snapshot"
+             data-src="/admin/api/dune/v2/systems/snapshot">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Nightly jobs</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading systemd.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-4" data-sys-card data-render="db"
+             data-src="/admin/api/dune/v2/systems/db">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Databases</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading the filesystem.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-12" data-sys-card data-render="rewards"
+             data-src="/admin/api/dune/v2/systems/rewards">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Login rewards</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading the local claim ledger.</p>
+      </div>
+    </article>
+
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/v2/systems.js?v=20260904a" defer></script>
+{% endblock %}

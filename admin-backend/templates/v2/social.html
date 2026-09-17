@@ -1,0 +1,210 @@
+{# Admin wave 1, Set B: Social reads.
+
+   Guild join requests, recruiting posts and inbox config; mailbox volume and
+   blocks; Solari gift volume against its caps; profile blurbs that trip a
+   heuristic; the seeker wall.
+
+   The read cards are deliberately shallow: message subjects and bodies are
+   never queried. This is a health and moderation-triage surface, not a way to
+   read players' mail. Every flag is a hint worth a look, never a verdict.
+
+   Wave 2 adds a Takedowns section below them: the Signal Board pair (a guild's
+   recruiting card, a seeker card) and the public directory listing. All three
+   are reversible and none of them deletes a row, so the player's own text
+   survives a takedown and comes back with it.
+#}
+{% extends "v2/base.html" %}
+{% block title %}Social{% endblock %}
+{% block extra_css %}
+{# The admin edge sends no Cache-Control, so the ?v= key IS the cache bust. #}
+<link rel="stylesheet" href="/admin/static/css/v2/systems.css?v=20260904a">
+<link rel="stylesheet" href="/admin/static/css/v2/takedowns.css?v=20260903b">
+{% endblock %}
+{% block content %}
+<main class="v2-sys" data-sys-root data-poll-interval="30000"
+      data-page-size="{{ page_size }}">
+
+  <header class="v2-sys__header">
+    <div>
+      <h1 class="v2-sys__title">Social</h1>
+      <p class="v2-sys__subtitle">
+        Guilds, the mailbox, gifts, profiles and the seeker wall. Character names
+        only: account ids stay server side, exactly as they do on the player
+        portal. The Takedowns section at the foot of the page is the part that
+        writes.
+      </p>
+    </div>
+    <div class="v2-sys__meta">
+      <span class="v2-sys__poll" id="sys-poll-state" data-state="idle" aria-live="polite">idle</span>
+      <span id="sys-poll-ts">refreshed never</span>
+    </div>
+  </header>
+
+  <section class="sys-grid" aria-label="Social cards">
+
+    <article class="sys-card sys-span-12" data-sys-card data-render="social_guilds"
+             data-paged data-offset="0"
+             data-src="/admin/api/dune/v2/social/guilds">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Guilds</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading join requests and recruiting posts.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-6" data-sys-card data-render="social_messages"
+             data-src="/admin/api/dune/v2/social/messages">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Mailbox</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading message volume and blocks.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-6" data-sys-card data-render="social_gifts"
+             data-src="/admin/api/dune/v2/social/gifts">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Solari gifts</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading the gift ledger.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-6" data-sys-card data-render="social_profiles"
+             data-paged data-offset="0"
+             data-src="/admin/api/dune/v2/social/profiles">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Profiles for review</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading profile blurbs.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-6" data-sys-card data-render="social_lfg"
+             data-paged data-offset="0"
+             data-src="/admin/api/dune/v2/social/lfg">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Seeker wall</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading solo looking for guild cards.</p>
+      </div>
+    </article>
+
+  </section>
+
+  {# Wave 2 lever C. Three reversible switches, each keyed by the handle the
+     cards above actually show. Nothing here deletes: a closed recruiting card,
+     an expired seeker card and an unlisted profile all keep every word the
+     player wrote, so reopening restores the card rather than an empty one. #}
+  <section class="td-section" aria-label="Write levers">
+    <h2 class="td-section__title">Takedowns</h2>
+    <p class="td-section__copy">
+      All three write, all three are reversible, and none of them deletes a row.
+      Every press is audited with the reason you type and with the state it
+      replaced, which is what an undo needs later.
+    </p>
+
+    <div class="sys-grid">
+
+      <article class="sys-card sys-span-6 td-card" data-td-card="signal-guild">
+        <div class="sys-card__header">
+          <h3 class="sys-card__title">Signal Board: guild card</h3>
+          <span class="td-scope">any admin</span>
+        </div>
+        <div class="sys-card__body">
+          <p class="td-copy">
+            Sets recruiting off or back on for one guild. The blurb, the contact
+            note and the filters are untouched.
+          </p>
+          <label class="td-label" for="td-guild-id">Guild id</label>
+          <input class="td-input" id="td-guild-id" type="number" min="1" step="1"
+                 inputmode="numeric" placeholder="from the Guild column above">
+          <label class="td-label" for="td-guild-reason">Reason (required)</label>
+          <input class="td-input" id="td-guild-reason" type="text" maxlength="500"
+                 placeholder="why this card comes down">
+          <label class="td-label" for="td-guild-confirm">Type HIDE or SHOW to arm</label>
+          <input class="td-input" id="td-guild-confirm" type="text" autocomplete="off"
+                 spellcheck="false" placeholder="HIDE">
+          <div class="btn-group td-actions">
+            <button type="button" class="btn btn-sm btn-destructive" id="td-guild-hide" disabled>Close card</button>
+            <button type="button" class="btn btn-sm btn-accent" id="td-guild-show" disabled>Reopen</button>
+          </div>
+          <p class="td-status" id="td-guild-status" role="status" aria-live="polite"></p>
+        </div>
+      </article>
+
+      <article class="sys-card sys-span-6 td-card" data-td-card="signal-seeker">
+        <div class="sys-card__header">
+          <h3 class="sys-card__title">Signal Board: seeker card</h3>
+          <span class="td-scope">any admin</span>
+        </div>
+        <div class="sys-card__body">
+          <p class="td-copy">
+            Expires or restores one looking for guild card. Expiring stamps the
+            same expiry a card reaches on its own; nothing is deleted. Two
+            players under one name is refused, not guessed at.
+          </p>
+          <label class="td-label" for="td-seeker-name">Character name</label>
+          <input class="td-input" id="td-seeker-name" type="text" maxlength="80"
+                 placeholder="from the Player column above">
+          <label class="td-label" for="td-seeker-reason">Reason (required)</label>
+          <input class="td-input" id="td-seeker-reason" type="text" maxlength="500"
+                 placeholder="why this card comes down">
+          <label class="td-label" for="td-seeker-confirm">Type HIDE or SHOW to arm</label>
+          <input class="td-input" id="td-seeker-confirm" type="text" autocomplete="off"
+                 spellcheck="false" placeholder="HIDE">
+          <div class="btn-group td-actions">
+            <button type="button" class="btn btn-sm btn-destructive" id="td-seeker-hide" disabled>Expire card</button>
+            <button type="button" class="btn btn-sm btn-accent" id="td-seeker-show" disabled>Restore</button>
+          </div>
+          <p class="td-status" id="td-seeker-status" role="status" aria-live="polite"></p>
+        </div>
+      </article>
+
+      <article class="sys-card sys-span-12 td-card" data-td-card="directory">
+        <div class="sys-card__header">
+          <h3 class="sys-card__title">Player directory listing</h3>
+          <span class="td-scope">any admin</span>
+        </div>
+        <div class="sys-card__body">
+          <p class="td-copy">
+            Takes one player out of the public directory, or puts them back. It
+            writes the listed flag and nothing else, so the blurb survives and
+            restoring brings the profile back exactly as it was.
+          </p>
+          <label class="td-label" for="td-dir-name">Character name</label>
+          <input class="td-input" id="td-dir-name" type="text" maxlength="80"
+                 placeholder="from the Player column above">
+          <label class="td-label" for="td-dir-reason">Reason (required)</label>
+          <input class="td-input" id="td-dir-reason" type="text" maxlength="500"
+                 placeholder="why this profile comes down">
+          <label class="td-label" for="td-dir-confirm">Type HIDE or SHOW to arm</label>
+          <input class="td-input" id="td-dir-confirm" type="text" autocomplete="off"
+                 spellcheck="false" placeholder="HIDE">
+          <div class="btn-group td-actions">
+            <button type="button" class="btn btn-sm btn-destructive" id="td-dir-hide" disabled>Unlist</button>
+            <button type="button" class="btn btn-sm btn-accent" id="td-dir-show" disabled>Relist</button>
+          </div>
+          <p class="td-status" id="td-dir-status" role="status" aria-live="polite"></p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/v2/systems.js?v=20260904a" defer></script>
+<script src="/admin/static/js/v2/takedowns.js?v=20260903b" defer></script>
+{% endblock %}

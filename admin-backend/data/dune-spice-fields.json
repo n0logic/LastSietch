@@ -1,0 +1,18 @@
+{
+  "map": "DeepDesert",
+  "cycle_label": "Current Coriolis cycle",
+  "cycle_ends": "2026-06-16",
+  "updated_utc": "2026-06-08T00:00:00Z",
+  "note": "Large spice erupts at one catalogued site at a time and shifts when harvested out or drawn off by the sandworm. Sites confirmed in-game on our own server (public maps differ). The live active field is now keyed by its authoritative field_id from the DB: when the active field_id matches a recorded survey below, its sector is pinned authoritatively; when it changes (a rotation), the map shows the field as active but awaiting a fresh survey, shaded to the legal band (rows D-I) rather than guessing. Position itself is never stored server-side (RE 2026-06-07), so the exact sector still comes from one survey per field_id.",
+  "fields": {
+    "large": [
+      { "sector": "F1" },
+      { "sector": "I3" },
+      { "sector": "H5" }
+    ],
+    "medium": [],
+    "small": []
+  },
+  "active_help": "Survey cache: per dimension index (\"0\"=PvE, \"1\"=PvP), record the sector you see in-game together with the field_id the live producer reports for that dimension at that moment. Match -> authoritative pin. Example: {\"0\": {\"sector\": \"H5\", \"field_id\": \"<19-digit id from the live producer>\", \"confirmed_utc\": \"...\"}}.",
+  "active": {}
+}

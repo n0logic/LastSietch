@@ -1,0 +1,141 @@
+{# CHOAM exchange item price ladder — GET /portal/market/item?tpl=
+   Rendered into #market-drawer-body by portal-market.js.
+   Context: detail = {available, template_id, name, icon, count, listings[], error?}
+     listings: [{price_display, price, qty, quality, is_npc, order_id, revision, buyable}]
+     bank_solari / bank_solari_display: signed-in player's bank (display only)
+     portal_csrf_token: CSRF token for the buy POST
+   (cheapest first)
+#}
+{% set d = detail if detail is defined else {} %}
+{% if not d.get('available') %}
+  <div class="portal-msg portal-msg--warning" role="status">
+    This item is unavailable right now. Please try again in a moment.
+  </div>
+{% else %}
+  {# The drawer header already shows the item name; here we show the icon +
+     listing count + a copy-name button (no duplicate name). #}
+  <div class="market-detail__head">
+    <span class="cont-item__icon-wrap market-detail__icon{% if d.is_schematic %} cont-item__icon-wrap--schematic{% endif %}">
+      <img class="cont-item__icon" loading="lazy" alt="" data-icon-fallback
+           src="/admin/static/img/dune-icons/{{ d.icon }}.png">
+    </span>
+    <div class="market-detail__heading">
+      <p class="market-detail__name">{{ d.name }}{% if d.is_schematic %} <span class="market-badge market-badge--schematic" title="An imperial permit to fabricate this item — a blueprint you learn, not the physical item">Schematic</span>{% endif %}</p>
+      <p class="market-detail__count">{{ d.count }} listing{{ '' if d.count == 1 else 's' }} on the exchange</p>
+    </div>
+    <button type="button" class="market-copy" data-copy-name="{{ d.name }}"
+            aria-label="Copy item name" title="Copy item name">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+    </button>
+  </div>
+
+  {% set bank = bank_solari if bank_solari is defined else None %}
+  {% if bank is not none %}
+  <p class="market-detail__bank">
+    Your bank Solari:
+    <span class="mono" data-buy-bank="{{ bank }}">{{ bank_solari_display }}</span><img class="market-solari-ico"
+         src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true">
+  </p>
+  {% endif %}
+
+  {# NPC buyer line: what the market-maker bot currently pays per unit, from
+     its tick-published price export. Tells sellers the price to list at or
+     below so the bot auto-buys; omitted entirely when the export is stale. #}
+  {% set bb = d.get('bot_buy') %}
+  {% if bb is not none %}
+    {% if bb.buyable %}
+    <div class="market-botbuy">
+      <span class="market-badge market-badge--npc">NPC buyer</span>
+      <p class="market-botbuy__text">
+        {% if bb.tiers|length == 1 %}
+          Pays up to <b class="mono">{{ bb.tiers[0].cap_display }}</b><img class="market-solari-ico" src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true"> per unit.
+        {% else %}
+          Pays per unit up to:
+          {% for t in bb.tiers %}<span class="market-botbuy__tier mono{% if t.grade %} quality-tier-{{ t.grade }}{% endif %}" title="{% if t.grade %}Quality tier {{ t.grade }}{% else %}Base item{% endif %}">{% if t.grade %}Q{{ t.grade }}{% else %}Base{% endif %} {{ t.cap_display }}</span>{% endfor %}
+          <span class="market-botbuy__p2p">Higher tiers are player-to-player only.</span>
+        {% endif %}
+      </p>
+      <p class="market-botbuy__hint">List at or below this and the market-maker buys it within minutes — even when nothing else is listed.</p>
+    </div>
+    {% else %}
+    <p class="cont-search__hint">The market-maker does not auto-buy this item — only other players will purchase it.</p>
+    {% endif %}
+  {% endif %}
+
+  {% if not d.get('listings') %}
+    <p class="cont-search__hint">No active listings for this item right now.</p>
+  {% else %}
+  <ul class="market-ladder" role="list"
+      data-buy-tpl="{{ d.template_id }}" data-buy-name="{{ d.name }}"
+      data-buy-csrf="{{ portal_csrf_token if portal_csrf_token is defined else '' }}">
+    {% for l in d['listings'] %}
+    <li class="market-ladder__row">
+      <span class="market-ladder__seller">
+        {% if l.is_npc %}<span class="market-badge market-badge--npc">NPC</span>{% else %}<span class="market-badge market-badge--player">Player</span>{% endif %}
+      </span>
+      {% if l.quality %}<span class="cont-item__grade cont-item__grade--inline quality-tier-{{ l.quality }}" title="Quality tier {{ l.quality }} — upgraded gear, priced above the base item">{{ l.quality }}</span>{% else %}<span class="market-ladder__grade market-ladder__grade--base" title="Base item (no quality upgrade)">Base</span>{% endif %}
+      <span class="market-ladder__qty mono" title="Quantity in this listing">×{{ '{:,}'.format(l.qty) }}</span>
+      <span class="market-ladder__price mono">{{ l.price_display }}<img class="market-solari-ico" src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true"></span>
+      {% if l.buyable %}
+      <button type="button" class="portal-btn portal-btn--primary portal-btn--sm market-ladder__buy"
+              data-buy-order="{{ l.order_id }}" data-buy-rev="{{ l.revision }}"
+              data-buy-price="{{ l.price }}" data-buy-stack="{{ l.qty }}"
+              aria-label="Buy this listing">Buy</button>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+
+  {# Buy confirm panel — revealed + populated by portal-market.js when a Buy
+     button is clicked. POSTs order_id + revision (the exact listing the player
+     saw) + count to /portal/market/buy; the writer fails closed on drift. #}
+  <div class="market-buy" data-market-buy hidden>
+    <p class="market-buy__title">Confirm purchase</p>
+    <p class="market-buy__line">
+      <span data-buy-itemname>Item</span>
+      <span class="market-buy__unit mono"><span data-buy-unit>0</span> Solari each</span>
+    </p>
+    <div class="market-buy__qtyrow">
+      <label class="market-buy__qtylabel" for="market-buy-qty">Quantity</label>
+      <input type="number" id="market-buy-qty" class="cont-search__input market-buy__qty"
+             min="1" step="1" inputmode="numeric" value="1"
+             data-buy-qty aria-label="Quantity to buy">
+      <span class="market-buy__stack">/ <span data-buy-stackmax>1</span> available</span>
+    </div>
+    <p class="market-buy__total">
+      Total: <span class="mono" data-buy-total>0</span><img class="market-solari-ico"
+           src="/admin/static/img/dune-icons/solari.png" alt="Solari" aria-hidden="true">
+    </p>
+    <p class="market-buy__from" data-buy-bankline hidden>
+      From your bank Solari: <span class="mono" data-buy-bankshow>—</span>
+    </p>
+    <p class="market-buy__deliver">Delivered to your in-game Completed tab — collect it at any exchange.</p>
+    <div class="market-buy__actions">
+      <button type="button" class="portal-btn portal-btn--ghost portal-btn--sm" data-buy-cancel>Cancel</button>
+      <button type="button" class="portal-btn portal-btn--primary portal-btn--sm" data-buy-confirm>Confirm purchase</button>
+    </div>
+    <p class="market-buy__msg" role="status" aria-live="polite"></p>
+  </div>
+
+  <p class="cont-search__hint">
+    Prices in Solari, cheapest first. Buying funds from your CHOAM bank Solari and
+    delivers to your in-game Completed tab — works whether you are online or not.
+  </p>
+  {% endif %}
+
+  {# Price-alert: watch this item. Revealed by portal-market.js (JS-only); the
+     button POSTs to /portal/watchlist/add. d.template_id feeds the watch row. #}
+  {% set suggested = d['listings'][0].price if d.get('listings') else '' %}
+  <div class="market-watch" data-market-watch data-market-watch-tpl="{{ d.template_id }}" hidden>
+    <p class="market-watch__title">🔔 Alert me when it drops to</p>
+    <div class="market-watch__row">
+      <input type="number" class="cont-search__input market-watch__input" min="1" step="1"
+             inputmode="numeric" value="{{ suggested }}"
+             data-market-watch-price aria-label="Target price in Solari">
+      <span class="market-watch__solari" aria-hidden="true">S</span>
+      <button type="button" class="portal-btn portal-btn--primary portal-btn--sm"
+              data-market-watch-add>Watch this item</button>
+    </div>
+    <p class="market-watch__msg" role="status" aria-live="polite"></p>
+  </div>
+{% endif %}

@@ -1,0 +1,169 @@
+{# Admin wave 1, Set B: Economy reads.
+
+   Four sources that had no admin surface at all: the tiered price history, the
+   watch/alert loop, the Karum wanted board (written since it shipped, never
+   listed) and the blueprint market.
+
+   The four cards are read only. market_history.db is opened as a mode=ro URI by
+   the router, never a plain connect, so this page cannot create a sidecar next
+   to a file the service owns.
+
+   Wave 2 adds a Takedowns section below them, which does write: the blueprint
+   hide/remove pair and the existing Karum force-return. It is a separate
+   section with its own heading for that reason.
+#}
+{% extends "v2/base.html" %}
+{% block title %}Economy{% endblock %}
+{% block extra_css %}
+{# The admin edge sends no Cache-Control, so the ?v= key IS the cache bust. #}
+<link rel="stylesheet" href="/admin/static/css/v2/systems.css?v=20260904a">
+<link rel="stylesheet" href="/admin/static/css/v2/takedowns.css?v=20260903b">
+{% endblock %}
+{% block content %}
+<main class="v2-sys" data-sys-root data-poll-interval="30000"
+      data-page-size="{{ page_size }}">
+
+  <header class="v2-sys__header">
+    <div>
+      <h1 class="v2-sys__title">Economy</h1>
+      <p class="v2-sys__subtitle">
+        Price history health, the watch and alert loop, wanted orders on the
+        Karum, and the blueprint market. All four cards read the local databases
+        only. The Takedowns section at the foot of the page is the part that
+        writes.
+      </p>
+    </div>
+    <div class="v2-sys__meta">
+      <span class="v2-sys__poll" id="sys-poll-state" data-state="idle" aria-live="polite">idle</span>
+      <span id="sys-poll-ts">refreshed never</span>
+    </div>
+  </header>
+
+  <section class="sys-grid" aria-label="Economy cards">
+
+    <article class="sys-card sys-span-6" data-sys-card data-render="history"
+             data-src="/admin/api/dune/v2/economy/history">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Price history tiers</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading market_history.db read only.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-6" data-sys-card data-render="watch"
+             data-src="/admin/api/dune/v2/economy/watch">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Watches &amp; alerts</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading the local watchlist.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-12" data-sys-card data-render="karum_wtb"
+             data-paged data-offset="0"
+             data-src="/admin/api/dune/v2/economy/karum-wtb">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Karum wanted orders</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading the wanted board.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-12" data-sys-card data-render="blueprints"
+             data-paged data-offset="0"
+             data-src="/admin/api/dune/v2/economy/blueprints">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Blueprint market</h2>
+        <span class="sys-state" data-sys-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-sys-body>
+        <p class="sys-card__caption">Reading the publish queue.</p>
+      </div>
+    </article>
+
+  </section>
+
+  {# Wave 2 lever C. These two cards WRITE, which is why they sit in their own
+     section under their own heading rather than beside the read cards: an
+     operator should never be one mis-click from a takedown while reading a
+     health board. Every field is typed by hand on purpose. #}
+  <section class="td-section" aria-label="Write levers">
+    <h2 class="td-section__title">Takedowns</h2>
+    <p class="td-section__copy">
+      Both levers below write. A hidden listing keeps its file and Re-publish
+      is what brings it back: the author cannot, because publishing the same
+      base again opens a second listing with a fresh counter and orphans the
+      hidden one. A removed listing deletes the blueprint file and cannot be
+      undone or re-published. Every press is audited with the reason you type.
+    </p>
+
+    <div class="sys-grid">
+
+      <article class="sys-card sys-span-6 td-card" data-td-card="blueprint">
+        <div class="sys-card__header">
+          <h3 class="sys-card__title">Blueprint listing</h3>
+          <span class="td-scope">any admin</span>
+        </div>
+        <div class="sys-card__body">
+          <label class="td-label" for="td-bp-id">Publish id</label>
+          <input class="td-input" id="td-bp-id" type="number" min="1" step="1"
+                 inputmode="numeric" placeholder="from the Id column above">
+          <label class="td-label" for="td-bp-reason">Reason (required)</label>
+          <input class="td-input" id="td-bp-reason" type="text" maxlength="500"
+                 placeholder="what is wrong with this listing">
+          <label class="td-label" for="td-bp-confirm">Type HIDE, REPUBLISH or REMOVE to arm</label>
+          <input class="td-input" id="td-bp-confirm" type="text" autocomplete="off"
+                 spellcheck="false" placeholder="HIDE">
+          <div class="btn-group td-actions">
+            <button type="button" class="btn btn-sm btn-accent" id="td-bp-hide" disabled>Hide</button>
+            <button type="button" class="btn btn-sm btn-accent" id="td-bp-republish" disabled>Re-publish</button>
+            <button type="button" class="btn btn-sm btn-destructive" id="td-bp-remove" disabled>Remove</button>
+          </div>
+          <p class="td-status" id="td-bp-status" role="status" aria-live="polite"></p>
+        </div>
+      </article>
+
+      {# Not a new verb: this is the force-return that already exists on the
+         Karum operator page, surfaced here with its own reason field so a
+         stuck trade can be handed back without leaving Economy. Force-deliver
+         and refund stay on that page, where their separate confirmations are. #}
+      <article class="sys-card sys-span-6 td-card" data-td-card="karum">
+        <div class="sys-card__header">
+          <h3 class="sys-card__title">Karum force return</h3>
+          <span class="td-scope">any admin</span>
+        </div>
+        <div class="sys-card__body">
+          <p class="td-copy">
+            Hands an escrowed listing back to its seller. This is the existing
+            operator action, not a new one: it runs the same writer, idempotent
+            on the delivery log. Force deliver and refund live on the
+            <a href="/admin/v2/portal/karum">Karum page</a>.
+          </p>
+          <label class="td-label" for="td-karum-id">Listing id</label>
+          <input class="td-input" id="td-karum-id" type="number" min="1" step="1"
+                 inputmode="numeric" placeholder="listing_id">
+          <label class="td-label" for="td-karum-reason">Reason (required, 4 chars minimum)</label>
+          <input class="td-input" id="td-karum-reason" type="text" maxlength="400"
+                 placeholder="the dispute this resolves">
+          <div class="btn-group td-actions">
+            <button type="button" class="btn btn-sm btn-accent" id="td-karum-return" disabled>Force return</button>
+          </div>
+          <p class="td-status" id="td-karum-status" role="status" aria-live="polite"></p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/admin/static/js/v2/systems.js?v=20260904a" defer></script>
+<script src="/admin/static/js/v2/takedowns.js?v=20260903b" defer></script>
+{% endblock %}

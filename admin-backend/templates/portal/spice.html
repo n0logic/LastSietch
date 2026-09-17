@@ -1,0 +1,100 @@
+{# Deep Desert spice map — GET /portal/spice (public, global server data)
+   Context (from routers/portal.py portal_spice):
+     grid: {rows:[{label, cells:[{sector, size}]}], cols[], counts{large,medium,small},
+            total_sites, cycle_label, cycle_ends, updated_utc, note}
+#}
+{% extends "portal/base.html" %}
+
+{% block title %}Deep Desert spice map — Last Sietch Dune Portal{% endblock %}
+
+{% block content %}
+
+<nav class="portal-breadcrumb" aria-label="Breadcrumb">
+  <a href="/portal/account" class="portal-link">← Back to your account</a>
+</nav>
+
+<section class="portal-hero portal-hero--maps portal-hero--slim" aria-label="Deep Desert spice map">
+  <div class="portal-hero__inner">
+    <span class="portal-hero__kicker">Deep Desert</span>
+    <h1 class="portal-hero__title">Spice Map</h1>
+    <p class="portal-hero__sub">
+      Known spice field sites for the {{ grid.cycle_label or 'current cycle' }}.
+      {% if grid.cycle_ends %}Resets at the next Coriolis storm (around {{ grid.cycle_ends }}).{% endif %}
+    </p>
+  </div>
+</section>
+
+{% if grid.active %}
+<article class="portal-card spice-active-banner">
+  <h2 class="spice-active-banner__title"><span class="spice-active-banner__pulse"></span>{% if grid.active|length > 1 %}{{ grid.active|length }} active Large fields right now{% else %}Active Large field right now{% endif %}</h2>
+  <ul class="spice-active-banner__list">
+    {% for a in grid.active %}
+    <li class="spice-active-banner__item">
+      <span class="spice-active-banner__dim spice-active-banner__dim--{{ (a.label or '')|lower }}">{{ a.label }}</span>
+      {% if a.status == 'live' and a.sector %}erupting at sector <strong>{{ a.sector }}</strong>
+        <span class="spice-active-banner__conf spice-active-banner__conf--confirmed">live-tracked</span>
+      {% elif a.status == 'surveyed' and a.sector %}erupting at sector <strong>{{ a.sector }}</strong>
+        <span class="spice-active-banner__conf spice-active-banner__conf--confirmed">survey-confirmed</span>
+      {% else %}active now &mdash; <span class="spice-active-banner__conf spice-active-banner__conf--none">location awaiting survey (somewhere in rows D&ndash;I)</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="portal-card__subtitle portal-card__fine-print">
+    Liveness is read straight from the server every ~90s. A field is pinned once it
+    has been surveyed; when it rotates to a new field its sector is re-surveyed.
+  </p>
+</article>
+{% endif %}
+
+{% if grid.total_sites == 0 %}
+<article class="portal-card">
+  <div class="portal-msg portal-msg--info" role="status">
+    No spice field sites surveyed yet for this cycle. Check back soon.
+  </div>
+</article>
+{% else %}
+
+<article class="portal-card">
+  <div class="spice-legend">
+    <span class="spice-legend__item"><span class="spice-dot spice-dot--large"></span>Large ({{ grid.counts.large }})</span>
+    <span class="spice-legend__item"><span class="spice-dot spice-dot--medium"></span>Medium ({{ grid.counts.medium }})</span>
+    <span class="spice-legend__item"><span class="spice-dot spice-dot--small"></span>Small ({{ grid.counts.small }})</span>
+  </div>
+
+  <div class="spice-grid-wrap">
+    <table class="spice-grid" aria-label="Deep Desert 9 by 9 sector grid">
+      <thead>
+        <tr>
+          <th scope="col" class="spice-grid__corner" aria-hidden="true"></th>
+          {% for c in grid.cols %}<th scope="col" class="spice-grid__collabel">{{ c }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in grid.rows %}
+        <tr>
+          <th scope="row" class="spice-grid__rowlabel">{{ row.label }}</th>
+          {% for cell in row.cells %}
+          <td class="spice-cell{% if cell.size %} spice-cell--{{ cell.size }}{% endif %}{% if cell.active %} spice-cell--active{% endif %}"
+              {% if cell.active %}title="{{ cell.sector }} — ACTIVE Large field now ({{ cell.active | map(attribute='label') | join(', ') }})"{% elif cell.size %}title="{{ cell.sector }} — {{ cell.size | capitalize }} spice field"{% else %}title="{{ cell.sector }}"{% endif %}>
+            {% if cell.size %}<span class="spice-dot spice-dot--{{ cell.size }}" aria-label="{{ cell.size }} field at {{ cell.sector }}"></span>{% endif %}
+            {% if cell.active %}<span class="spice-cell__live" aria-label="active Large field at {{ cell.sector }}"></span>{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if grid.note %}
+  <p class="portal-card__subtitle portal-card__fine-print">{{ grid.note }}</p>
+  {% endif %}
+  {% if grid.updated_utc %}
+  <p class="portal-card__subtitle portal-card__fine-print">Last surveyed <time data-utc="{{ grid.updated_utc }}">{{ grid.updated_utc }}</time>.</p>
+  {% endif %}
+</article>
+
+{% endif %}
+
+{% endblock %}

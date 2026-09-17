@@ -1,0 +1,48 @@
+{# Live state cards. Reuses player picker payload (online flag + grace + faction). #}
+{% if player %}
+<div class="v2-card">
+  <div class="v2-card__title">Player</div>
+  <div class="v2-card__body">
+    <div class="v2-card__row">
+      <span class="v2-card__label">aid</span>
+      <code class="v2-card__val">{{ player.account_id }}</code>
+    </div>
+    <div class="v2-card__row">
+      <span class="v2-card__label">char</span>
+      <span class="v2-card__val">{{ player.character_name or player.name or '—' }}</span>
+    </div>
+    <div class="v2-card__row">
+      <span class="v2-card__label">faction</span>
+      <span class="v2-card__val">{{ player.faction or '—' }}</span>
+    </div>
+    <div class="v2-card__row">
+      <span class="v2-card__label">house</span>
+      <span class="v2-card__val">{{ player.active_landsraad_house or '—' }}</span>
+    </div>
+    <div class="v2-card__row">
+      <span class="v2-card__label">status</span>
+      <span class="v2-card__val">
+        {% if player.online_status %}
+          <span class="status-badge status-badge--online">online</span>
+        {% elif player.in_grace_period %}
+          <span class="status-badge status-badge--grace">grace</span>
+        {% else %}
+          <span class="status-badge status-badge--offline">offline</span>
+        {% endif %}
+      </span>
+    </div>
+    {% if player.last_login_display or player.last_login_iso %}
+    <div class="v2-card__row">
+      <span class="v2-card__label">last seen</span>
+      <span class="v2-card__val">{{ player.last_login_display or player.last_login_iso }}</span>
+    </div>
+    {% endif %}
+  </div>
+  <div class="v2-card__hint" data-hx-poll-hint>polls every 30s</div>
+</div>
+{% else %}
+<div class="v2-card v2-card--empty">
+  <div class="v2-card__title">Player</div>
+  <div class="v2-card__body">no picker data for aid <code>{{ aid }}</code></div>
+</div>
+{% endif %}

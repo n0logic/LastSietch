@@ -1,0 +1,126 @@
+{# Per-track trait grid + track XP controls. Swapped into #spec-traits-mount by
+   the track tabs. Everything track-specific lives here so a tab switch refreshes
+   the XP section, the unlock-track button, and the grid together.
+   States (owned/available/locked) render only when state_available; otherwise
+   every row shows "--" and stays addable (backend insert is idempotent). #}
+<div class="v2-spec-traits"
+     data-track="{{ track }}"
+     data-track-level="{{ track_level if track_level is not none else '' }}"
+     data-track-xp="{{ track_xp if track_xp is not none else '' }}"
+     data-state-available="{{ '1' if state_available else '0' }}">
+
+  <div class="v2-spec-traits__trackhd">
+    <span class="v2-spec-traits__trackname">{{ track_label }}</span>
+    <span class="v2-spec-traits__tracklvl">
+      LVL {{ track_level if track_level is not none else '--' }}
+    </span>
+  </div>
+
+  {# --- Track level / XP grant (spec_xp; online-safe) --- #}
+  <div class="v2-spec-section">
+    <div class="v2-spec-section__hd">Track Level / XP</div>
+    <div class="v2-spec-xp">
+      <button type="button" class="btn btn-sm btn-accent"
+              data-action="spec-max" data-track="{{ track }}">
+        Max this track (XP {{ spec_xp_max }} / LVL {{ spec_level_max }})
+      </button>
+      <div class="v2-spec-xp__manual">
+        <label class="v2-spec-xp__field">
+          <span>Set XP</span>
+          <input type="number" id="spec-xp-input" min="0" max="{{ spec_xp_max }}"
+                 placeholder="0..{{ spec_xp_max }}" />
+        </label>
+        <label class="v2-spec-xp__field">
+          <span>Target LVL</span>
+          <input type="number" id="spec-level-input" min="0" max="{{ spec_level_max }}"
+                 placeholder="0..{{ spec_level_max }}" />
+        </label>
+        <button type="button" class="btn btn-sm"
+                data-action="spec-add-xp" data-track="{{ track }}">
+          Add XP/level to cart
+        </button>
+      </div>
+      <label class="v2-spec-xp__adv">
+        <input type="checkbox" id="spec-advanced" />
+        <span>Advanced: use add mode (default is set; set writes XP/level directly)</span>
+      </label>
+      <div id="spec-decrease-warn" class="msg warning" hidden></div>
+      <p class="v2-spec-xp__note">
+        XP is authoritative; level is the checkpoint. Only "Max this track" is a
+        validated preset. For partial grants enter the level manually (OQ-3).
+      </p>
+    </div>
+  </div>
+
+  {# --- Whole-track unlock (spec_unlock_track; offline-only) --- #}
+  <div class="v2-spec-section">
+    <div class="v2-spec-section__hd">Bulk Trait Unlock</div>
+    <button type="button" class="btn btn-sm"
+            data-action="spec-unlock-track" data-track="{{ track }}">
+      Unlock all 41 {{ track_label }} traits
+    </button>
+  </div>
+
+  {# --- Individual traits (keystone; offline-only) --- #}
+  <div class="v2-spec-section">
+    <div class="v2-spec-section__hd">Individual Traits</div>
+    {% if not state_available %}
+    <p class="v2-spec-traits__statenote">
+      Owned / locked state unavailable (no single-player context). Traits stay
+      addable; grants are idempotent.
+    </p>
+    {% endif %}
+    <table class="v2-spec-grid">
+      <thead>
+        <tr>
+          <th class="v2-spec-grid__lvl">LVL REQ</th>
+          <th class="v2-spec-grid__type">TYPE</th>
+          <th class="v2-spec-grid__name">NAME</th>
+          <th class="v2-spec-grid__sp">SP</th>
+          <th class="v2-spec-grid__spice">SPICE</th>
+          <th class="v2-spec-grid__state">STATE</th>
+          <th class="v2-spec-grid__act"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in traits %}
+        <tr class="v2-spec-row v2-spec-row--{{ t.state }}"
+            data-keystone-id="{{ t.keystone_id }}"
+            data-track="{{ track }}"
+            data-name="{{ t.name }}">
+          <td class="v2-spec-grid__lvl">{{ t.req_level }}</td>
+          <td class="v2-spec-grid__type">{{ t.type }}</td>
+          <td class="v2-spec-grid__name">{{ t.name }}</td>
+          <td class="v2-spec-grid__sp">{% if t.sp_bonus %}+{{ t.sp_bonus }}{% else %}-{% endif %}</td>
+          <td class="v2-spec-grid__spice">{{ t.spice_cost }}</td>
+          <td class="v2-spec-grid__state">
+            {% if t.state == 'owned' %}<span class="v2-spec-state v2-spec-state--owned">owned</span>
+            {% elif t.state == 'locked' %}<span class="v2-spec-state v2-spec-state--locked">lvl {{ t.req_level }}</span>
+            {% elif t.state == 'available' %}<span class="v2-spec-state v2-spec-state--avail">available</span>
+            {% else %}<span class="v2-spec-state v2-spec-state--unknown">--</span>{% endif %}
+          </td>
+          <td class="v2-spec-grid__act">
+            {% if t.state == 'owned' %}
+              <button type="button" class="btn btn-xs" disabled>owned</button>
+            {% elif t.state == 'locked' %}
+              <button type="button" class="btn btn-xs v2-spec-add v2-spec-add--override"
+                      data-action="spec-trait-add"
+                      data-keystone-id="{{ t.keystone_id }}"
+                      data-track="{{ track }}"
+                      data-name="{{ t.name }}"
+                      data-override="1"
+                      title="Above this player's track level ({{ t.req_level }}). Admin override: a direct grant bypasses the in-game level gate.">+ add</button>
+            {% else %}
+              <button type="button" class="btn btn-xs v2-spec-add"
+                      data-action="spec-trait-add"
+                      data-keystone-id="{{ t.keystone_id }}"
+                      data-track="{{ track }}"
+                      data-name="{{ t.name }}">+ add</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

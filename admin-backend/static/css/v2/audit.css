@@ -1,0 +1,226 @@
+/* ============================================================================
+ * V2 Audit tab layout
+ * Tokens + components live in design-system.css. This file is layout-only.
+ * Source: P1-BUILD-PLAN section 4 + design-system 3.16.
+ * ============================================================================ */
+
+body.admin-page .v2-audit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* Seven controls now (search, user, action, outcome, from, to, buttons). A fixed
+   four-column track wrapped them into a ragged block the moment the outcome and
+   date filters landed, so the bar tracks by minimum width instead. */
+body.admin-page .v2-audit__filter-bar {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+}
+
+body.admin-page .v2-audit__filter-field--wide {
+  grid-column: span 2;
+}
+
+body.admin-page .v2-audit__filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+body.admin-page .v2-audit__filter-field label {
+  margin: 0;
+}
+
+body.admin-page .v2-audit__filter-actions {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* Reset is a link to the unfiltered page, not a form reset: the server renders
+   the current filters as the field values, so resetting the form would restore
+   the state it was asked to clear. .btn is a class, so it styles the anchor;
+   only the underline needs saying. */
+body.admin-page .v2-audit__filter-actions a.btn,
+body.admin-page .empty-state a.btn {
+  text-decoration: none;
+}
+
+body.admin-page .v2-audit__table-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+body.admin-page .v2-audit__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+body.admin-page .v2-audit__table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-elevated);
+  z-index: 2;
+  padding: var(--space-3) var(--space-3);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-strong);
+  text-align: left;
+}
+
+body.admin-page .v2-audit__table tbody td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  font-variant-numeric: tabular-nums;
+  vertical-align: top;
+}
+
+body.admin-page .v2-audit__table .audit-row {
+  cursor: default;
+  transition: background var(--motion-instant) var(--ease-in-out);
+}
+
+body.admin-page .v2-audit__table .audit-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+body.admin-page .v2-audit__table .audit-detail {
+  background: var(--bg-deep);
+}
+
+body.admin-page .v2-audit__table .audit-detail td {
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+body.admin-page .v2-audit__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+body.admin-page .v2-audit__pagination-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+body.admin-page .v2-audit__pagination-page {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+body.admin-page .v2-audit__source-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+ * Details cell
+ * Every lever writes its reason and its before/after state into audit_log.
+ * details; the page rendered none of it. The summary is one truncated line so a
+ * 4KB payload cannot own the table, and the disclosure holds the whole thing.
+ * --------------------------------------------------------------------------- */
+body.admin-page .audit-row__details {
+  max-width: 34ch;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+body.admin-page .audit-row__details summary {
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 34ch;
+}
+
+body.admin-page .audit-row__details summary:hover {
+  color: var(--text);
+}
+
+body.admin-page .audit-row__details details[open] summary {
+  color: var(--text);
+  margin-bottom: var(--space-2);
+}
+
+body.admin-page .audit-row__details pre {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  max-height: 20rem;
+  max-width: 60ch;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+body.admin-page .audit-row__none {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+/* Half the trail lives behind the relay. When it is down the table is admin.db
+   only, and the page has to say so rather than look like a quiet day. */
+body.admin-page .v2-audit__source-warn {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--yellow);
+}
+
+/* ---------------------------------------------------------------------------
+ * Responsive breakpoint
+ * --------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  body.admin-page .v2-audit__filter-bar {
+    grid-template-columns: 1fr;
+  }
+
+  body.admin-page .v2-audit__filter-field--wide {
+    grid-column: auto;
+  }
+
+  body.admin-page .v2-audit__filter-actions {
+    justify-content: flex-end;
+  }
+
+  body.admin-page .v2-audit__table-wrap {
+    overflow-x: auto;
+  }
+}

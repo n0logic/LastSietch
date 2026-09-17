@@ -1,0 +1,681 @@
+/* portal-solido.css — Solido blueprint browse/detail/3D + My Bases.
+ * Loaded only on /portal/solido* and /portal/my-bases (via {% block extra_head %}).
+ * Uses the portal design-system tokens (--accent, --bg-card, --border, …) so it
+ * tracks day/night themes automatically. Kept out of the shared portal.css so it
+ * never bloats the SW shell cache. */
+
+/* ---- toolbar ---- */
+.solido-gallery { margin-top: 1rem; }
+.solido-toolbar {
+  display: flex; flex-wrap: wrap; gap: 1rem; align-items: center;
+  justify-content: space-between; margin-bottom: 1.25rem;
+}
+.solido-sorts { display: inline-flex; gap: .25rem; flex-wrap: wrap; }
+.solido-sort {
+  font: inherit; cursor: pointer; padding: .4rem .9rem;
+  background: var(--bg-card); color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: 999px;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.solido-sort:hover { color: var(--text); border-color: var(--accent-soft); }
+.solido-sort.is-active {
+  color: var(--accent-bright); border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.solido-tagfilter { display: inline-flex; align-items: center; gap: .5rem; }
+.solido-tagfilter__label { color: var(--text-muted); font-size: .85rem; }
+.solido-tagfilter input {
+  font: inherit; padding: .4rem .7rem; min-width: 12rem;
+  background: var(--bg-card); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.solido-tagfilter input:focus-visible { outline: 2px solid var(--accent-bright); }
+
+.solido-status { color: var(--text-muted); padding: 1.5rem 0; text-align: center; }
+.solido-status[hidden] { display: none; }
+
+/* ---- gallery grid + cards ---- */
+.solido-grid {
+  display: grid; gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+.solido-card {
+  position: relative;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+  transition: transform .15s, border-color .15s, box-shadow .15s;
+}
+.solido-card:hover {
+  transform: translateY(-3px); border-color: var(--accent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
+}
+.solido-card__link {
+  display: flex; flex-direction: column; flex: 1;
+  text-decoration: none; color: inherit;
+}
+/* Quick "Save to character" action overlaid on the card art (linked users). */
+.solido-card__save {
+  position: absolute; top: .5rem; right: .5rem; z-index: 2;
+  font-size: .72rem; padding: .25rem .6rem;
+}
+.solido-card__art {
+  aspect-ratio: 16 / 10; background: var(--bg-deep); position: relative; overflow: hidden;
+}
+.solido-card__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.solido-card__art.is-empty::after {
+  content: 'no preview'; position: absolute; inset: 0;
+  display: grid; place-items: center; color: var(--text-muted); font-size: .8rem;
+}
+.solido-card__body { padding: .75rem .85rem .9rem; display: flex; flex-direction: column; gap: .45rem; }
+.solido-card__title {
+  margin: 0; font-size: 1rem; line-height: 1.25; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.solido-card__meta { display: flex; justify-content: space-between; gap: .5rem; font-size: .8rem; color: var(--text-muted); }
+.solido-card__stats { display: inline-flex; gap: .6rem; }
+.solido-card__tags { display: flex; flex-wrap: wrap; gap: .3rem; }
+
+.solido-chip {
+  font-size: .72rem; padding: .15rem .5rem; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent-bright); border: 1px solid var(--border);
+}
+
+/* ---- detail ---- */
+.solido-detail { margin-top: 1rem; }
+.solido-detail__back { color: var(--text-muted); text-decoration: none; font-size: .9rem; }
+.solido-detail__back:hover { color: var(--accent-bright); }
+.solido-detail__head {
+  display: grid; gap: 1.5rem; margin-top: 1rem;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+}
+@media (max-width: 720px) { .solido-detail__head { grid-template-columns: 1fr; } }
+.solido-detail__snap {
+  background: var(--bg-deep); border: 1px solid var(--border); border-radius: 10px;
+  overflow: hidden; aspect-ratio: 16 / 10;
+}
+.solido-detail__snap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.solido-detail__title { margin: 0 0 .35rem; }
+.solido-detail__by { color: var(--text-muted); display: flex; flex-wrap: wrap; gap: .75rem; }
+.solido-detail__stat { color: var(--text-muted); }
+.solido-detail__tags { display: flex; flex-wrap: wrap; gap: .35rem; margin: .75rem 0; }
+.solido-detail__actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; }
+.solido-detail__viewnote, .solido-detail__warn { color: var(--text-muted); font-size: .85rem; margin-top: .75rem; }
+.solido-detail__warn { color: var(--yellow); }
+.solido-detail__viewnote[hidden] { display: none; }
+
+/* ---- 3D stage ---- */
+.solido-stage { margin-top: 1.5rem; position: relative; }
+.solido-stage[hidden] { display: none; }
+.solido-canvas {
+  display: block; width: 100%; height: min(76vh, 720px);
+  background: #0c0a07; border: 1px solid var(--border); border-radius: 10px;
+  touch-action: none;
+}
+/* Market detail: while the 3D view is open, the snap takes the full row and
+   real height instead of the 2-col thumbnail box. */
+.solido-detail__head.is-3d { grid-template-columns: 1fr; }
+.solido-detail__head.is-3d .solido-detail__snap {
+  aspect-ratio: auto; height: min(76vh, 820px); order: 2;
+}
+.solido-stage__hint { color: var(--text-muted); font-size: .8rem; margin-top: .5rem; text-align: center; }
+
+/* ---- My Bases ---- */
+.my-bases__section { margin-top: 1.5rem; }
+.my-bases__char {
+  font-size: 1.1rem; margin: 0 0 .6rem; padding-bottom: .4rem;
+  border-bottom: 1px solid var(--border);
+}
+.my-bases__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.my-bases__row {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: .65rem .85rem; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.my-bases__meta { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.my-bases__name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.my-bases__pieces { color: var(--text-muted); font-size: .8rem; }
+.my-bases__actions { display: inline-flex; gap: .5rem; flex-shrink: 0; }
+
+/* ---- empty + credit ---- */
+.solido-empty {
+  text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; margin-top: 1.5rem;
+}
+.solido-empty__headline { color: var(--text); font-size: 1.15rem; margin: 0 0 .5rem; }
+.solido-empty .portal-btn { margin-top: 1rem; }
+
+.solido-credit {
+  margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted); font-size: .8rem;
+}
+.solido-credit a { color: var(--accent); }
+.solido-credit a:hover { color: var(--accent-bright); }
+
+/* ---- faction-tinted placeholder art (no thumbnails in v1) ---- */
+.solido-card__art[data-faction],
+.solido-detail__snap[data-faction] {
+  background:
+    radial-gradient(120% 90% at 30% 20%,
+      color-mix(in srgb, var(--faction-tint, #9c8a68) 38%, transparent) 0%,
+      transparent 70%),
+    var(--bg-deep);
+}
+[data-faction="atreides"] { --faction-tint: #c9a14e; }
+[data-faction="harkonnen"] { --faction-tint: #b5532f; }
+[data-faction="choam"] { --faction-tint: #b89055; }
+[data-faction="mtx"] { --faction-tint: #8a76b8; }
+[data-faction="neutral"] { --faction-tint: #9c8a68; }
+
+/* card corner badges (MTX / Yours) */
+.solido-card__badge {
+  position: absolute; top: .5rem; font-size: .68rem; font-weight: 600;
+  padding: .12rem .45rem; border-radius: 999px; letter-spacing: .02em;
+  background: rgba(12, 10, 7, .72); color: var(--text); border: 1px solid var(--border);
+}
+.solido-card__badge--mtx { left: .5rem; color: #cdbcf0; }
+.solido-card__badge--mine { right: .5rem; color: var(--accent-bright); }
+
+.solido-card__author { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* load-more + chip variants */
+.solido-loadmore { text-align: center; margin-top: 1.5rem; }
+.solido-loadmore .portal-btn[hidden] { display: none; }
+.solido-chip--mtx { color: #cdbcf0; }
+
+/* ---- detail extras ---- */
+.solido-detail__snap.is-empty::after {
+  content: '3D preview'; position: absolute; inset: 0;
+  display: grid; place-items: center; color: var(--text-muted); font-size: .8rem;
+}
+.solido-detail__snap { position: relative; }
+.solido-detail__snap .solido-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0;
+}
+.solido-detail__snap .solido-canvas[hidden] { display: none; }
+.solido-detail__desc { color: var(--text); margin: .75rem 0; white-space: pre-wrap; }
+.solido-detail__census { list-style: none; margin: 1rem 0; padding: 0; color: var(--text-muted); }
+.solido-detail__census li { margin: .2rem 0; }
+.solido-detail__census strong { color: var(--text); }
+.solido-detail__hint { color: var(--text-muted); font-size: .85rem; margin-top: 1.5rem; }
+.solido-detail__hint a { color: var(--accent); }
+
+/* ---- My Bases publish state ---- */
+.my-bases__badge {
+  display: inline-block; margin-left: .5rem; font-size: .72rem;
+  padding: .1rem .45rem; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-bright); border: 1px solid var(--border);
+}
+
+/* ---- Real-mesh mode toggle (injected by portal-solido.js after viewer mount) ---- */
+.solido-mesh-toggle {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .4rem;
+  padding: .5rem .75rem; margin-bottom: .5rem;
+  background: var(--bg-elevated, var(--bg-card));
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.solido-mesh-toggle__btn {
+  font: inherit; cursor: pointer; padding: .35rem .85rem;
+  background: var(--bg-card); color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: 999px;
+  transition: color .15s, border-color .15s, background .15s;
+  font-size: .82rem;
+}
+.solido-mesh-toggle__btn:hover:not(:disabled) {
+  color: var(--text); border-color: var(--accent-soft);
+}
+.solido-mesh-toggle__btn.is-active {
+  color: var(--accent-bright); border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.solido-mesh-toggle__btn:disabled { opacity: .5; cursor: not-allowed; }
+.solido-mesh-toggle__warn {
+  color: var(--yellow, #d4aa50); font-size: .75rem;
+  width: 100%; order: -1; /* above buttons */
+}
+.solido-mesh-toggle--material { margin-top: -.25rem; }
+
+/* Both toolbars (render-mode + material/selection) share one wrapper so they
+   stack as a column and never overlap, no matter the "large blueprint" warning
+   line or the selection readout growing the material bar. In My Bases the
+   wrapper is in-flow (align stretch = full-width bars, layout unchanged). */
+.solido-mesh-toolbars {
+  display: flex; flex-direction: column; gap: .4rem; margin-bottom: .5rem;
+}
+.solido-mesh-toolbars .solido-mesh-toggle { margin: 0; }
+
+/* Detail listing 3D view: the canvas is position:absolute and fills the snap so
+   the model shows edge-to-edge, which paints over the in-flow toolbars the
+   viewer injects (they were invisible behind the canvas). Float the whole stack
+   above the canvas, top-left, clear of the top-right PIECE BREAKDOWN (top:3.4rem).
+   align-items:flex-start shrinks each bar to its content so they don't span the
+   stage. My Bases uses .solido-stage with an in-flow canvas and is unaffected. */
+.solido-detail__head.is-3d .solido-mesh-toolbars {
+  position: absolute; z-index: 7; left: .5rem; top: .5rem; margin: 0;
+  align-items: flex-start; max-width: calc(100% - 11rem);
+}
+.solido-detail__head.is-3d .solido-mesh-toggle {
+  width: auto; max-width: 100%;
+  background: color-mix(in srgb, var(--bg-card) 92%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+/* Publish-time thumbnails (gallery cards + detail snap) */
+.solido-card__shot, .solido-detail__shot {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; display: block;
+}
+.solido-card__art { position: relative; }
+
+/* My Bases: highlight the row whose base is open in the 3D stage */
+.my-bases__section li.is-viewing {
+  border: 1px solid var(--accent); border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+/* ---- In-canvas viewer overlays (selection / breakdown / hint) ---- */
+.solido-overlay {
+  position: absolute; z-index: 6; pointer-events: none;
+  background: color-mix(in srgb, var(--bg-deep) 82%, transparent);
+  border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: .75rem; backdrop-filter: blur(3px);
+}
+.solido-overlay--select { left: .5rem; bottom: .5rem; padding: .5rem .7rem; max-width: 62%; }
+.solido-overlay__cat { font-size: .62rem; letter-spacing: .08em; color: var(--text-muted); }
+.solido-overlay__name {
+  font-weight: 600; color: var(--accent-bright); font-size: .85rem; word-break: break-all;
+}
+.solido-overlay__meta {
+  color: var(--text-muted); font-size: .68rem; margin-top: .15rem; font-variant-numeric: tabular-nums;
+}
+.solido-overlay--breakdown {
+  top: 3.4rem; right: .5rem; padding: .5rem .6rem; min-width: 9.5rem;
+  max-height: 58%; overflow: auto; pointer-events: auto;
+}
+.solido-overlay__head {
+  font-size: .62rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: .35rem;
+}
+.solido-overlay__list { list-style: none; margin: 0; padding: 0; display: grid; gap: .15rem; }
+.solido-overlay__row { display: flex; justify-content: space-between; gap: 1rem; }
+.solido-overlay__row-label { color: var(--text); }
+.solido-overlay__row-count { color: var(--accent-bright); font-variant-numeric: tabular-nums; }
+.solido-overlay--hint {
+  right: .5rem; bottom: .5rem; padding: .3rem .55rem; max-width: 56%;
+  color: var(--text-muted); font-size: .66rem; text-align: right;
+}
+@media (max-width: 560px) {
+  .solido-overlay--breakdown, .solido-overlay--hint { display: none; }
+}
+
+/* ---- Character stage (account page two-column vitals) ------------------- */
+.portal-vitals__cols {
+  display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 1.5fr);
+  gap: 1.25rem; align-items: start; margin-top: .75rem;
+}
+/* Stats become a vertical list in the left column. Selector carries
+   body.portal-page + .portal-vitals so it outranks portal.css's
+   `body.portal-page .portal-dash__stats` grid (incl. its >=768px multi-column
+   media override) at every width. */
+body.portal-page .portal-vitals .portal-dash__stats--list {
+  display: grid; grid-template-columns: 1fr; gap: .35rem;
+}
+body.portal-page .portal-vitals .portal-dash__stats--list .portal-stat {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; padding: .45rem .65rem; min-width: 0;
+  background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+body.portal-page .portal-vitals .portal-dash__stats--list .portal-stat__label {
+  white-space: nowrap;
+}
+body.portal-page .portal-vitals .portal-dash__stats--list .portal-stat__value {
+  text-align: right; overflow-wrap: anywhere;
+}
+.portal-charstage {
+  display: grid; grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+  gap: .6rem; align-items: stretch;
+}
+.portal-charstage__rail {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: .4rem;
+}
+.portal-charstage__slot {
+  font: inherit; cursor: pointer; width: 100%; text-align: left;
+  padding: .45rem .6rem; border-radius: 8px;
+  background: var(--bg-card); color: var(--text-muted);
+  border: 1px solid var(--border);
+  display: grid; gap: .1rem;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.portal-charstage__slot:hover { color: var(--text); border-color: var(--accent-soft); }
+.portal-charstage__slot.is-active {
+  color: var(--accent-bright); border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.portal-charstage__slot-label {
+  font-size: .6rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.portal-charstage__slot-name { font-size: .8rem; font-weight: 600; }
+/* Definite height + absolutely-positioned canvas: the renderer sizes the
+   drawing buffer from clientWidth/Height with updateStyle=false, so the canvas
+   must NOT drive layout height or it feeds back through ResizeObserver and the
+   page grows without bound. A definite container height + absolute canvas
+   decouples buffer size from layout. */
+.portal-charstage__view { position: relative; height: clamp(320px, 38vh, 480px); }
+.portal-charstage__canvas {
+  position: absolute; inset: 0; display: block; width: 100%; height: 100%;
+  background: #0d0f12; border: 1px solid var(--border); border-radius: 10px;
+  touch-action: none;
+}
+.portal-charstage__empty[hidden] { display: none; }
+.portal-charstage__empty {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--text-muted); font-size: .82rem; text-align: center; padding: 1rem;
+}
+/* Item stats popup: overlays the turntable figure on a rail click (the figure
+   stays mounted behind it). A faint backdrop fills the view so a tap on empty
+   space dismisses it; the card itself is bottom-anchored. */
+.portal-charstage__popup {
+  position: absolute; inset: 0; z-index: 2;
+  display: grid; align-items: end; padding: .5rem;
+  background: color-mix(in srgb, var(--bg-deep) 35%, transparent);
+}
+.portal-charstage__popup[hidden] { display: none; }
+.portal-charstage__popup-card {
+  position: relative; display: grid; gap: .35rem;
+  padding: .65rem .75rem; max-height: 100%; overflow-y: auto;
+  background: color-mix(in srgb, var(--bg-deep) 90%, transparent);
+  border: 1px solid var(--border); border-radius: 10px; backdrop-filter: blur(4px);
+}
+.portal-charstage__popup-slot {
+  font-size: .6rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.portal-charstage__popup-name {
+  font-size: .95rem; font-weight: 700; color: var(--accent-bright);
+  line-height: 1.2; padding-right: 1.6rem;
+}
+.portal-charstage__popup-chips { display: flex; flex-wrap: wrap; gap: .3rem; }
+.portal-charstage__popup-chips:empty { display: none; }
+.portal-charstage__chip {
+  font-size: .58rem; letter-spacing: .04em; text-transform: uppercase; font-weight: 600;
+  padding: .12rem .4rem; border-radius: 5px;
+  background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+  color: var(--text); border: 1px solid var(--border);
+}
+.portal-charstage__chip.is-grade { color: var(--accent-bright); border-color: var(--accent-soft); }
+.portal-charstage__chip.is-unique {
+  color: #c9a0ff; border-color: #7a4fd0;
+  background: color-mix(in srgb, #7a4fd0 16%, transparent);
+}
+.portal-charstage__chip.is-memento {
+  color: #ffd27a; border-color: #b8862f;
+  background: color-mix(in srgb, #b8862f 16%, transparent);
+}
+.portal-charstage__popup-desc {
+  margin: 0; font-size: .72rem; line-height: 1.35; color: var(--text); font-style: italic;
+}
+.portal-charstage__popup-desc[hidden] { display: none; }
+.portal-charstage__popup-stats {
+  margin: .1rem 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr);
+  gap: .12rem .6rem; padding: .45rem .6rem; border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-card) 60%, transparent);
+  border: 1px solid var(--border);
+}
+.portal-charstage__popup-stats:empty { display: none; }
+.portal-charstage__popup-stats dt {
+  font-size: .64rem; color: var(--text-muted); align-self: center;
+}
+.portal-charstage__popup-stats dd {
+  margin: 0; font-size: .74rem; font-weight: 600; color: var(--text); text-align: right;
+}
+.portal-charstage__popup-meta {
+  margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .05rem .5rem;
+}
+.portal-charstage__popup-meta:empty { display: none; }
+.portal-charstage__popup-meta dt {
+  font-size: .55rem; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-muted); align-self: center;
+}
+.portal-charstage__popup-meta dd {
+  margin: 0; font-size: .62rem; color: var(--text-muted); word-break: break-all;
+}
+.portal-charstage__popup-close {
+  position: absolute; top: .4rem; right: .45rem;
+  width: 1.5rem; height: 1.5rem; padding: 0; line-height: 1;
+  font-size: 1.05rem; cursor: pointer; border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-deep) 80%, transparent);
+  color: var(--text-muted); border: 1px solid var(--border);
+}
+.portal-charstage__popup-close:hover { color: var(--text); border-color: var(--accent-soft); }
+@media (max-width: 919px) {
+  .portal-vitals__cols { grid-template-columns: 1fr; }
+  .portal-charstage { grid-template-columns: 1fr; }
+  .portal-charstage__rail { flex-direction: row; flex-wrap: wrap; }
+  .portal-charstage__rail > li { flex: 1 1 9rem; }
+}
+
+/* ---- Gear 3D viewer (character page) ------------------------------------ */
+.gear-viewer {
+  display: none; flex-direction: column; gap: .5rem;
+  margin-top: 1rem;
+}
+.gear-viewer.is-open { display: flex; }
+.gear-viewer__canvas {
+  display: block; width: 100%; height: min(50vh, 400px);
+  background: #0c0a07; border: 1px solid var(--border); border-radius: 10px;
+  touch-action: none;
+}
+.gear-viewer__hint {
+  color: var(--text-muted); font-size: .78rem; text-align: center;
+}
+.gear-viewer__label {
+  font-size: .82rem; color: var(--accent-bright);
+  text-align: center; font-weight: 500;
+}
+.gear-viewer__error {
+  color: var(--text-muted); font-size: .82rem; text-align: center; padding: 1rem 0;
+}
+
+/* Gear slot trigger button (inline in gear card) */
+.gear-slot__3d-btn {
+  font: inherit; cursor: pointer; padding: .2rem .6rem;
+  background: transparent; color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 6px;
+  font-size: .75rem; white-space: nowrap;
+  transition: background .15s, color .15s;
+}
+.gear-slot__3d-btn:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.gear-slot__3d-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Gear item row (demo + future equipped-gear cards) */
+.portal-gear-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; padding: .35rem 0;
+}
+.portal-gear-row__name { color: var(--text); font-size: .9rem; min-width: 0; }
+
+/* ---- Selected-piece readout, embedded in the Clay/Textured bar ----------- */
+.solido-selbar {
+  display: inline-flex; align-items: center; gap: .55rem;
+  margin-left: auto; min-width: 0;
+}
+.solido-selbar[hidden] { display: none; }
+.solido-selbar__cat {
+  font-size: .6rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-muted); white-space: nowrap;
+}
+.solido-selbar__name {
+  color: var(--accent-bright); font-weight: 600; font-size: .8rem;
+  max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.solido-selbar__meta {
+  color: var(--text-muted); font-size: .68rem; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.solido-selbar .solido-overlay__walkbtn { margin-top: 0; }
+@media (max-width: 700px) {
+  .solido-selbar { flex-basis: 100%; margin-left: 0; flex-wrap: wrap; }
+  .solido-selbar__name { max-width: none; }
+}
+
+/* ---- Walkthrough mode (first-person base tour) --------------------------- */
+.solido-overlay__walkbtn {
+  pointer-events: auto; display: block; margin-top: .45rem;
+  font: inherit; font-size: .75rem; cursor: pointer;
+  padding: .3rem .7rem; border-radius: 999px;
+  color: var(--accent-bright); border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  transition: background .15s, color .15s;
+}
+.solido-overlay__walkbtn:hover {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+.solido-overlay__walkbtn[hidden] { display: none; }
+
+.solido-walkhud { position: absolute; inset: 0; z-index: 8; pointer-events: none; }
+.solido-walkhud[hidden] { display: none; }
+.solido-walkhud__btn {
+  pointer-events: auto; position: absolute; cursor: pointer;
+  font: inherit; font-size: .78rem; padding: .35rem .8rem; border-radius: 999px;
+  color: var(--text); border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-deep) 82%, transparent);
+  backdrop-filter: blur(3px);
+}
+.solido-walkhud__btn:hover { color: var(--accent-bright); border-color: var(--accent); }
+.solido-walkhud__btn--exit { top: .6rem; left: .6rem; }
+.solido-walkhud__btn--fs { top: .6rem; right: .6rem; }
+.solido-walkhud__cross {
+  position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px;
+  border-radius: 50%; background: rgba(255, 255, 255, .85);
+  box-shadow: 0 0 4px rgba(0, 0, 0, .6);
+}
+.solido-walkhud__hint {
+  position: absolute; bottom: .6rem; left: 50%; transform: translateX(-50%);
+  white-space: nowrap; font-size: .68rem; color: var(--text-muted);
+  padding: .25rem .6rem; border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-deep) 75%, transparent);
+}
+.solido-walkhud__joy {
+  pointer-events: auto; position: absolute; bottom: 1.1rem; left: 1.1rem;
+  width: 108px; height: 108px; border-radius: 50%; touch-action: none;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
+}
+.solido-walkhud__joy[hidden] { display: none; }
+.solido-walkhud__nub {
+  position: absolute; left: 50%; top: 50%; width: 44px; height: 44px;
+  margin: -22px; border-radius: 50%; pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 45%, var(--bg-card));
+  border: 1px solid var(--accent);
+}
+.solido-walkhud__pause {
+  position: absolute; inset: 0; display: grid; place-content: center;
+  gap: .7rem; text-align: center; pointer-events: none;
+  background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+.solido-walkhud__pause[hidden] { display: none; }
+.solido-walkhud__pause-title {
+  font-size: .95rem; font-weight: 600; color: var(--text);
+  letter-spacing: .04em; text-transform: uppercase;
+}
+.solido-walkhud__pause-row { display: flex; gap: .6rem; justify-content: center; }
+.solido-walkhud__pause-row .solido-walkhud__btn {
+  position: static; pointer-events: auto;
+}
+.solido-walkhud__btn--resume { color: var(--accent-bright); border-color: var(--accent); }
+.solido-walkhud__cross[hidden] { display: none; }
+
+/* Joystick sits over the hint pill on phones — lift the hint clear of it. */
+@media (max-width: 560px) {
+  .solido-walkhud__hint { bottom: 1.4rem; left: auto; right: .8rem; transform: none; white-space: normal; text-align: right; max-width: 46%; }
+}
+/* Orbit-mode overlays + toggles get out of the way during a walk. */
+.is-walking .solido-overlay { display: none; }
+.is-walking .solido-mesh-toggle { visibility: hidden; }
+
+/* Fullscreen: native (the stage element itself) + CSS takeover fallback. */
+.solido-detail__snap:fullscreen, .solido-stage:fullscreen {
+  aspect-ratio: auto; border-radius: 0; background: #0c0a07;
+}
+.solido-detail__snap:fullscreen .solido-canvas,
+.solido-stage:fullscreen .solido-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0;
+}
+.solido-stage--fs {
+  position: fixed !important; inset: 0; z-index: 1000; margin: 0;
+  aspect-ratio: auto; border-radius: 0; background: #0c0a07;
+}
+.solido-stage--fs .solido-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0;
+}
+html.solido-fs-lock, html.solido-fs-lock body { overflow: hidden; }
+
+/* ---- Blueprints hub (2026-06-12 link-out pivot) ------------------------- */
+body.portal-page .solido-hub {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+body.portal-page .solido-hub__card p { color: var(--text-muted); }
+body.portal-page .solido-hub__card .portal-btn { margin-top: var(--space-2); }
+
+/* "Walk inside" tour entry in the render-mode bar */
+.solido-mesh-toggle__btn--tour {
+  margin-left: auto; color: var(--accent-bright); border-color: var(--accent);
+}
+.solido-mesh-toggle__btn--tour[hidden] { display: none; }
+
+/* ---- Mobile sizing (2026-06-12 iPhone QA) -------------------------------- */
+/* My Bases rows: the action buttons overflow phone widths side-by-side. */
+@media (max-width: 700px) {
+  .my-bases__row { flex-direction: column; align-items: stretch; gap: .55rem; }
+  .my-bases__actions { flex-wrap: wrap; }
+  .my-bases__actions > * { flex: 1 1 auto; text-align: center; }
+}
+/* Touch devices: bigger tap targets on the 3D chrome. */
+@media (pointer: coarse) {
+  .solido-mesh-toggle__btn { font-size: .9rem; padding: .55rem 1rem; }
+  .solido-walkhud__btn { font-size: .92rem; padding: .55rem 1.05rem; }
+  .solido-overlay__walkbtn { font-size: .85rem; padding: .5rem .95rem; }
+  .solido-overlay--select { max-width: 80%; }
+}
+
+/* ----------------------------------------------------- Import to character --- */
+.solido-import { max-width: 640px; }
+.solido-import__title { margin: .5rem 0 .25rem; color: var(--text); }
+.solido-import__lede { color: var(--text-muted); margin: 0 0 1.25rem; }
+.solido-import__notice { color: var(--text-muted); }
+.solido-import__form { display: flex; flex-direction: column; gap: 1.1rem; }
+.solido-import__field {
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: .85rem 1rem; margin: 0; background: var(--bg-card);
+}
+.solido-import__field legend { padding: 0 .4rem; color: var(--text-muted); font-size: .85rem; }
+.solido-import__radio {
+  display: flex; align-items: center; gap: .5rem; padding: .3rem 0; color: var(--text);
+}
+.solido-import__radio.is-disabled { opacity: .5; }
+.solido-import__radio em { color: var(--text-muted); font-style: normal; font-size: .82rem; }
+.solido-import__input {
+  width: 100%; margin: .3rem 0 .6rem; padding: .55rem .65rem;
+  background: var(--bg-deep); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.solido-import__input:focus-visible { outline: 2px solid var(--accent-bright); }
+.solido-import__who { color: var(--text); }
+.solido-import__status {
+  font-size: .72rem; padding: .12rem .5rem; border-radius: 999px; margin-left: .4rem;
+  border: 1px solid var(--border);
+}
+.solido-import__status.is-online { color: #41d67a; border-color: color-mix(in srgb, #41d67a 50%, transparent); }
+.solido-import__status.is-offline { color: var(--text-muted); }
+.solido-import__cap { color: var(--text-muted); font-size: .8rem; margin: .25rem 0 0; }
+.solido-import__result { margin: .25rem 0 0; min-height: 1.2em; }
+.solido-import__result.is-ok { color: #41d67a; }
+.solido-import__result.is-err { color: #e5736b; }

@@ -1,0 +1,382 @@
+{% extends "v2/base.html" %}
+{% block title %}Discord links{% endblock %}
+{% block extra_css %}
+<style>
+  /* Tokens only. This page shipped with `var(--v2-panel, <hex>)` and friends;
+     --v2-panel has never been defined anywhere, so the fallback hexes were what
+     actually rendered and the page sat a shade off the rest of the panel. */
+  .pl-grid { display: grid; gap: var(--space-4); margin-top: var(--space-4); }
+  .pl-card { background: var(--bg-card); border: 1px solid var(--border);
+             border-left: 2px solid var(--accent-soft);
+             border-radius: var(--radius-lg); padding: var(--space-5) var(--space-6); }
+  .pl-card h2 { margin: 0 0 var(--space-1); font-size: var(--text-md); font-weight: 700;
+                letter-spacing: 0.02em; color: var(--accent); }
+  .pl-card p.pl-sub { margin: 0 0 var(--space-4); font-size: var(--text-xs); color: var(--text-muted); }
+  .pl-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+  .pl-field { display: flex; flex-direction: column; gap: var(--space-1); }
+  .pl-field label { font-size: var(--text-2xs); text-transform: uppercase;
+                    letter-spacing: 0.06em; color: var(--text-muted); }
+  .pl-input { background: var(--bg-deep); color: var(--text); border: 1px solid var(--border);
+              border-radius: var(--radius-md); padding: var(--space-2) var(--space-3);
+              font-family: var(--font-mono); font-size: var(--text-sm); min-width: 180px;
+              font-variant-numeric: tabular-nums;
+              transition: border-color var(--motion-fast) var(--ease-in-out); }
+  .pl-input:focus { outline: none; border-color: var(--accent); }
+  .pl-typeahead { position: absolute; top: 100%; left: 0; right: 0; z-index: 30; margin-top: var(--space-1);
+                  background: var(--bg-elevated); border: 1px solid var(--border-strong);
+                  border-radius: var(--radius-md); overflow: hidden;
+                  max-height: 280px; overflow-y: auto; box-shadow: var(--shadow-overlay); }
+  .pl-ta-item { display: flex; align-items: baseline; gap: var(--space-2);
+                padding: var(--space-2) var(--space-3); cursor: pointer;
+                border-bottom: 1px solid var(--border-subtle); font-size: var(--text-sm); }
+  .pl-ta-item:last-child { border-bottom: none; }
+  .pl-ta-item:hover, .pl-ta-item.active { background: var(--bg-card); color: var(--accent); }
+  .pl-ta-name { font-weight: 600; }
+  .pl-ta-meta { color: var(--text-muted); font-size: var(--text-xs); }
+  .pl-ta-dot { width: 7px; height: 7px; border-radius: var(--radius-full); display: inline-block; flex-shrink: 0; }
+  .pl-ta-dot--on { background: var(--green); }
+  .pl-ta-dot--off { background: var(--border-strong); }
+  .pl-ta-aid { margin-left: auto; font-family: var(--font-mono); font-size: var(--text-xs);
+               color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .pl-ta-empty { padding: var(--space-2) var(--space-3); font-size: var(--text-xs); color: var(--text-muted); }
+  .pl-selected { margin-top: var(--space-3); display: inline-flex; align-items: center; gap: var(--space-3);
+                 background: var(--success-bg); border: 1px solid var(--green);
+                 border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); font-size: var(--text-sm); }
+  .pl-selected__x { cursor: pointer; color: var(--text-muted); font-size: var(--text-md); }
+  .pl-selected__x:hover { color: var(--text); }
+  .pl-btn { background: transparent; color: var(--text); border: 1px solid var(--border);
+            border-radius: var(--radius-md); padding: var(--space-2) var(--space-4);
+            font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 600; cursor: pointer;
+            transition: border-color var(--motion-fast) var(--ease-in-out),
+                        color var(--motion-fast) var(--ease-in-out); }
+  .pl-btn:hover { border-color: var(--border-strong); }
+  .pl-btn--primary { color: var(--accent); border-color: var(--accent); }
+  .pl-btn--primary:hover { background: var(--accent-glow); border-color: var(--accent-bright); color: var(--accent-bright); }
+  .pl-btn--warn { border-color: var(--yellow); color: var(--yellow); }
+  .pl-btn--danger { border-color: var(--red); color: var(--red); }
+  .pl-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .pl-msg { margin-top: var(--space-3); font-size: var(--text-sm); min-height: 18px; }
+  .pl-msg--err { color: var(--red); }
+  .pl-msg--ok { color: var(--green); }
+  .pl-result { margin-top: var(--space-4); display: none; }
+  .pl-result.show { display: block; }
+  .pl-pill { display: inline-block; padding: 2px var(--space-3); border-radius: var(--radius-full);
+             font-size: var(--text-xs); font-weight: 600; border: 1px solid transparent; }
+  .pl-pill--ok { background: var(--success-bg); border-color: var(--green); color: var(--green); }
+  .pl-pill--lock { background: var(--error-bg); border-color: var(--red); color: var(--red); }
+  .pl-pill--muted { background: var(--bg-elevated); border-color: var(--border); color: var(--text-muted); }
+  table.pl-tbl { width: 100%; border-collapse: collapse; font-size: var(--text-sm);
+                 margin-top: var(--space-2); font-variant-numeric: tabular-nums; }
+  table.pl-tbl th, table.pl-tbl td { text-align: left; padding: var(--space-2) var(--space-2);
+                                     border-bottom: 1px solid var(--border-subtle); }
+  table.pl-tbl th { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.06em;
+                    color: var(--text-muted); font-weight: 600; }
+  table.pl-tbl tbody tr:hover { background: rgba(212, 137, 28, 0.05); }
+  table.pl-tbl td.num { text-align: right; }
+  .pl-tag { font-size: var(--text-2xs); padding: 1px var(--space-2); border-radius: var(--radius-sm);
+            border: 1px solid transparent; }
+  .pl-tag--fail { background: var(--error-bg); border-color: var(--red); color: var(--red); }
+  .pl-tag--success { background: var(--success-bg); border-color: var(--green); color: var(--green); }
+  .pl-tag--test { background: var(--bg-elevated); border-color: var(--border); color: var(--text-muted); }
+  .pl-mono { font-family: var(--font-mono); }
+  .pl-section-title { font-size: var(--text-2xs); text-transform: uppercase; color: var(--text-muted);
+                      letter-spacing: 0.06em; margin: var(--space-4) 0 var(--space-1); }
+</style>
+{% endblock %}
+{% block content %}
+{# .v2-main is the page frame every other v2 page uses; without it these
+   cards ran to the viewport edge. #}
+<main class="v2-main">
+<div class="pl-grid">
+
+  <!-- Find a player -->
+  <section class="pl-card">
+    <h2>Find a player</h2>
+    <p class="pl-sub">Look up a Discord ID to see its account link, lockout state, and recent quiz attempts.
+       From here you can clear a lockout, link manually, or revoke.</p>
+    <div class="pl-row">
+      <div class="pl-field">
+        <label for="pl-did">Discord ID</label>
+        <input class="pl-input" id="pl-did" placeholder="18-digit Discord user ID" autocomplete="off" inputmode="numeric">
+      </div>
+      <button class="pl-btn pl-btn--primary" id="pl-lookup-btn">Look up</button>
+    </div>
+    <div class="pl-msg" id="pl-lookup-msg"></div>
+
+    <div class="pl-result" id="pl-result">
+      <!-- lockout summary -->
+      <div class="pl-section-title">Status</div>
+      <div id="pl-status"></div>
+
+      <!-- current links -->
+      <div class="pl-section-title">Account links</div>
+      <table class="pl-tbl" id="pl-links-tbl"><tbody></tbody></table>
+
+      <!-- manual link inline -->
+      <div class="pl-section-title">Link to a game account (bypasses the quiz)</div>
+      <div class="pl-row">
+        <div class="pl-field" style="position:relative;">
+          <label for="pl-link-search">Character (in-game name)</label>
+          <input class="pl-input" id="pl-link-search" placeholder="Search in-game name…" autocomplete="off">
+          <div class="pl-typeahead" id="pl-link-results" hidden></div>
+        </div>
+        <div class="pl-field">
+          <label for="pl-link-handle">Discord handle (display, optional)</label>
+          <input class="pl-input" id="pl-link-handle" placeholder="e.g. Shadow" autocomplete="off">
+        </div>
+        <button class="pl-btn pl-btn--primary" id="pl-link-btn" disabled>Create link</button>
+      </div>
+      <div class="pl-selected" id="pl-link-selected" hidden></div>
+      <div class="pl-msg" id="pl-link-msg"></div>
+
+      <!-- recent attempts -->
+      <div class="pl-section-title">Recent attempts</div>
+      <table class="pl-tbl" id="pl-attempts-tbl"><tbody></tbody></table>
+    </div>
+  </section>
+
+  <!-- Recent links table -->
+  <section class="pl-card">
+    <h2>Recent account links</h2>
+    <p class="pl-sub">Most recent links across all players. Search by Discord ID, account ID, character, or handle.</p>
+    <div class="pl-row">
+      <div class="pl-field">
+        <label for="pl-search">Search</label>
+        <input class="pl-input" id="pl-search" placeholder="Discord ID / account / character" autocomplete="off">
+      </div>
+      <button class="pl-btn" id="pl-search-btn">Search</button>
+      <button class="pl-btn" id="pl-refresh-btn">Refresh</button>
+    </div>
+    <div class="pl-msg" id="pl-list-msg"></div>
+    <table class="pl-tbl" id="pl-list-tbl">
+      <thead><tr><th>Discord</th><th>Account</th><th>Character</th><th>Linked</th><th>Status</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+</div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var API = '/admin/api/dune/v2/portal';
+
+function plMsg(id, text, ok){ var e=document.getElementById(id); if(!e) return;
+  e.textContent=text||''; e.className='pl-msg'+(text?(ok?' pl-msg--ok':' pl-msg--err'):''); }
+function plEsc(s){ var d=document.createElement('div'); d.textContent=(s===null||s===undefined)?'':String(s); return d.innerHTML; }
+function plTime(s){ return s ? String(s).replace('T',' ').replace(/\..*$/,'') : '—'; }
+
+var currentDid = '';
+
+function plRenderStatus(d){
+  var lo=d.lockout||{}; var box=document.getElementById('pl-status');
+  var bits=[];
+  if(lo.locked){ bits.push('<span class="pl-pill pl-pill--lock">LOCKED</span>'); }
+  else { bits.push('<span class="pl-pill pl-pill--ok">not locked</span>'); }
+  bits.push('<span class="pl-pill pl-pill--muted">attempts 24h: '+plEsc(lo.discord_attempts_24h)+' / '+plEsc(lo.discord_cap)+'</span>');
+  (lo.cooldowns||[]).forEach(function(c){
+    bits.push('<span class="pl-pill '+(c.cooldown_active?'pl-pill--lock':'pl-pill--muted')+'">acct '+plEsc(c.account_id)+': '+plEsc(c.fails_24h)+' fails</span>');
+  });
+  var clearBtn = lo.locked
+    ? ' <button class="pl-btn pl-btn--warn" id="pl-unlock-btn" style="margin-left:8px;">Clear lockout</button>'
+    : '';
+  box.innerHTML = bits.join(' ') + clearBtn;
+  var ub=document.getElementById('pl-unlock-btn');
+  if(ub) ub.onclick=function(){ plUnlock(currentDid); };
+}
+
+function plRenderLinks(links){
+  var tb=document.querySelector('#pl-links-tbl tbody'); tb.innerHTML='';
+  if(!links || !links.length){ tb.innerHTML='<tr><td colspan="4" style="opacity:.6;">No links for this Discord ID.</td></tr>'; return; }
+  links.forEach(function(l){
+    var revoked = !!l.revoked_at;
+    var status = revoked
+      ? '<span class="pl-tag pl-tag--fail">revoked</span>'
+      : '<span class="pl-tag pl-tag--success">active</span>';
+    var act = revoked ? '' :
+      '<button class="pl-btn pl-btn--danger" data-revoke-aid="'+plEsc(l.account_id)+'">Revoke</button>';
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td>acct '+plEsc(l.account_id)+' · '+plEsc(l.character_name)+'</td>'
+      +'<td>'+plTime(l.linked_at)+'</td><td>'+status+'</td><td>'+act+'</td>';
+    tb.appendChild(tr);
+  });
+  tb.querySelectorAll('[data-revoke-aid]').forEach(function(b){
+    b.onclick=function(){ plRevoke(currentDid, b.getAttribute('data-revoke-aid')); };
+  });
+}
+
+function plRenderAttempts(rows){
+  var tb=document.querySelector('#pl-attempts-tbl tbody'); tb.innerHTML='';
+  if(!rows || !rows.length){ tb.innerHTML='<tr><td style="opacity:.6;">No attempts.</td></tr>'; return; }
+  rows.forEach(function(a){
+    var when = plTime(a.attempt_at || a.callback_hit_at);
+    var res = a.is_test_run ? '<span class="pl-tag pl-tag--test">cleared</span>'
+      : (a.result==='success' ? '<span class="pl-tag pl-tag--success">success</span>'
+        : (a.result==='fail' ? '<span class="pl-tag pl-tag--fail">fail</span>'
+          : '<span class="pl-tag pl-tag--test">'+(a.result||'started')+'</span>'));
+    var kinds=[a.q1_kind,a.q2_kind,a.q3_kind].filter(Boolean).join(', ');
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td>'+when+'</td><td>'+(a.account_id?('acct '+plEsc(a.account_id)):'—')+'</td>'
+      +'<td>'+res+'</td><td style="opacity:.6;">'+plEsc(kinds)+'</td>';
+    tb.appendChild(tr);
+  });
+}
+
+function plLookup(did){
+  did=(did||'').trim();
+  if(!/^[0-9]{15,25}$/.test(did)){ plMsg('pl-lookup-msg','Enter a valid 15-25 digit Discord ID.',false); return; }
+  var changed = (did !== currentDid);
+  currentDid=did;
+  plMsg('pl-lookup-msg','Looking up…',true);
+  apiCall('GET', API+'/lookup?discord_id='+encodeURIComponent(did)).then(function(d){
+    plMsg('pl-lookup-msg','',true);
+    document.getElementById('pl-result').classList.add('show');
+    plRenderStatus(d); plRenderLinks(d.links); plRenderAttempts(d.recent_attempts);
+    if(changed){ plClearSelection();
+      document.getElementById('pl-link-search').value='';
+      document.getElementById('pl-link-handle').value='';
+      plMsg('pl-link-msg','',true); }
+  }).catch(function(e){ plMsg('pl-lookup-msg','Lookup failed: '+(e.message||e),false); });
+}
+
+function plUnlock(did){
+  showConfirm('Clear all rate-limit strikes for Discord '+did+'? They will be able to retry immediately.', function(){
+    apiCall('POST', API+'/unlock', {discord_id:did}).then(function(d){
+      plMsg('pl-lookup-msg','Cleared '+d.cleared+' strike(s).',true);
+      plLookup(did);
+    }).catch(function(e){ plMsg('pl-lookup-msg','Unlock failed: '+(e.message||e),false); });
+  });
+}
+
+/* ---- player name typeahead (resolves character name -> account_id) ---- */
+var plSelected = null;       // {account_id, name, funcom_id}
+var plSearchTimer = null;
+
+function plClearSelection(){
+  plSelected = null;
+  var sel=document.getElementById('pl-link-selected'); sel.hidden=true; sel.innerHTML='';
+  document.getElementById('pl-link-btn').disabled = true;
+}
+
+function plChoose(p){
+  plSelected = p;
+  var sel=document.getElementById('pl-link-selected');
+  var on=(p.online_status||'').toLowerCase()==='online';
+  sel.innerHTML='<span class="pl-ta-dot '+(on?'pl-ta-dot--on':'pl-ta-dot--off')+'"></span>'
+    +'<span><strong>'+plEsc(p.name)+'</strong>'
+    +(p.funcom_id?(' <span class="pl-ta-meta">'+plEsc(p.funcom_id)+'</span>'):'')
+    +' <span class="pl-ta-meta">· account '+plEsc(p.account_id)+'</span></span>'
+    +'<span class="pl-selected__x" id="pl-link-clear" title="Clear">×</span>';
+  sel.hidden=false;
+  document.getElementById('pl-link-clear').onclick=function(){ plClearSelection();
+    document.getElementById('pl-link-search').value=''; };
+  document.getElementById('pl-link-results').hidden=true;
+  document.getElementById('pl-link-search').value=p.name;
+  document.getElementById('pl-link-btn').disabled = false;
+  // Pre-fill the display handle from the funcom handle (operator can edit).
+  var hin=document.getElementById('pl-link-handle');
+  if(!hin.value && p.funcom_id){ hin.value = String(p.funcom_id).split('#')[0]; }
+}
+
+function plRenderSearch(players){
+  var box=document.getElementById('pl-link-results');
+  if(!players || !players.length){ box.innerHTML='<div class="pl-ta-empty">No players match.</div>'; box.hidden=false; return; }
+  box.innerHTML='';
+  players.forEach(function(p){
+    var on=(p.online_status||'').toLowerCase()==='online';
+    var it=document.createElement('div'); it.className='pl-ta-item';
+    it.innerHTML='<span class="pl-ta-dot '+(on?'pl-ta-dot--on':'pl-ta-dot--off')+'"></span>'
+      +'<span class="pl-ta-name">'+plEsc(p.name)+'</span>'
+      +(p.funcom_id?('<span class="pl-ta-meta">'+plEsc(p.funcom_id)+'</span>'):'')
+      +'<span class="pl-ta-aid">acct '+plEsc(p.account_id)+'</span>';
+    it.onclick=function(){ plChoose(p); };
+    box.appendChild(it);
+  });
+  box.hidden=false;
+}
+
+function plPlayerSearch(q){
+  apiCall('GET', API+'/player-search?q='+encodeURIComponent(q)).then(function(d){
+    if(d.too_short){ document.getElementById('pl-link-results').hidden=true; return; }
+    plRenderSearch(d.players);
+  }).catch(function(e){ plMsg('pl-link-msg','Search failed: '+(e.message||e),false); });
+}
+
+function plLink(){
+  var did=currentDid;
+  var handle=(document.getElementById('pl-link-handle').value||'').trim();
+  if(!/^[0-9]{15,25}$/.test(did)){ plMsg('pl-link-msg','Look up a Discord ID first.',false); return; }
+  if(!plSelected || !plSelected.account_id){ plMsg('pl-link-msg','Search and pick a character first.',false); return; }
+  var aid=plSelected.account_id, nm=plSelected.name;
+  showConfirm('Link Discord '+did+' to '+nm+' (account '+aid+')? This bypasses the identity quiz.', function(){
+    plMsg('pl-link-msg','Linking…',true);
+    apiCall('POST', API+'/link', {discord_id:did, account_id:parseInt(aid,10), discord_handle:handle||null})
+      .then(function(d){
+        plMsg('pl-link-msg','Linked to '+plEsc(d.character_name)+' (account '+d.account_id+').',true);
+        plRenderLinks(d.links);
+        plClearSelection();
+        document.getElementById('pl-link-search').value='';
+        plLoadList();
+      }).catch(function(e){ plMsg('pl-link-msg','Link failed: '+(e.message||e),false); });
+  });
+}
+
+function plRevoke(did, aid){
+  showConfirm('Revoke account '+aid+' from Discord '+did+'? The player loses portal access and must re-link.', function(){
+    apiCall('POST', API+'/revoke', {discord_id:did, account_id:parseInt(aid,10), reason:'operator-revoked via panel'})
+      .then(function(d){ plRenderLinks(d.links); plLoadList(); })
+      .catch(function(e){ plMsg('pl-lookup-msg','Revoke failed: '+(e.message||e),false); });
+  });
+}
+
+function plLoadList(q){
+  plMsg('pl-list-msg','Loading…',true);
+  var url=API+'/links'+(q?('?q='+encodeURIComponent(q)):'');
+  apiCall('GET', url).then(function(d){
+    plMsg('pl-list-msg', (d.count||0)+' link(s).', true);
+    var tb=document.querySelector('#pl-list-tbl tbody'); tb.innerHTML='';
+    (d.links||[]).forEach(function(l){
+      var revoked=!!l.revoked_at;
+      var status=revoked?'<span class="pl-tag pl-tag--fail">revoked</span>':'<span class="pl-tag pl-tag--success">active</span>';
+      var tr=document.createElement('tr');
+      tr.innerHTML='<td class="pl-mono">'+plEsc(l.discord_id)+(l.discord_handle?(' <span style="opacity:.6;">'+plEsc(l.discord_handle)+'</span>'):'')+'</td>'
+        +'<td class="num">'+plEsc(l.account_id)+'</td><td>'+plEsc(l.character_name)+'</td>'
+        +'<td>'+plTime(l.linked_at)+'</td><td>'+status+'</td>'
+        +'<td><button class="pl-btn" data-lookup-did="'+plEsc(l.discord_id)+'">Open</button></td>';
+      tb.appendChild(tr);
+    });
+    tb.querySelectorAll('[data-lookup-did]').forEach(function(b){
+      b.onclick=function(){ var did=b.getAttribute('data-lookup-did');
+        document.getElementById('pl-did').value=did; plLookup(did);
+        window.scrollTo({top:0, behavior:'smooth'}); };
+    });
+  }).catch(function(e){ plMsg('pl-list-msg','Could not load links: '+(e.message||e),false); });
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+  document.getElementById('pl-lookup-btn').onclick=function(){ plLookup(document.getElementById('pl-did').value); };
+  document.getElementById('pl-did').addEventListener('keydown', function(e){ if(e.key==='Enter') plLookup(this.value); });
+  document.getElementById('pl-link-btn').onclick=plLink;
+  var lsearch=document.getElementById('pl-link-search');
+  lsearch.addEventListener('input', function(){
+    if(plSelected){ plClearSelection(); }   // editing the name invalidates a prior pick
+    var q=this.value.trim();
+    if(plSearchTimer) window.clearTimeout(plSearchTimer);
+    if(q.length<2){ document.getElementById('pl-link-results').hidden=true; return; }
+    plSearchTimer=window.setTimeout(function(){ plPlayerSearch(q); }, 250);
+  });
+  lsearch.addEventListener('focus', function(){
+    if(!plSelected && this.value.trim().length>=2) plPlayerSearch(this.value.trim());
+  });
+  document.addEventListener('click', function(e){
+    var box=document.getElementById('pl-link-results');
+    if(box && !box.hidden && !box.contains(e.target) && e.target!==lsearch){ box.hidden=true; }
+  });
+  document.getElementById('pl-search-btn').onclick=function(){ plLoadList(document.getElementById('pl-search').value.trim()); };
+  document.getElementById('pl-search').addEventListener('keydown', function(e){ if(e.key==='Enter') plLoadList(this.value.trim()); });
+  document.getElementById('pl-refresh-btn').onclick=function(){ document.getElementById('pl-search').value=''; plLoadList(); };
+  plLoadList();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,522 @@
+/* World & Maps > Live Map.
+ *
+ * Amber is chrome. Ibad blue (--wm-live) is reserved for values that are being
+ * polled right now -- the player and vehicle counters and their dot markers --
+ * so a blue number on this page always means "this is live", and nothing else
+ * on the page is allowed to borrow the colour to look important.
+ *
+ * The map is the page: the viewport takes the remaining height under the v2
+ * header and scrolls nothing, and the legend rail scrolls inside itself.
+ */
+
+body.admin-page .wm {
+  --wm-rail: 264px;
+  --wm-stage-a: #241d12;
+  --wm-stage-b: #15110b;
+  --wm-live: #4aa8d8;            /* Ibad blue: live-polled values only */
+  --wm-display: 'Saira Condensed', 'Inter', -apple-system, sans-serif;
+  --wm-player: #4aa8d8;
+  --wm-vehicle: #e6a532;
+  --wm-base: #d695c4;
+  --wm-waypoint: #86d84a;
+  --wm-rescue: #c0392b;
+  --wm-worm: #c2a878;
+  --wm-storm: #6cc6d6;
+  --wm-spice-large: #b15ee0;
+  --wm-spice-medium: #8a4fae;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 116px);
+  min-height: 520px;
+  background: var(--bg);
+}
+
+/* --- top bar ------------------------------------------------------------- */
+
+body.admin-page .wm__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+body.admin-page .wm__title {
+  font-family: var(--wm-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+body.admin-page .wm__picker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+body.admin-page .wm__picker label {
+  margin: 0;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+body.admin-page .wm__picker select {
+  min-width: 168px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+body.admin-page .wm__counts {
+  display: flex;
+  gap: var(--space-5);
+  margin-left: auto;
+}
+
+body.admin-page .wm__count {
+  text-align: right;
+  line-height: 1.15;
+}
+
+body.admin-page .wm__count-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--wm-live);            /* live-polled: the only blue numbers here */
+}
+
+body.admin-page .wm__count-label {
+  display: block;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+body.admin-page .wm__stale {
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--yellow);
+}
+
+/* --- body: rail + viewport ----------------------------------------------- */
+
+body.admin-page .wm__body {
+  display: grid;
+  grid-template-columns: var(--wm-rail) 1fr;
+  flex: 1;
+  min-height: 0;
+}
+
+body.admin-page .wm__rail {
+  border-right: 1px solid var(--border);
+  background: var(--bg-card);
+  overflow-y: auto;
+  padding: var(--space-3);
+}
+
+body.admin-page .wm__rail-head {
+  font-family: var(--wm-display);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+body.admin-page .wm__rail-head:first-child { margin-top: 0; }
+
+/* --- legend -------------------------------------------------------------- */
+
+body.admin-page .wm__legend { display: flex; flex-direction: column; gap: 2px; }
+
+body.admin-page .wm__layer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-instant) var(--ease-out);
+}
+
+body.admin-page .wm__layer:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+}
+
+body.admin-page .wm__layer.is-off { opacity: 0.42; }
+
+body.admin-page .wm__layer.is-out {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+body.admin-page .wm__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+
+body.admin-page .wm__layer-label { flex: 1; }
+
+body.admin-page .wm__layer-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+body.admin-page .wm__layer-note {
+  padding: 0 var(--space-2) var(--space-2) var(--space-6);
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+body.admin-page .wm__layer-note--error { color: var(--red); }
+
+/* --- Deep Desert layout card --------------------------------------------- */
+
+body.admin-page .wm__layout {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  padding: var(--space-3);
+}
+
+body.admin-page .wm__layout dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+body.admin-page .wm__layout dt {
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+body.admin-page .wm__layout dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text);
+}
+
+body.admin-page .wm__source {
+  display: inline-block;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body.admin-page .wm__source--override { color: var(--accent); border-color: var(--accent-soft); }
+body.admin-page .wm__source--fingerprint { color: var(--green); border-color: var(--green); }
+body.admin-page .wm__source--last-known { color: var(--yellow); border-color: var(--yellow); }
+body.admin-page .wm__source--fallback { color: var(--text-muted); }
+
+body.admin-page .wm__layout-note {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* --- Deep Desert layout pin (owner only) ---------------------------------
+ *
+ * Amber chrome throughout. Nothing in this panel is polled, so nothing in it
+ * wears Ibad blue: the pin is a decision an operator made, not a live value.
+ */
+
+body.admin-page .wm__pin {
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  padding: var(--space-3);
+}
+
+body.admin-page .wm__pin-copy {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+body.admin-page .wm__pin-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+body.admin-page .wm__pin-thumb {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color var(--motion-fast) var(--ease-in-out);
+}
+
+body.admin-page .wm__pin-thumb img {
+  display: block;
+  width: 100%;
+  height: auto;
+  opacity: 0.75;
+}
+
+body.admin-page .wm__pin-thumb span {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+body.admin-page .wm__pin-thumb:hover { border-color: var(--accent-soft); }
+
+body.admin-page .wm__pin-thumb--on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-glow);
+}
+
+body.admin-page .wm__pin-thumb--on img { opacity: 1; }
+body.admin-page .wm__pin-thumb--on span { color: var(--accent-bright); }
+
+body.admin-page .wm__pin-label {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+body.admin-page .wm__pin-input {
+  width: 100%;
+  margin-bottom: var(--space-3);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+body.admin-page .wm__pin-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+body.admin-page .wm__pin-actions { margin-bottom: var(--space-2); }
+
+body.admin-page .wm__pin-status {
+  margin: 0;
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+body.admin-page .wm__pin-status--bad { color: var(--red); }
+
+/* --- viewport ------------------------------------------------------------ */
+
+body.admin-page .wm__viewport {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-deep);
+  cursor: grab;
+}
+
+body.admin-page .wm__viewport.is-panning { cursor: grabbing; }
+
+body.admin-page .wm__stage {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+
+body.admin-page .wm__backdrop {
+  position: absolute;
+  inset: 0;
+  background-size: 100% 100%;
+  background-position: center;
+}
+
+body.admin-page .wm__backdrop--sand {
+  background-image:
+    radial-gradient(circle at 30% 25%, rgba(212, 137, 28, 0.10), transparent 55%),
+    radial-gradient(circle at 72% 68%, rgba(168, 105, 22, 0.12), transparent 60%),
+    linear-gradient(160deg, var(--wm-stage-a), var(--wm-stage-b) 70%);
+}
+
+body.admin-page .wm__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body.admin-page .wm__gridline {
+  stroke: rgba(212, 137, 28, 0.22);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+body.admin-page .wm__gridlabel {
+  fill: rgba(212, 137, 28, 0.55);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+body.admin-page .wm__pin { cursor: pointer; }
+body.admin-page .wm__pin--player { fill: var(--wm-player); }
+body.admin-page .wm__pin--vehicle { fill: var(--wm-vehicle); }
+body.admin-page .wm__pin--base { fill: var(--wm-base); }
+body.admin-page .wm__pin--waypoint { fill: var(--wm-waypoint); }
+body.admin-page .wm__pin--rescue { fill: var(--wm-rescue); }
+body.admin-page .wm__pin--worm { fill: var(--wm-worm); }
+body.admin-page .wm__pin--spice-large { fill: var(--wm-spice-large); }
+body.admin-page .wm__pin--spice-medium { fill: var(--wm-spice-medium); }
+
+body.admin-page .wm__pin--rescue-open {
+  stroke: var(--red);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+body.admin-page .wm__ring {
+  fill: none;
+  stroke: var(--wm-storm);
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* --- overlays ------------------------------------------------------------ */
+
+body.admin-page .wm__zoom {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  display: flex;
+  gap: var(--space-1);
+}
+
+body.admin-page .wm__banner {
+  position: absolute;
+  left: var(--space-4);
+  top: var(--space-4);
+  max-width: 340px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: rgba(10, 10, 15, 0.88);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text);
+}
+
+body.admin-page .wm__popover {
+  position: absolute;
+  z-index: 5;
+  min-width: 200px;
+  max-width: 300px;
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-overlay);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+body.admin-page .wm__popover[hidden] { display: none; }
+
+body.admin-page .wm__popover-title {
+  font-family: var(--wm-display);
+  font-size: var(--text-sm);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 var(--space-2);
+}
+
+body.admin-page .wm__popover dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--space-3);
+  margin: 0 0 var(--space-2);
+}
+
+body.admin-page .wm__popover dt { color: var(--text-muted); }
+
+body.admin-page .wm__popover dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+
+body.admin-page .wm__popover-close {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-2);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--text-md);
+  line-height: 1;
+  cursor: pointer;
+}
+
+body.admin-page .wm__popover-close:hover { color: var(--text); }
+
+/* --- mobile: the rail becomes a drawer above the map --------------------- */
+
+@media (max-width: 900px) {
+  body.admin-page .wm { height: auto; }
+  body.admin-page .wm__body { grid-template-columns: 1fr; }
+  body.admin-page .wm__rail {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    max-height: 40vh;
+  }
+  body.admin-page .wm__viewport { height: 60vh; }
+  body.admin-page .wm__counts { margin-left: 0; width: 100%; }
+}
+
+/* Raster map tokens: a <use> of one <symbol> per icon (world-map.js
+   ensureDefs). The three ornithopter strips scroll behind a one-frame window
+   inside their symbol on a SMIL <animate>, so ONE timeline drives every
+   thopter on the board; the reduced-motion gate and the stale-feed pause both
+   live in the script, because SMIL does not read CSS. This file only dims a
+   stale layer. */
+body.admin-page .wm__icon { cursor: pointer; }
+body.admin-page .wm__svg.is-stale .wm__icon { opacity: .7; }

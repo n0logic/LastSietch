@@ -188,6 +188,10 @@ def inspect(name, raw, patterns):
             block('literal deployment account identifier', number)
         for match in EMAIL.finditer(line):
             domain = match.group().rsplit('@', 1)[1].lower()
+            if line[:match.start()].endswith('://'):
+                # URL userinfo (https://bank.example@evil.test/), the confusable
+                # link the chat filter documents, not a mailbox.
+                continue
             if domain not in ('example.com', 'example.org', 'example.net', 'example.invalid', 'users.noreply.github.com'):
                 block('mailbox address', number)
         for match in IPV4.finditer(line):

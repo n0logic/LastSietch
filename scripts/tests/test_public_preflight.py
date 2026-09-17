@@ -32,6 +32,12 @@ class PublicationTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(gate.inspect('config.example', value.encode(), []), [])
 
+    def test_url_userinfo_is_not_a_mailbox(self):
+        confusable = "'https://your-bank.example@" + 'discord' + '.gg/x' + "' reads as a bank link"
+        self.assertEqual(gate.inspect('links.js', confusable.encode(), []), [])
+        mailbox = 'contact operator@' + 'discord' + '.gg for access'
+        self.assertTrue(gate.inspect('links.js', mailbox.encode(), []))
+
     def test_every_identifier_prefix_is_blocked(self):
         for prefix in ('1', '2', '9'):
             value = prefix + ''.join(str(number % 10) for number in range(17))

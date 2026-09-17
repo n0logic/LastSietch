@@ -31,7 +31,7 @@ PVE_NODE = "pve"
 RCON_PS_SCRIPT = r"C:\Tools\lastsietch-rcon.ps1"
 BASE_DIR = Path(__file__).parent
 INFRA_PLATFORM = os.environ.get("INFRA_PLATFORM", "")
-INFRA_LOCATION = "Atlanta, GA"
+INFRA_LOCATION = os.environ.get("INFRA_LOCATION", "")
 
 # Load game registry
 with open(BASE_DIR / "games.json") as f:

@@ -7,3 +7,16 @@ condition = "AND"
 paths = ['''^scripts/tags-data\.json$''']
 regexTarget = "match"
 regexes = ['''Skills\.Key\.[A-Za-z0-9_]+''']
+
+[[allowlists]]
+description = """
+A CSS class named __key, not a credential.
+
+admin-backend/static/css/v2/cvars.css styles the cvars panel with BEM class
+names such as .v2-cvars-live__key. The selector list that follows reads to the
+generic-api-key rule as the word "key" beside a high-entropy value. A
+stylesheet cannot hold a secret, and the file is still scanned by
+scripts/public-preflight.py for every other class of finding.
+"""
+paths = ['''admin-backend/static/css/v2/cvars\.css''']
+regexes = ['''v2-cvars-live__key''']

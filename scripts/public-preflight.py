@@ -17,8 +17,10 @@ DENIED = re.compile(
     r'(?i)(?:^|/)(?:\.git|private|secrets?|snapshots?|logs?|k3s-bootstrap|funcom-procs[^/]*|'
     r'cvar-catalog|discord-export|community-scrape|node_modules|\.preflight-local)(?:/|$)'
     r'|\.(?:pak|utoc|ucas|uasset|umap|glb|gltf|mask|pcap|pcapng|pem|key|p12|pfx|jks|'
-    r'sqlite3?|db|dump|log|jwt|token|zip|gz|tar)$'
-    r'|(?:^|/)(?:\.env(?!\.(?:example|sample)$)(?:\..*)?|id_rsa|id_ed25519|kubeconfig|seed_users\.py|SERVER-ADMIN-GUIDE[^/]*|'
+    r'sqlite3?|db|dump|log|jwt|token|zip|gz|tar|qcow2|img|vmdk|bin)$'
+    r'|(?:^|/)[^/]*\.env(?:\.(?!(?:example|sample)$)[^/]*)?$'
+    r'|(?:^|/)admin-password(?:/|$)|(?:^|/)[^/]*password[^/]*$(?<!\.html)|(?:^|/)(?:rclone\.conf|\.netrc)$'
+    r'|(?:^|/)(?:id_rsa|id_ed25519|kubeconfig|seed_users\.py|SERVER-ADMIN-GUIDE[^/]*|'
     r'GETTING-STARTED\.md|RE-INDEX[^/]*|DUNERESUME[^/]*|.*-secret\.(?:json|ya?ml))$'
     r'|Default(?:Game|Engine)\.ini$|_all\.sql$|layout_\d+\.(?:bin|json)$|ops/artifacts/'
     r'|DISCORD-INTEL-|INTEL-PULL-|COMPETITOR-|SECURITY-AUDIT|dune-icons/|pak-meta'
@@ -32,7 +34,7 @@ CONTENT = [
     ('local workstation path', re.compile(r'(?i)/mnt/[a-z]/Users/|[A-Z]:\\Users\\|'
                                          r'(?:/home/|/Users/)[^/\s]+/(?:Source|Documents|Desktop|Tools)/|'
                                          r'(?:~/|["\'])Source/(?:Security|Private|Internal)/')),
-    ('private native detail', re.compile(r'(?i)\bvptr\b|\bfile_off\b|\+0x[0-9a-f]{3,}')),
+    ('private native detail', re.compile(r'(?i)\bvptr\b|\bfile_off\b|\+0x[0-9a-f]{3,}|(?-i:\bRVA\b)')),
 ]
 SNOWFLAKE = re.compile(r'(?<![A-Za-z0-9])[0-9]{17,20}(?![A-Za-z0-9])')
 INTEGER_BOUNDS = {'9223372036854775807', '9223372036854775808', '18446744073709551615'}

@@ -1,6 +1,5 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
-import { reviewPreview } from './scripts/review-preview.mjs';
 
 // Dev proxy: the app routes live at the root (served by SvelteKit dev), while
 // the JSON API lives at /portal/<api> on the live host. Proxy ONLY the API
@@ -34,6 +33,6 @@ for (const p of API_PREFIXES) {
 
 export default defineConfig({
   define: { 'import.meta.env.VITE_REVIEW_PREVIEW': JSON.stringify(process.env.LASTSIETCH_PREVIEW === '1' ? 'true' : 'false') },
-  plugins: [sveltekit(), ...(process.env.LASTSIETCH_PREVIEW === '1' ? [reviewPreview()] : [])],
+  plugins: [sveltekit()],
   server: { proxy: process.env.LASTSIETCH_PREVIEW === '1' ? {} : proxy },
 });

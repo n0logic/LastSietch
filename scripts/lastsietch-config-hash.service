@@ -1,5 +1,5 @@
 [Unit]
-Description=Config-drift hash watch — sha256 the pinned pod's INI/cvar files vs baseline
+Description=Config watch: live Dune game config vs the values of record (scripts/dune-config-hash.py)
 After=network-online.target
 
 [Service]

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Dune CHOAM BANK item transfer WRITE tool — game-host resident (sibling of
+# Dune CHOAM BANK item transfer WRITE tool, game-host resident (sibling of
 # dune-gift-op.sh). Tier 5 of the portal social layer.
 #
 # Deployed to the game host:/root/dune-item-transfer-op.sh (mode 0750, owner root).
 # Invoked ONLY by the forced-command dispatcher (an 'item-transfer-op' action reading
 # --op-b64-stdin), reached over the relay SSH key. Runs as root on the game host and
-# does its own `sudo kubectl exec` into the Dune DB pod — no nested ssh.
+# does its own `sudo kubectl exec` into the Dune DB pod, no nested ssh.
 #
 # WHAT IT DOES: moves ONE whole item stack from the SENDER's CHOAM bank into the
 # RECIPIENT's CHOAM bank, atomically, in a single txn. The move is a single-row
@@ -42,22 +42,25 @@
 # caps, recipient capacity, and the ls_item_transfers ledger, all in the SAME
 # transaction as the take.
 #
-# ⚠️ STILL UNTESTED, and it is why this stays DARK: the 7/26 test characterised a DELETE.
-# This is an UPDATE that re-homes the row. A sender whose session still holds the stale
-# item could plausibly yank it back OUT of the recipient's bank by moving it. The gate is
-# supposed to make that unreachable; LT-0 (ops/bank-online-delete-test/run.sh:
-# insert -> update-move -> update-verify) tells us what happens if the gate ever
-# regresses. Do NOT un-dark before LT-0 is run and recorded.
+# ✅ LT-0 IS CLOSED, RUN LIVE 2026-07-27 (Karum contract, KARUM-BUILD-CONTRACT-2026-07-27.md
+# lines 1262-1300). The open question was what an UPDATE re-home does when the sender's
+# session still holds the stale row. The answer: the client's write follows the PRIMARY
+# KEY and applies its OWN intended destination, so the item is RETRACTED out of where the
+# server put it. One row throughout, nothing minted and nothing destroyed. The remaining
+# failure mode of a gate regression is therefore a sender pulling their own item back,
+# not a duplication, which is the safe direction and is why this is no longer untested.
 #
 # See and
 #: give is online-safe, TAKE is not.
 #
 # WHOLE STACKS ONLY: partial-stack split (send N of a stack of M) is intentionally NOT
-# supported — a split reintroduces a delete+insert-of-remainder window. Deferred.
+# supported, a split reintroduces a delete+insert-of-remainder window. Deferred.
 #
-# LASTSIETCH_ITEM_TRANSFER_ENABLED (env, default "0" = OFF/DARK): while off, the op is
-# code-complete but refuses — returns {"status":"deferred",...} without opening a DB
-# txn. Un-dark (default -> 1, redeploy) ONLY after the 2-account live go/no-go.
+# THE DARK GATE IS THE FILE /etc/lastsietch/item-transfer-enabled, not the env var. While the
+# file is absent the op is code-complete but refuses: it returns {"status":"deferred",...}
+# without opening a DB txn. Un-dark by creating the file (the panel's flag board does it
+# through flag-set), ONLY after the 2-account live go/no-go. The portal-side
+# LASTSIETCH_ITEM_TRANSFER_ENABLED gate has to be on too; both layers, or the door stays shut.
 #
 # HARD CONSTRAINTS (same as dune-gift-op.sh):
 #   * NEVER restart/reboot any game pod, the BGD, or k3s. Only opens a psql session
@@ -72,6 +75,13 @@ set -euo pipefail
 XFER_MAX_PER_DAY="${XFER_MAX_PER_DAY:-30}"              # max transfers a sender may send / 24h (RMT brake)
 XFER_MAX_PER_PAIR_PER_DAY="${XFER_MAX_PER_PAIR_PER_DAY:-15}"  # max sender->same-recipient / 24h
 LASTSIETCH_ITEM_TRANSFER_ENABLED="${LASTSIETCH_ITEM_TRANSFER_ENABLED:-0}"   # 0 = dark/refuse; 1 = live
+[[ -f "${LASTSIETCH_FLAG_DIR:-/etc/lastsietch}/item-transfer-enabled" ]] && LASTSIETCH_ITEM_TRANSFER_ENABLED=1
+# 🔴 THE FLAG FILE IS THE ONLY WORKING SWITCH, not the env var. The dispatcher runs this
+# as `printf ... | /root/dune-item-transfer-op.sh` under a non-interactive non-login ssh
+# shell that inherits NO profile, so nothing anyone exports ever reaches this line and the
+# env default alone left the writer unconditionally dark on the box. Same trap that made
+# LASTSIETCH_AUGMENT_ENABLED and LASTSIETCH_KARUM_ENABLED no-ops for weeks; same fix. The env var stays
+# honoured for a hand run on the host.
 
 DB_PORT=15432
 DB_USER=postgres
@@ -149,14 +159,8 @@ resolve_db_pod() {
 }
 
 run_psql() {
-  local pgpass
-  pgpass=$(sudo kubectl exec -n "$DB_NS" "$DB_POD" -- printenv POSTGRES_PASSWORD 2>/dev/null)
-  if [[ -z "$pgpass" ]]; then
-    echo "FATAL: could not read POSTGRES_PASSWORD from DB pod $DB_POD" >&2
-    exit 3
-  fi
   sudo kubectl exec -i -n "$DB_NS" "$DB_POD" -- \
-    env PGPASSWORD="$pgpass" psql -h localhost -p "$DB_PORT" \
+    sh -c '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"' _ -h localhost -p "$DB_PORT" \
     -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 "$@"
 }
 
@@ -212,14 +216,14 @@ do_op() {
   # --- dark gate --------------------------------------------------------------
   if [[ "$LASTSIETCH_ITEM_TRANSFER_ENABLED" != "1" ]]; then
     printf '{"success":true,"status":"deferred","message":%s}\n' \
-      "$(json_str "CHOAM bank item transfer is disabled (LASTSIETCH_ITEM_TRANSFER_ENABLED=${LASTSIETCH_ITEM_TRANSFER_ENABLED}); transfer not applied")"
+      "$(json_str "CHOAM bank item transfer is disabled (no ${LASTSIETCH_FLAG_DIR:-/etc/lastsietch}/item-transfer-enabled on the game host); transfer not applied")"
     exit 0
   fi
 
   local DETAIL_JSON
   DETAIL_JSON=$(printf '%s' "$OP_JSON" | jq -c '{item_id: (.item_id|tostring), template_id: (.template_id // null), kind: "bank_item_transfer"}')
 
-  # Rate caps are embedded directly into the txn SQL — re-validate as integers.
+  # Rate caps are embedded directly into the txn SQL, re-validate as integers.
   [[ "$XFER_MAX_PER_DAY" =~ ^[0-9]+$ ]] \
     || fail_json "XFER_MAX_PER_DAY must be an integer: $XFER_MAX_PER_DAY" 2
   [[ "$XFER_MAX_PER_PAIR_PER_DAY" =~ ^[0-9]+$ ]] \

@@ -223,7 +223,7 @@ def build_spawn_vehicle_inner(fls_id, class_name, x, y, z, rotation=0.0,
     Persistent is sent as a float 1.0/0.0, matching DST.
 
     🔴 There is no inverse. The RMQ surface has no despawn verb, and the Destroy*
-    cheat family takes a transaction id and an EDestroyVehicleInventoryOperation
+    admin family takes a transaction id and an EDestroyVehicleInventoryOperation
     and runs as a DB coroutine -- it is DATA LOSS, not an actor-only despawn, and
     it is not RMQ-reachable anyway. So a persistent spawn is permanent. Default to
     non-persistent and only opt in deliberately.
@@ -246,31 +246,7 @@ def build_spawn_vehicle_inner(fls_id, class_name, x, y, z, rotation=0.0,
     return inner
 
 
-def build_cheat_script_inner(fls_id, script_name):
-    """CheatScript: run a NAMED sequence of console commands against a player.
-
-    Payload shape from DST's Invoke-DuneRmqCheatScript. Scripts are `[CheatScript.X]`
-    INI sections whose `+Cmd=` lines each run one console command.
-
-    🔴 THIS IS THE CHEAT-MANAGER SURFACE, and it is far sharper than the other verbs.
-    The shipped scripts are NOT safe to fire casually at a live player:
-      * LeaveMeAlone      runs `ServerExec sandworm.dune.Enabled 0` -- SERVER-WIDE
-      * Start/StopHitchVehicleTest deliberately tank server FPS
-      * PlaytestSetup(Admin) open with ResetProgression + CleanPlayerInventory
-    Read the script body before sending the name. There is no dry-run on the game side.
-
-    Why it matters: cheat scripts mix bare console commands (DestroyAllNpcs,
-    JourneyCompleteTaskByName) with explicitly-prefixed `ServerExec` ones, which means
-    the bare lines execute in a PLAYER context that generic ServerExec lacks -- exactly
-    the limitation the 2026-07-23 probe hit. `JourneyCompleteTaskByName <Task>` is a
-    force-complete of a quest task through the engine's own flow, which is the primitive
-    we concluded did not exist when DragonLord's rank-20 was parked as unfixable.
-    """
-    return {
-        "ServerCommand": "CheatScript",
-        "PlayerId": fls_id,
-        "ScriptName": script_name,
-    }
+# Named server scripts are not sent from here. This helper sends announcements and cvar sets only.
 
 
 # Any exec that is destructive, server-wide-disruptive, or a known crash hook.
@@ -292,15 +268,15 @@ def build_serverexec_inner(exec_str):
     dispatched to `GEngine->Exec(World, <str>, OutputDevice)`.
 
     This is the CVAR surface, and that is the honest limit of it. Funcom's own
-    shipped `[CheatScript.LeaveMeAlone]` uses exactly this shape
+    shipped LeaveMeAlone server script uses exactly this shape
     (`ServerExec sandworm.dune.Enabled 0`) to flip a cvar server-wide, which is
     what makes cvar sets here well-founded rather than speculative.
 
-    🔴 It does NOT reach player-scoped cheat verbs. Our 2026-07-23 probe hit that
+    🔴 It does NOT reach player-scoped admin verbs. Our 2026-07-23 probe hit that
     wall: a dedicated server has no local PlayerController for `ProcessConsoleExec`,
-    so bare player-context console lines (the ones cheat scripts CAN run, because
-    they execute in a player context) are unavailable through generic ServerExec.
-    Do not expect `ScheduleMTXEvent` or similar cheat-manager UFunctions to work.
+    so bare player-context console lines (which need a player
+    context to execute) are unavailable through generic ServerExec.
+    Do not expect `ScheduleMTXEvent` or similar player-scoped admin UFunctions to work.
 
     Reading a cvar back is free and self-verifying: pass the cvar name with NO
     value and the current value is written to the OutputDevice, i.e. the game-pod
@@ -456,7 +432,9 @@ def build_parser():
                         "Quality/Grade/ItemQuality hedge. 0 = the proven payload.")
     i.add_argument("--message-id",
                    help="Explicit AMQP MsgId, so a caller can use it as a "
-                        "delivery-trace correlation_id. [A-Za-z0-9._-] only.")
+                        "delivery-trace correlation_id. [A-Za-z0-9._-] only. "
+                        "NOTE: item-grant ONLY -- spawn-vehicle/serverexec "
+                        "reject it with 'unrecognized arguments' and publish nothing.")
 
     v = sub.add_parser("spawn-vehicle",
                        help="SpawnVehicleAt: spawn a vehicle at world coordinates")
@@ -465,8 +443,11 @@ def build_parser():
                         "sends it and that is what scopes the spawn to one player's "
                         "world -- without it there is no partition selector at all.")
     v.add_argument("--class-name", required=True,
-                   help="Full BP path, e.g. /Game/Dune/Systems/Vehicles/Blueprints/"
-                        "FlyingVehicles/BP_LightOrnithopter_Choam.BP_LightOrnithopter_Choam_C")
+                   help="DT_VehicleTemplates ROW KEY, e.g. 'OrnithopterLight' -- NOT a "
+                        "blueprint path. A BP path dispatches, logs its ServerCommand "
+                        "line, and silently spawns nothing. This help string said 'Full "
+                        "BP path' until 2026-08-29 and cost a month of believing "
+                        "SpawnVehicleAt was broken; verified live with the row key.")
     v.add_argument("--x", type=float, required=True)
     v.add_argument("--y", type=float, required=True)
     v.add_argument("--z", type=float, required=True)
@@ -476,21 +457,13 @@ def build_parser():
     v.add_argument("--persistent", action="store_true",
                    help="Default OFF, and leave it off unless you mean it. There is "
                         "NO safe removal verb: the RMQ surface has no despawn, and "
-                        "the Destroy* cheat family is persistence-affecting DATA LOSS "
+                        "the Destroy* admin family is persistence-affecting DATA LOSS "
                         "rather than an actor-only despawn. A non-persistent spawn "
                         "cleans itself up; a persistent one is yours forever.")
 
-    c = sub.add_parser("cheat-script",
-                       help="CheatScript: run a named [CheatScript.X] command sequence "
-                            "against a player. READ THE SCRIPT BODY FIRST.")
-    c.add_argument("--fls-id", required=True)
-    c.add_argument("--script-name", required=True,
-                   help="Section suffix, e.g. LeaveMeAlone. Shipped scripts include "
-                        "server-wide and destructive effects; see build_cheat_script_inner.")
-
     e = sub.add_parser("serverexec",
                        help="ServerExec: run one console command server-side. CVAR "
-                            "surface only; player-scoped cheat verbs do NOT work here.")
+                            "surface only; player-scoped admin verbs do NOT work here.")
     e.add_argument("--exec", dest="exec_str", required=True,
                    help="The console command. A bare cvar name READS it (value goes to "
                         "the game-pod log); 'name value' SETS it server-wide.")
@@ -564,14 +537,6 @@ def main(argv=None):
             "template_name": args.template_name,
             "persistent": args.persistent,
             "faction": args.faction,
-        }
-    elif args.mode == "cheat-script":
-        inner = build_cheat_script_inner(args.fls_id, args.script_name)
-        msg_id_prefix = "lastsietch-cheat-script"
-        summary = {
-            "type": "CheatScript",
-            "fls_id": args.fls_id,
-            "script_name": args.script_name,
         }
     elif args.mode == "serverexec":
         exec_str = args.exec_str.strip()

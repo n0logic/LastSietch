@@ -22,6 +22,12 @@
 # give. Design law: a change that introduces a second take does not ship. Rather than
 # duplicate the gate into the Karum writer, both callers share this one:
 #
+# 🔴 `src=` (added 2026-08-25) is NOT a second take and must never become one. It selects
+# which of the owner's OWN pawn inventories the single take reads from; every gate, lock,
+# guard and the one-row re-home are identical either way. If you ever find yourself adding
+# a code path rather than a resolved inventory id, you are writing take number two and the
+# design law says it does not ship.
+#
 #   scripts/dune-item-transfer-op.sh   dst=bank:<recipient_account_id>   (Tier 5, DARK)
 #   scripts/dune-karum-op.sh           dst=exchange                      (Phase 1)
 #
@@ -50,19 +56,23 @@
 # knowable at SQL time so it cannot be a shell literal.)
 #
 #   item_id=<int>              REQUIRED  the row to take
-#   owner_account_id=<int>     REQUIRED  whose bank it is taken from, and who is gated
+#   owner_account_id=<int>     REQUIRED  whose storage it is taken from, and who is gated
+#   src=bank|backpack          optional  WHICH pawn inventory to take from (default bank)
 #   dst=<spec>                 REQUIRED  <int> | bank:<account_id> | exchange
 #   correlation_id=<uuid>      REQUIRED  the caller's idempotency key, echoed into _take_result
 #   expected_template=<tpl>    optional  identity guard; omitted = no guard
+#   expected_quality=<0-5>     optional  GRADE guard; omitted = any grade accepted
+#   quality_mode=exact|min     optional  how expected_quality compares (default exact)
+#   owner_ctrl=<int>           optional  pin the source bank to one owned character
 #   min_position=<int>         optional  floor for the destination slot (default 0)
 #   stats_patch=<json object>  optional  merged into dune.items.stats (the Karum sentinel)
 #
 # WHAT THE EMITTED SQL DOES, in one transaction, in this order:
 #   1. offline gate on the owner's account, under a row lock, fail-closed
-#   2. resolve the SOURCE bank fresh and tombstone-safe (never trust a cached inv id)
+#   2. resolve the SOURCE (bank or backpack) fresh and tombstone-safe, never a cached id
 #   3. resolve the DESTINATION per `dst`
 #   4. SELECT ... FOR UPDATE the item row, pinned to the source bank
-#   5. template identity guard
+#   5. template identity guard, then the grade guard
 #   6. single-row re-home pinned with WHERE id = <item> AND inventory_id = <src>
 #   7. publish the facts into the temp table _take_result for the caller's ledger
 #
@@ -84,7 +94,9 @@
 # of the psql error, so keep them lowercase and unique):
 #   player_online   the owner is online, in grace, or their status is undetermined
 #   no_bank         no CHOAM bank inventory resolves for that account
+#   no_backpack     no backpack inventory resolves for that account (src=backpack)
 #   item_not_found  the row is not in that bank, or the template guard failed
+#   grade_mismatch  the row's quality_level does not satisfy expected_quality
 #   take_failed     the destination is unusable, or the re-home did not move exactly 1 row
 
 # --- validation helpers (prefixed so a sourcing caller cannot collide) --------
@@ -103,9 +115,16 @@ _take_nonneg() {
   return 2
 }
 
-# Resolve an account's CHOAM bank (inventory_type 30) fresh and tombstone-safe. Emitted
-# for the source and, when dst=bank:<acct>, for the destination too, so the two can never
+# Resolve one of an account's PAWN-side inventories fresh and tombstone-safe. Emitted for
+# the source and, when dst=bank:<acct>, for the destination too, so the two can never
 # disagree about what "that player's bank" means.
+#
+# inv_type selects WHICH pawn inventory: 30 = CHOAM bank (the default and the only thing
+# this resolved before 2026-08-25), 0 = the player's own backpack. Both hang off
+# player_pawn_id, so the same tombstone-safety argument covers both. 🔴 inventory_type 0 is
+# ALSO vehicle cargo and base-container storage; those hang off a VEHICLE/placeable actor,
+# not the pawn, so joining through encrypted_player_state is what keeps this to the
+# player's own backpack and nothing else. Do not relax that join to reach a container.
 #
 # Pawn-keyed, NOT controller-keyed: inv.actor_id points at player_pawn_id. An account can
 # hold MORE THAN ONE encrypted_player_state row (create / delete / recreate each leave
@@ -113,18 +132,27 @@ _take_nonneg() {
 # forever, so Deleted rows are excluded here and everywhere else this file reads eps.
 # See.
 _take_bank_sql() {
-  local acct="$1" pawn_var="$2" inv_var="$3"
+  local acct="$1" pawn_var="$2" inv_var="$3" owner_ctrl="${4:-}" inv_type="${5:-30}"
+  local ctrl_guard=""
+  if [[ -n "$owner_ctrl" ]]; then
+    ctrl_guard="AND eps.player_controller_id = ${owner_ctrl}"
+  fi
+  local token="no_bank" label="CHOAM bank"
+  if [[ "$inv_type" == "0" ]]; then
+    token="no_backpack"; label="backpack"
+  fi
   cat <<EOF
   SELECT eps.player_pawn_id, inv.id INTO ${pawn_var}, ${inv_var}
     FROM dune.encrypted_player_state eps
     JOIN dune.inventories inv
-      ON inv.actor_id = eps.player_pawn_id AND inv.inventory_type = 30
+      ON inv.actor_id = eps.player_pawn_id AND inv.inventory_type = ${inv_type}
    WHERE eps.account_id = ${acct}
      AND eps.character_state IS DISTINCT FROM 'Deleted'
+     ${ctrl_guard}
    ORDER BY eps.last_avatar_activity DESC NULLS LAST, eps.player_controller_id DESC
    LIMIT 1;
   IF ${inv_var} IS NULL THEN
-    RAISE EXCEPTION 'no_bank (account % has no CHOAM bank inventory; never opened one?)', ${acct};
+    RAISE EXCEPTION '${token} (account % has no ${label} inventory; never opened one?)', ${acct};
   END IF;
 EOF
 }
@@ -133,7 +161,8 @@ EOF
 
 karum_take_item() {
   local item_id="" owner_account_id="" dst="" correlation_id="" \
-        expected_template="" min_position="0" stats_patch=""
+        expected_template="" owner_ctrl="" min_position="0" stats_patch="" \
+        expected_quality="" quality_mode="" src="bank"
   local kv key val
 
   for kv in "$@"; do
@@ -145,16 +174,31 @@ karum_take_item() {
       dst)                dst="$val" ;;
       correlation_id)     correlation_id="$val" ;;
       expected_template)  expected_template="$val" ;;
+      src)                src="$val" ;;
+      expected_quality)   expected_quality="$val" ;;
+      quality_mode)       quality_mode="$val" ;;
+      owner_ctrl)         owner_ctrl="$val" ;;
       min_position)       min_position="$val" ;;
       stats_patch)        stats_patch="$val" ;;
-      *) _take_die "unknown argument '$kv' (item_id= owner_account_id= dst= correlation_id= [expected_template=] [min_position=] [stats_patch=])"
+      *) _take_die "unknown argument '$kv' (item_id= owner_account_id= dst= correlation_id= [src=] [expected_template=] [expected_quality=] [quality_mode=] [owner_ctrl=] [min_position=] [stats_patch=])"
          return 2 ;;
     esac
   done
 
   _take_posint "$item_id" item_id || return 2
   _take_posint "$owner_account_id" owner_account_id || return 2
+  if [[ -n "$owner_ctrl" ]]; then
+    _take_posint "$owner_ctrl" owner_ctrl || return 2
+  fi
   _take_nonneg "$min_position" min_position || return 2
+  # Closed set resolved to an inventory type exactly once, here. Everything downstream
+  # reads the number, so a typo cannot silently fall through to "some other inventory".
+  local src_type
+  case "$src" in
+    bank)     src_type=30 ;;
+    backpack) src_type=0 ;;
+    *) _take_die "src must be bank or backpack: '$src'"; return 2 ;;
+  esac
   if [[ ! "$correlation_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
     _take_die "correlation_id must be a UUID: '$correlation_id'"
     return 2
@@ -169,6 +213,27 @@ karum_take_item() {
       return 2
     fi
     tpl_lit="'${expected_template}'"
+  fi
+
+  # GRADE guard. Base is 0 and is a REAL request, so this is nonneg-checked rather than
+  # posint-checked: `expected_quality=0` must mean "must be Base", never "no guard".
+  # Only an EMPTY value means no guard. Live max grade is 5 (verified 2026-08-25).
+  local q_lit="NULL" q_mode_lit="'exact'"
+  if [[ -n "$expected_quality" ]]; then
+    _take_nonneg "$expected_quality" expected_quality || return 2
+    if (( expected_quality > 5 )); then
+      _take_die "expected_quality must be 0-5: '$expected_quality'"
+      return 2
+    fi
+    q_lit="${expected_quality}"
+    case "${quality_mode:-exact}" in
+      exact|min) q_mode_lit="'${quality_mode:-exact}'" ;;
+      *) _take_die "quality_mode must be exact or min: '$quality_mode'"
+         return 2 ;;
+    esac
+  elif [[ -n "$quality_mode" ]]; then
+    _take_die "quality_mode given without expected_quality"
+    return 2
   fi
 
   # stats_patch is folded into a SQL literal, so it may not carry a quote or a backslash,
@@ -239,6 +304,8 @@ DECLARE
   v_item     bigint := ${item_id};
   v_min_pos  bigint := ${min_position};
   v_want_tpl text   := ${tpl_lit};
+  v_want_q   bigint := ${q_lit};
+  v_want_qm  text   := ${q_mode_lit};
   v_chars    int;
   v_offline  int;
   v_src_pawn bigint;
@@ -294,7 +361,7 @@ BEGIN
   END IF;
 
   -- 2. SOURCE: the owner's own CHOAM bank, resolved fresh inside the txn.
-$(_take_bank_sql v_acct v_src_pawn v_src_inv)
+$(_take_bank_sql v_acct v_src_pawn v_src_inv "$owner_ctrl" "$src_type")
 
   -- 3. DESTINATION.
 ${dst_sql}
@@ -319,6 +386,27 @@ ${dst_sql}
   IF v_want_tpl IS NOT NULL AND v_tpl IS DISTINCT FROM v_want_tpl THEN
     RAISE EXCEPTION 'item_not_found (template mismatch: row is %, caller expected %)',
                     v_tpl, v_want_tpl;
+  END IF;
+
+  -- 5b. GRADE GUARD. The portal checks this at the edge too, but THIS is the authority:
+  -- it reads the locked row inside the same transaction that moves it, so nothing can
+  -- swap the item between the check and the take. A NULL v_want_q is the legacy
+  -- any-grade contract. A NULL quality_level on the row fails closed against a real
+  -- request rather than being read as Base.
+  IF v_want_q IS NOT NULL THEN
+    IF v_quality IS NULL THEN
+      RAISE EXCEPTION 'grade_mismatch (item % has no grade, caller expected % %)',
+                      v_item, v_want_qm, v_want_q;
+    END IF;
+    IF v_want_qm = 'min' THEN
+      IF v_quality < v_want_q THEN
+        RAISE EXCEPTION 'grade_mismatch (grade % is below the minimum % requested)',
+                        v_quality, v_want_q;
+      END IF;
+    ELSIF v_quality IS DISTINCT FROM v_want_q THEN
+      RAISE EXCEPTION 'grade_mismatch (grade mismatch: row is %, caller expected exactly %)',
+                      v_quality, v_want_q;
+    END IF;
   END IF;
 
   -- 6. Destination slot. min_position lets a caller allocate above another writer's

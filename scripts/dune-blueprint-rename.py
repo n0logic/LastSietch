@@ -176,20 +176,19 @@ def resolve_db_pod():
 
 def run_psql(ns, pod, sql, timeout=20):
     """The ONLY place a write DB connection is opened. VERBATIM from
-    dune-storage-write.run_psql: reads POSTGRES_PASSWORD from the pod then execs psql
+    dune-storage-write.run_psql: uses POSTGRES_PASSWORD inside the pod shell, which execs psql
     inside the already-running pod with the SQL on stdin."""
     try:
-        pw_out = subprocess.run(
+        auth_out = subprocess.run(
             ["sudo", "kubectl", "exec", "-n", ns, pod, "--",
-             "printenv", "POSTGRES_PASSWORD"],
+             "sh", "-c", 'test -n "${POSTGRES_PASSWORD:-}"'],
             capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
         fail("timeout reading POSTGRES_PASSWORD", 3)
-    pgpass = (pw_out.stdout or "").strip()
-    if not pgpass:
+    if auth_out.returncode != 0:
         fail("no_pgpass", 3)
     cmd = ["sudo", "kubectl", "exec", "-i", "-n", ns, pod, "--",
-           "env", f"PGPASSWORD={pgpass}", "psql",
+           "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_",
            "-h", "localhost", "-p", DB_PORT, "-U", DB_USER, "-d", DB_NAME,
            "-tA", "-v", "ON_ERROR_STOP=1"]
     try:

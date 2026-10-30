@@ -14,9 +14,11 @@ Two techniques, because the subject needs both:
 
 Run:  python3 scripts/tests/test_karum_l4.py     (also import-safe)
 """
+import atexit
 import json
 import os
 import re
+import shutil
 import sqlite3
 import tempfile
 
@@ -26,6 +28,8 @@ REPO = os.path.dirname(SCRIPTS)
 PORTAL = os.path.join(REPO, "admin-backend", "routers", "portal.py")
 MESSAGES = os.path.join(REPO, "admin-backend", "routers", "messages.py")
 DATABASE = os.path.join(REPO, "admin-backend", "database.py")
+_TMP = tempfile.mkdtemp()
+atexit.register(shutil.rmtree, _TMP, ignore_errors=True)
 
 
 def _read(path):
@@ -41,7 +45,7 @@ def _schema():
 
 
 def _db():
-    conn = sqlite3.connect(tempfile.mktemp(suffix=".db"))
+    conn = sqlite3.connect(tempfile.mktemp(suffix=".db", dir=_TMP))
     conn.executescript(_schema())
     return conn
 
@@ -66,16 +70,42 @@ _LISTING_INSERT = """INSERT INTO portal_karum_listings
   display_name, stack_size, price, escrow_item_id, status)
  VALUES (?,?,?,?,?,?,?,?,?,?)"""
 
+_REQUEST_INSERT = """INSERT INTO portal_karum_requests
+ (requester_account_id, requester_discord_id, requester_name, requester_ctrl,
+  template_id, display_name, category, stack_size, price, post_corr_id, status)
+ VALUES (?,?,?,?,?,?,?,?,?,?,?)"""
+
 
 # --------------------------------------------------------------------------- #
 # Schema, executed
 # --------------------------------------------------------------------------- #
 
-def test_three_tables_exist():
+def test_four_tables_exist():
     conn = _db()
     tabs = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    for t in ("portal_karum_listings", "portal_karum_events", "portal_karum_ledger"):
+    for t in ("portal_karum_listings", "portal_karum_requests",
+              "portal_karum_events", "portal_karum_ledger"):
         assert t in tabs, t
+
+
+def test_wanted_request_status_and_post_key_are_enforced():
+    conn = _db()
+    args = (2002, "d2", "Buyer", 8002, "IronBar", "Iron Bar", "resource",
+            500, 12500, "post-1")
+    conn.execute(_REQUEST_INSERT, args + ("active",))
+    try:
+        conn.execute(_REQUEST_INSERT, args + ("active",))
+        raise AssertionError("duplicate wanted-order post key accepted")
+    except sqlite3.IntegrityError:
+        pass
+    for bad in ("selling", "sold", "open", ""):
+        try:
+            changed = list(args)
+            changed[-1] = f"post-{bad or 'empty'}"
+            conn.execute(_REQUEST_INSERT, tuple(changed) + (bad,))
+            raise AssertionError(f"wanted-order status {bad!r} accepted")
+        except sqlite3.IntegrityError:
+            pass
 
 
 def test_one_live_listing_per_escrowed_stack():
@@ -168,6 +198,37 @@ def test_cas_decides_a_contested_listing():
     assert conn.execute(cas, ("selling", 3003, lid, "active")).rowcount == 1
 
 
+def test_cas_decides_a_contested_wanted_order():
+    conn = _db()
+    conn.execute(_REQUEST_INSERT,
+                 (2002, "d2", "Buyer", 8002, "IronBar", "Iron Bar", "resource",
+                  500, 12500, "post-race", "active"))
+    rid = conn.execute("SELECT request_id FROM portal_karum_requests").fetchone()[0]
+    cas = ("UPDATE portal_karum_requests SET status = 'filling', filler_account_id = ? "
+           "WHERE request_id = ? AND status = 'active'")
+    first = conn.execute(cas, (1001, rid)).rowcount
+    second = conn.execute(cas, (3003, rid)).rowcount
+    assert first == 1
+    assert second == 0
+    assert conn.execute("SELECT filler_account_id FROM portal_karum_requests "
+                        "WHERE request_id = ?", (rid,)).fetchone()[0] == 1001
+
+
+def test_only_an_active_wanted_order_can_be_cancelled():
+    conn = _db()
+    base = (2002, "d2", "Buyer", 8002, "IronBar", "Iron Bar", "resource",
+            500, 12500)
+    for n, status in enumerate(("active", "filling", "reconciling", "filled"), 1):
+        conn.execute(_REQUEST_INSERT, base + (f"post-cancel-{n}", status))
+    ids = conn.execute("SELECT request_id, status FROM portal_karum_requests").fetchall()
+    wins = []
+    for rid, _ in ids:
+        wins.append(conn.execute(
+            "UPDATE portal_karum_requests SET status = 'cancelled' "
+            "WHERE request_id = ? AND status = 'active'", (rid,)).rowcount)
+    assert wins == [1, 0, 0, 0]
+
+
 def test_pair_cap_sidecar_matches_the_like_pattern():
     """🔴 The per-pair cap counts portal_karum_events with
     detail LIKE '%\"counterparty\":N%'. json.dumps' DEFAULT spacing writes
@@ -217,6 +278,19 @@ def test_projection_emits_no_internal_identifier():
     assert '"seller_name"' in proj
 
 
+def test_wanted_projection_emits_no_internal_identifier():
+    block = _karum_block()
+    proj = block[block.index("def _karum_request_public("):
+                 block.index("def _karum_event(")]
+    for leaked in ("requester_account_id", "requester_discord_id", "requester_ctrl",
+                   "filler_account_id", "filler_discord_id", "filler_ctrl",
+                   "fill_item_id", "settlement_listing_id", "post_corr_id",
+                   "take_corr_id", "fill_corr_id"):
+        assert f'"{leaked}"' not in proj, f"wanted projection leaks {leaked}"
+    assert '"requester_name"' in proj
+    assert '"funded"' in proj
+
+
 def test_every_read_route_goes_through_the_projection():
     block = _karum_block()
     for route in ('@router.get("/portal/karum")',
@@ -230,6 +304,21 @@ def test_every_read_route_goes_through_the_projection():
     assert "dict(row)" not in reads and "dict(r)" not in reads
 
 
+def test_wanted_reads_go_through_the_wanted_projection():
+    block = _karum_block()
+    for route in ('@router.get("/portal/karum/request/{request_id}")',
+                  '@router.get("/portal/karum/catalog")'):
+        assert route in block, route
+    search = block[block.index('@router.get("/portal/karum/search")'):
+                   block.index('@router.get("/portal/karum/listing/{listing_id}")')]
+    assert 'side not in ("sell", "wanted")' in search
+    assert "_karum_request_public" in search
+    detail = block[block.index('@router.get("/portal/karum/request/{request_id}")'):
+                   block.index('@router.get("/portal/karum/catalog")')]
+    assert "_karum_request_public(row)" in detail
+    assert "dict(row)" not in detail
+
+
 # --------------------------------------------------------------------------- #
 # LIST: the only gated leg
 # --------------------------------------------------------------------------- #
@@ -238,9 +327,11 @@ def test_list_offline_gates_and_checks_ownership():
     r = _route("list")
     assert "await _resolve_online(active_account_id) is True" in r
     assert '_v2_err("player_online"' in r
-    # ownership through the enforced path, and the bank picked for the SELECTED character
+    # ownership through the enforced path, and the source resolved for the SELECTED
+    # character. Since 2026-08-25 either pawn inventory is allowed, so the assertion is on
+    # the strict resolver rather than on _pick_bank; see test_karum_source_is_strict.
     assert "_verify_seller_owns_item(active_account_id, container_id, item_id)" in r
-    assert "_pick_bank(clist, ctrl)" in r
+    assert "_karum_resolve_src(clist, ctrl, container_id)" in r
     assert 'owned.get("tradeable")' in r
     assert "_KARUM_MAX_PRICE" in r
 
@@ -265,6 +356,8 @@ def test_sellable_hides_what_it_could_not_hand_back():
     sellable = block[block.index('@router.get("/portal/karum/sellable")'):]
     sellable = sellable[:sellable.index("\n@router.")]
     assert "_karum_no_category" in sellable, "undeliverable items are still offered"
+    assert 'it.get("template")' in sellable
+    assert 'it.get("template_id")' not in sellable
     # Silently dropping them is how "where did my item go" tickets start.
     assert "hidden_no_category" in sellable, "withheld items are dropped without a count"
 
@@ -279,6 +372,120 @@ def test_unknown_deliverability_fails_open():
     assert "if not categorised" in fn and "return False" in fn, \
         "an unavailable category set is not failing open"
     assert 'return tpl.lower() not in categorised' in fn
+
+
+# --------------------------------------------------------------------------- #
+# WANTED ORDERS
+# --------------------------------------------------------------------------- #
+
+def test_wanted_post_uses_catalogue_and_session_identity():
+    r = _route("request/post")
+    assert "if not _karum_wtb_enabled()" in r
+    assert '_karum_catalog_data()["by_id"].get(template_id)' in r
+    assert 'catalog_item["max_stack"]' in r
+    assert 'body.get("requester_account_id")' not in r
+    assert 'body.get("requester_ctrl")' not in r
+    assert "active_account_id" in r and "int(ctrl)" in r
+    assert "post_corr_id" in r
+    assert "except sqlite3.IntegrityError:" in r
+    assert '"status": "replay"' in r
+
+
+def test_catalogue_filters_nontradeable_and_uncategorised_items():
+    block = _karum_block()
+    loader = block[block.index("def _karum_catalog_data()"):
+                   block.index("def _karum_public(")]
+    assert 'row.get("non_tradeable") is True' in loader
+    assert '"max_stack": max_stack' in loader
+    route = block[block.index('@router.get("/portal/karum/catalog")'):
+                  block.index('@router.get("/portal/karum/listing/{listing_id}")')]
+    assert "_karum_categorised()" in route
+    assert 'row["template_id"].lower() in categorised' in route
+
+
+def test_wanted_fill_is_offline_and_exact_stack_only():
+    r = _route("request/fill")
+    assert "await _resolve_online(active_account_id) is True" in r
+    assert "_karum_resolve_src(clist, filler_ctrl, container_id)" in r
+    assert "_verify_seller_owns_item(active_account_id, container_id, item_id)" in r
+    assert 'owned.get("template_id")' in r
+    assert 'owned_stack != int(wanted["stack_size"])' in r
+    assert 'owned.get("tradeable")' in r
+    assert '"item_id": item_id' in r
+    assert '"stack_size": int(wanted["stack_size"])' in r
+
+
+def test_karum_source_is_strict_and_cannot_reach_an_arbitrary_container():
+    """🔴 The container-id trap. A container `id` is not an `inv_id` and the two namespaces
+    OVERLAP, so accepting the client's id would let a colliding number escrow the wrong
+    container's item. The resolver must MATCH the id against a server-resolved pair, never
+    look it up, and the pair must be the strict selected-character one."""
+    src = _read(PORTAL)
+    fn = src[src.index("def _karum_resolve_src("):]
+    fn = fn[:fn.index("\ndef ")]
+    assert "_pick_pawn_storage_pair(clist, ctrl)" in fn, \
+        "the resolver must use the strict selected-character pair"
+    # It compares, it does not query. A lookup by id is exactly the trap.
+    assert 'str(bank.get("id")) == container_id' in fn
+    assert 'str(backpack.get("id")) == container_id' in fn
+    assert "return None, None" in fn, "the resolver must fail closed"
+    # Only two sources are reachable, ever.
+    assert fn.count('return "bank"') == 1 and fn.count('return "backpack"') == 1
+    for leg in ("list", "request/fill"):
+        r = _route(leg)
+        assert '"src": src' in r, f"{leg} does not forward the resolved source"
+
+
+def test_wanted_fill_self_trade_checks_both_keys():
+    r = _route("request/fill")
+    assert 'int(wanted["requester_account_id"]) == active_account_id' in r
+    assert 'str(requester_discord) == str(discord_id)' in r
+    assert "not discord_id or not requester_discord" in r
+
+
+def test_wanted_claim_is_atomic_and_precedes_the_relay():
+    block = _karum_block()
+    claim = block[block.index("def _karum_claim_request("):
+                  block.index("def _karum_mirror(")]
+    assert 'conn.execute("BEGIN IMMEDIATE")' in claim
+    assert claim.index("INSERT INTO portal_karum_listings") < claim.index(
+        "UPDATE portal_karum_requests")
+    assert "status = 'filling'" in claim
+    assert "status = 'active'" in claim
+    assert 'int(owned["id"])' in claim
+    assert 'owned["item_id"]' not in claim
+    assert "conn.rollback()" in claim
+    r = _route("request/fill")
+    assert r.index("_karum_claim_request(") < r.index("_karum_relay(")
+
+
+def test_wanted_fill_never_reopens_on_no_response_or_payment():
+    r = _route("request/fill")
+    unknown = r[r.index('if status == "unknown":'):r.index("if paid and delivered:")]
+    assert '"reconciling"' in unknown
+    assert '"active"' not in unknown
+    paid = r[r.index("if paid and not delivered:"):
+             r.index('_karum_cas(listing_id, "selling", "failed"',
+                     r.index("if paid and not delivered:"))]
+    assert '"paid_undelivered"' in paid
+    assert '"active"' not in paid
+
+
+def test_wanted_fill_reopens_only_on_a_clean_unpaid_answer():
+    r = _route("request/fill")
+    tail = r[r.index('_karum_cas(listing_id, "selling", "failed"',
+                     r.index("if paid and not delivered:")):]
+    assert '_karum_request_cas(request_id, "filling", "active", clear_fill=True)' in tail
+    assert '_karum_cas(listing_id, "selling", "failed"' in tail
+
+
+def test_wanted_cancel_is_owners_active_request_and_touches_no_game_state():
+    r = _route("request/cancel")
+    assert 'int(wanted["requester_account_id"]) != active_account_id' in r
+    assert 'status=404' in r
+    assert '_karum_request_cas(request_id, "active", "cancelled"' in r
+    assert "_karum_relay(" not in r
+    assert "_karum_mirror(" not in r
 
 
 def test_no_category_copy_names_the_real_reason():

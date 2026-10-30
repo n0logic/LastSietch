@@ -16,9 +16,11 @@ Covers the brief's five assertions:
 
 Run:  python3 scripts/tests/test_guild_op.py     (also pytest-compatible)
 """
+import atexit
 import base64
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -68,6 +70,7 @@ esac
 def _run(args, payload_b64, env_extra=None, capture_path=None):
     """Run dune-guild-op.sh with the fake sudo on PATH. Returns (proc, sql)."""
     tmp = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, tmp, ignore_errors=True)
     cap = capture_path or os.path.join(tmp, "captured.sql")
     sudo_path = os.path.join(tmp, "sudo")
     with open(sudo_path, "w") as fh:
@@ -133,6 +136,7 @@ def test_edit_description_reverifies_admin():
 # --- dry-run does NOT COMMIT (psql never runs) -------------------------------
 def test_dry_run_does_not_execute():
     tmp = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, tmp, ignore_errors=True)
     cap = os.path.join(tmp, "captured.sql")
     proc, sql = _run(["--dry-run"], _edit_payload(), capture_path=cap)
     out = json.loads(proc.stdout)
@@ -365,6 +369,7 @@ def test_send_invite_uses_universe_time_basis():
 # --- Tier 4: Solari gifting (dune-gift-op.sh) --------------------------------
 def _run_gift(args, payload_b64, env_extra=None):
     tmp = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, tmp, ignore_errors=True)
     cap = os.path.join(tmp, "captured.sql")
     sudo_path = os.path.join(tmp, "sudo")
     with open(sudo_path, "w") as fh:

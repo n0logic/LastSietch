@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The Karum WRITE tool — game-host resident. L1 of the four-layer contract, and the ONLY
+# The Karum WRITE tool, game-host resident. L1 of the four-layer contract, and the ONLY
 # thing that writes game state for the player-to-player trade venue.
 #
 # Deployed to the game host:/root/dune-karum-op.sh (mode 0750, owner root). Invoked ONLY by
@@ -9,7 +9,9 @@
 #
 #
 # ── THE ONE THING TO UNDERSTAND ────────────────────────────────────────────────
-# There is EXACTLY ONE TAKE in this system: the seller, at listing time, offline-gated.
+# There is EXACTLY ONE TAKE per trade in this system: the seller, offline-gated. For a
+# sale listing it happens when the seller lists. For a wanted order it happens when the
+# filler commits the whole order, in the same transaction as payment.
 # Every other leg is a give. That is not a style preference, it is why the dupe path is
 # closed by construction:
 #
@@ -17,6 +19,8 @@
 #   (escrow)      park the row in exchange 610     give-shaped, no player session involved
 #   karum-buy A   two-sided balance adjust         tabular, proc-routed, no item row
 #   karum-buy B   hand the item to the buyer       give, engine places it on claim
+#   karum-fill A  take from filler + payment       one atomic transaction
+#   karum-fill B  hand the item to requester       give, same claim lane
 #   karum-cancel  hand the item back to the seller give, same mechanism
 #
 # The take is NOT written here. It lives in scripts/lib/dune-take-item.sh and is shared
@@ -87,6 +91,8 @@ set -euo pipefail
 # --- caps / tunables ---------------------------------------------------------
 LASTSIETCH_KARUM_ENABLED="${LASTSIETCH_KARUM_ENABLED:-0}"                    # 0 = dark/refuse; 1 = live
 [[ -f /etc/lastsietch/karum-enabled ]] && LASTSIETCH_KARUM_ENABLED=1         # go-live flag file (rm to kill-switch)
+LASTSIETCH_KARUM_WTB_ENABLED="${LASTSIETCH_KARUM_WTB_ENABLED:-0}"            # separate wanted-order gate
+[[ -f /etc/lastsietch/karum-wtb-enabled ]] && LASTSIETCH_KARUM_WTB_ENABLED=1
 # 🔴 THE FLAG FILE IS THE ONLY WORKING SWITCH, not the env var. The dispatcher runs this
 # as `printf ... | /root/dune-karum-op.sh` under a non-interactive non-login ssh shell
 # that inherits NO profile, so nothing anyone exports ever reaches this line. Between
@@ -175,9 +181,10 @@ fail_json() {
 
 # Every RAISE on these paths leads with a stable lowercase token. Order matters only in that
 # no token may be a substring of another.
-KARUM_ERROR_TOKENS=(player_online no_bank item_not_found take_failed self_trade
-                    insufficient_funds rate_limited price_too_high escrow_missing
-                    no_category no_game_clock no_character already_settled)
+KARUM_ERROR_TOKENS=(player_online no_bank no_backpack item_not_found take_failed
+                    self_trade insufficient_funds rate_limited price_too_high
+                    escrow_missing quantity_mismatch grade_mismatch no_category
+                    no_game_clock no_character already_settled)
 
 error_token_of() {
   local blob token
@@ -209,14 +216,8 @@ resolve_db_pod() {
 }
 
 run_psql() {
-  local pgpass
-  pgpass=$(sudo kubectl exec -n "$DB_NS" "$DB_POD" -- printenv POSTGRES_PASSWORD 2>/dev/null)
-  if [[ -z "$pgpass" ]]; then
-    echo "FATAL: could not read POSTGRES_PASSWORD from DB pod $DB_POD" >&2
-    exit 3
-  fi
   sudo kubectl exec -i -n "$DB_NS" "$DB_POD" -- \
-    env PGPASSWORD="$pgpass" psql -h localhost -p "$DB_PORT" \
+    sh -c '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"' _ -h localhost -p "$DB_PORT" \
     -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 "$@"
 }
 
@@ -249,6 +250,15 @@ validate_nonneg() {
 validate_template() {
   [[ "$1" =~ ^[A-Za-z0-9_-]{2,64}$ ]] \
     || fail_json "$2 must be 2-64 chars of letters, digits, _ or -: $1" 2
+}
+# Empty = the historical default (bank). Anything outside the closed set is refused here
+# rather than passed down, so a typo can never reach the take library as "some other
+# inventory". The library validates again; this is layer 2 of the same defence.
+validate_src() {
+  case "${1:-}" in
+    ""|bank|backpack) ;;
+    *) fail_json "$2 must be bank or backpack: $1" 2 ;;
+  esac
 }
 
 # Emit-or-execute. Every action builds its SQL first and runs it only when not in dry-run,
@@ -307,14 +317,21 @@ dry_run_json() {
 #
 # $1 listing id | $2 target account id | $3 target ctrl role (buyer|seller)
 # $4 escrow end state | $5 listing price for the order's cosmetic item_price
+# $6 optional exact target controller. Wanted orders pin delivery to the character that
+# posted the request; existing sale and return paths retain their latest-character lookup.
 #
 # listing_id is an explicit parameter rather than read from the caller's scope: bash would
 # have resolved it dynamically and silently, and a delivery leg that settles the wrong
 # listing is not a failure mode worth leaving to scoping luck.
 build_delivery_txn() {
   local listing_id="$1" target_acct="$2" role="$3" end_state="$4" price="$5"
+  local target_ctrl="${6:-}" target_ctrl_guard=""
   local buyer_expr="NULL"
   [[ "$role" != "buyer" ]] || buyer_expr="v_ctrl"
+  if [[ -n "$target_ctrl" ]]; then
+    validate_posint "$target_ctrl" "target_ctrl"
+    target_ctrl_guard="AND eps.player_controller_id = ${target_ctrl}"
+  fi
 
   cat <<EOF
 BEGIN;
@@ -352,6 +369,7 @@ BEGIN
    WHERE eps.account_id = ${target_acct}
      AND eps.character_state IS DISTINCT FROM 'Deleted'
      AND eps.player_controller_id IS NOT NULL
+     ${target_ctrl_guard}
    ORDER BY eps.last_avatar_activity DESC NULLS LAST, eps.player_controller_id DESC
    LIMIT 1;
   IF v_ctrl IS NULL THEN
@@ -524,16 +542,19 @@ EOF
 
 # --- karum-list --------------------------------------------------------------
 op_list() {
-  local listing_id seller_account_id item_id template_id
+  local listing_id seller_account_id item_id template_id src
   listing_id=$(jq_get '.listing_id')
   seller_account_id=$(jq_get '.seller_account_id')
   item_id=$(jq_get '.item_id')
   template_id=$(jq_get '.template_id')
+  # Absent = bank, which is what every listing did before 2026-08-25.
+  src=$(jq_get '.src')
 
   validate_posint "$listing_id" "listing_id"
   validate_posint "$seller_account_id" "seller_account_id"
   validate_posint "$item_id" "item_id"
   validate_template "$template_id" "template_id"
+  validate_src "$src" "src"
 
   require_take_lib
 
@@ -546,6 +567,7 @@ op_list() {
     expected_template="$template_id"
     min_position="$KARUM_POSITION_BASE"
   )
+  [[ -z "$src" ]] || take_args+=(src="$src")
   if [[ "$LASTSIETCH_KARUM_STATS_SENTINEL" == "1" ]]; then
     take_args+=(stats_patch="{\"HolKarum\":{\"listing_id\":${listing_id}}}")
   fi
@@ -785,7 +807,7 @@ WITH ins AS (
      detail, operator, status, applied_at)
   VALUES
     (:'corr'::uuid, :listing_id, :buyer_account_id, :seller_account_id, :amount,
-     dune.get_solaris_id(), :'detail'::jsonb, :'operator', 'applied', now())
+     0, :'detail'::jsonb, :'operator', 'applied', now())
   ON CONFLICT (correlation_id) DO NOTHING
   RETURNING id
 ),
@@ -840,15 +862,15 @@ BEGIN
 
   -- Lock both balance rows in deterministic controller order (deadlock-safe).
   PERFORM 1 FROM dune.player_virtual_currency_balances
-   WHERE currency_id = dune.get_solaris_id()
+   WHERE currency_id = 'Solaris'::dune.virtualwallettype
      AND player_controller_id IN (v_buyer, v_seller)
    ORDER BY player_controller_id
    FOR UPDATE;
 
   SELECT balance INTO v_buyer_bal FROM dune.player_virtual_currency_balances
-   WHERE player_controller_id = v_buyer AND currency_id = dune.get_solaris_id();
+   WHERE player_controller_id = v_buyer AND currency_id = 'Solaris'::dune.virtualwallettype;
   SELECT balance INTO v_seller_bal FROM dune.player_virtual_currency_balances
-   WHERE player_controller_id = v_seller AND currency_id = dune.get_solaris_id();
+   WHERE player_controller_id = v_seller AND currency_id = 'Solaris'::dune.virtualwallettype;
 
   -- PRE-CHECK so the buyer-side negative delta never drives the proc into its
   -- clamp / log_cheating / undefined branch. An insufficient balance rolls this whole
@@ -876,8 +898,8 @@ BEGIN
    WHERE id = (SELECT op_id FROM _pay_gate);
 
   -- Two adjusts, value-conserving, same primitive a refund would use to compensate.
-  PERFORM dune.adjust_player_virtual_currency_balance(v_buyer,  dune.get_solaris_id(), -${amount});
-  PERFORM dune.adjust_player_virtual_currency_balance(v_seller, dune.get_solaris_id(),  ${amount});
+  PERFORM dune.adjust_player_virtual_currency_balance(v_buyer,  'Solaris'::dune.virtualwallettype, -${amount});
+  PERFORM dune.adjust_player_virtual_currency_balance(v_seller, 'Solaris'::dune.virtualwallettype,  ${amount});
 END
 \$pay\$;
 
@@ -953,6 +975,389 @@ EOF
   # back". The game will never say "purchase", so the copy MUST explain it.
   printf '{"success":true,"status":%s,"paid":true,"delivered":true,"order_id":%s,"correlation_id":%s,"collect_at":"any CHOAM Exchange terminal","message":"paid and delivered; collect it from the Completed tab (it shows as CANCELED)"}\n' \
     "$(json_str "$([[ "$pay_state" == "replay" && "$dstate" == "replay" ]] && echo replay || echo applied)")" \
+    "$order_id" "$(json_str "$IDEM")"
+  exit 0
+}
+
+# --- karum-fill --------------------------------------------------------------
+# Fill one whole wanted order. Transaction A combines the only take with the
+# two-sided payment, so a clean refusal rolls back both. Transaction B is the same
+# delivery builder used by a normal purchase and remains last.
+op_fill() {
+  local request_id listing_id buyer_account_id buyer_ctrl seller_account_id seller_ctrl
+  local item_id template_id stack_size amount take_corr expected_quality quality_mode src
+  request_id=$(jq_get '.request_id')
+  listing_id=$(jq_get '.listing_id')
+  buyer_account_id=$(jq_get '.buyer_account_id')
+  buyer_ctrl=$(jq_get '.buyer_ctrl')
+  seller_account_id=$(jq_get '.seller_account_id')
+  seller_ctrl=$(jq_get '.seller_ctrl')
+  item_id=$(jq_get '.item_id')
+  template_id=$(jq_get '.template_id')
+  stack_size=$(jq_get '.stack_size')
+  amount=$(jq_get '.amount')
+  take_corr=$(jq_get '.take_correlation_id')
+  # Grade is OPTIONAL: a wanted order posted before 2026-08-25 carries none and keeps its
+  # any-grade meaning. jq_get yields empty for an absent key, which is exactly what the
+  # take library reads as "no guard". Base is 0, so this is nonneg-validated, never posint.
+  expected_quality=$(jq_get '.expected_quality')
+  quality_mode=$(jq_get '.quality_mode')
+  src=$(jq_get '.src')
+
+  validate_posint "$request_id" "request_id"
+  validate_posint "$listing_id" "listing_id"
+  validate_posint "$buyer_account_id" "buyer_account_id"
+  validate_posint "$buyer_ctrl" "buyer_ctrl"
+  validate_posint "$seller_account_id" "seller_account_id"
+  validate_posint "$seller_ctrl" "seller_ctrl"
+  validate_posint "$item_id" "item_id"
+  validate_template "$template_id" "template_id"
+  validate_posint "$stack_size" "stack_size"
+  validate_posint "$amount" "amount"
+  validate_uuid "$take_corr" "take_correlation_id"
+  validate_src "$src" "src"
+  if [[ -n "$expected_quality" ]]; then
+    validate_nonneg "$expected_quality" "expected_quality"
+    [[ "$expected_quality" -le 5 ]] \
+      || fail_json "expected_quality must be 0-5: $expected_quality" 2
+    case "${quality_mode:-exact}" in
+      exact|min) ;;
+      *) fail_json "quality_mode must be exact or min: $quality_mode" 2 ;;
+    esac
+  elif [[ -n "$quality_mode" ]]; then
+    fail_json "quality_mode given without expected_quality" 2
+  fi
+  [[ "$buyer_account_id" != "$seller_account_id" ]] \
+    || fail_json "self_trade: requester and filler are the same account" 2 "self_trade"
+  [[ "$buyer_ctrl" != "$seller_ctrl" ]] \
+    || fail_json "self_trade: requester and filler are the same controller" 2 "self_trade"
+  [[ "$amount" -le "$KARUM_MAX_PRICE" ]] \
+    || fail_json "price_too_high: $amount exceeds the ceiling $KARUM_MAX_PRICE" 2 "price_too_high"
+
+  require_take_lib
+
+  local -a take_args=(
+    item_id="$item_id"
+    owner_account_id="$seller_account_id"
+    owner_ctrl="$seller_ctrl"
+    dst=exchange
+    correlation_id="$take_corr"
+    expected_template="$template_id"
+    min_position="$KARUM_POSITION_BASE"
+  )
+  # Appended only when the order actually carries a grade. The library always emits the
+  # guard block and makes it inert on a NULL want, so a legacy any-grade order takes
+  # exactly the path it always did; leaving the pair off keeps that want NULL.
+  [[ -z "$src" ]] || take_args+=(src="$src")
+  if [[ -n "$expected_quality" ]]; then
+    take_args+=(expected_quality="$expected_quality" quality_mode="${quality_mode:-exact}")
+  fi
+  if [[ "$LASTSIETCH_KARUM_STATS_SENTINEL" == "1" ]]; then
+    take_args+=(stats_patch="{\"HolKarum\":{\"listing_id\":${listing_id},\"request_id\":${request_id}}}")
+  fi
+  local TAKE_SQL
+  TAKE_SQL=$(karum_take_item "${take_args[@]}") \
+    || fail_json "could not build the wanted-order take for item $item_id" 2 "write_failed"
+
+  local DETAIL_JSON
+  DETAIL_JSON=$(printf '%s' "$OP_JSON" \
+    | jq -c '{listing_id: (.listing_id|tostring), request_id: (.request_id|tostring), kind: "karum_fill"}')
+
+  VARGS=(
+    -v "corr=${IDEM}"
+    -v "take_corr=${take_corr}"
+    -v "request_id=${request_id}"
+    -v "listing_id=${listing_id}"
+    -v "buyer_account_id=${buyer_account_id}"
+    -v "buyer_ctrl=${buyer_ctrl}"
+    -v "seller_account_id=${seller_account_id}"
+    -v "seller_ctrl=${seller_ctrl}"
+    -v "item_id=${item_id}"
+    -v "template_id=${template_id}"
+    -v "stack_size=${stack_size}"
+    -v "amount=${amount}"
+    -v "detail=${DETAIL_JSON}"
+    -v "operator=${OPERATOR}"
+  )
+
+  local FILL_SQL
+  FILL_SQL=$(cat <<EOF
+BEGIN;
+SET LOCAL search_path TO dune, public;
+SET LOCAL ls.karum_tpl = :'template_id';
+
+-- Resolve both exact characters before either idempotency gate is opened.
+CREATE TEMP TABLE _karum_fill_people ON COMMIT DROP AS
+SELECT
+  (SELECT eps.player_controller_id
+     FROM dune.encrypted_player_state eps
+    WHERE eps.account_id = :seller_account_id
+      AND eps.player_controller_id = :seller_ctrl
+      AND eps.character_state IS DISTINCT FROM 'Deleted'
+    LIMIT 1) AS seller_ctrl,
+  (SELECT eps.player_controller_id
+     FROM dune.encrypted_player_state eps
+    WHERE eps.account_id = :buyer_account_id
+      AND eps.player_controller_id = :buyer_ctrl
+      AND eps.character_state IS DISTINCT FROM 'Deleted'
+    LIMIT 1) AS buyer_ctrl;
+
+DO \$people\$
+BEGIN
+  IF (SELECT seller_ctrl FROM _karum_fill_people) IS NULL THEN
+    RAISE EXCEPTION 'no_character (filler account % does not own controller %)',
+                    ${seller_account_id}, ${seller_ctrl};
+  END IF;
+  IF (SELECT buyer_ctrl FROM _karum_fill_people) IS NULL THEN
+    RAISE EXCEPTION 'no_character (requester account % does not own controller %)',
+                    ${buyer_account_id}, ${buyer_ctrl};
+  END IF;
+  IF (SELECT seller_ctrl FROM _karum_fill_people) =
+     (SELECT buyer_ctrl FROM _karum_fill_people) THEN
+    RAISE EXCEPTION 'self_trade (requester and filler resolve to the same controller)';
+  END IF;
+END
+\$people\$;
+
+-- Resolve and snapshot a real non-zero exchange category before taking anything.
+CREATE TEMP TABLE _karum_cat ON COMMIT DROP AS
+SELECT category_mask AS mask, category_depth AS depth
+  FROM dune.dune_exchange_orders
+ WHERE template_id = :'template_id'
+   AND category_mask <> 0
+ GROUP BY category_mask, category_depth
+ ORDER BY count(*) DESC, category_mask
+ LIMIT 1;
+
+-- Escrow and payment each keep their existing unique gate. They must move in lockstep:
+-- both new on the first fill, or both prior on an exact replay.
+CREATE TEMP TABLE _karum_gate ON COMMIT DROP AS
+WITH ins AS (
+  INSERT INTO dune.ls_karum_escrow
+    (correlation_id, listing_id, item_id, inventory_id, seller_account_id, seller_ctrl,
+     template_id, stack_size, quality_level, category_mask, category_depth, state, operator)
+  SELECT :'take_corr', :listing_id, :item_id, dune.get_exchange_inventory_id(${EXCHANGE_ID}),
+         :seller_account_id, :seller_ctrl, :'template_id', 0, 0,
+         (SELECT mask FROM _karum_cat), (SELECT depth FROM _karum_cat), 'held', :'operator'
+  ON CONFLICT (correlation_id) DO NOTHING
+  RETURNING id
+), prior AS (
+  SELECT id FROM dune.ls_karum_escrow WHERE correlation_id = :'take_corr'
+)
+SELECT COALESCE((SELECT id FROM ins), (SELECT id FROM prior)) AS op_id,
+       EXISTS (SELECT 1 FROM ins) AS is_new;
+
+CREATE TEMP TABLE _pay_gate ON COMMIT DROP AS
+WITH ins AS (
+  INSERT INTO dune.ls_karum_payments
+    (correlation_id, listing_id, buyer_account_id, seller_account_id, amount, currency_id,
+     detail, operator, status, applied_at)
+  VALUES
+    (:'corr'::uuid, :listing_id, :buyer_account_id, :seller_account_id, :amount,
+     0, :'detail'::jsonb, :'operator', 'applied', now())
+  ON CONFLICT (correlation_id) DO NOTHING
+  RETURNING id
+), prior AS (
+  SELECT id FROM dune.ls_karum_payments WHERE correlation_id = :'corr'::uuid
+)
+SELECT COALESCE((SELECT id FROM ins), (SELECT id FROM prior)) AS op_id,
+       EXISTS (SELECT 1 FROM ins) AS is_new;
+
+DO \$gates\$
+DECLARE
+  v_esc record;
+  v_pay record;
+BEGIN
+  IF (SELECT is_new FROM _karum_gate) IS DISTINCT FROM
+     (SELECT is_new FROM _pay_gate) THEN
+    RAISE EXCEPTION 'already_settled (wanted-order gates are split; refusing a partial replay)';
+  END IF;
+
+  SELECT * INTO v_esc FROM dune.ls_karum_escrow
+   WHERE id = (SELECT op_id FROM _karum_gate);
+  SELECT * INTO v_pay FROM dune.ls_karum_payments
+   WHERE id = (SELECT op_id FROM _pay_gate);
+  IF v_esc.listing_id <> ${listing_id}
+     OR v_esc.item_id <> ${item_id}
+     OR v_esc.seller_account_id <> ${seller_account_id}
+     OR v_esc.template_id IS DISTINCT FROM current_setting('ls.karum_tpl') THEN
+    RAISE EXCEPTION 'already_settled (escrow correlation belongs to different fill facts)';
+  END IF;
+  IF v_pay.listing_id <> ${listing_id}
+     OR v_pay.buyer_account_id <> ${buyer_account_id}
+     OR v_pay.seller_account_id <> ${seller_account_id}
+     OR v_pay.amount <> ${amount} THEN
+    RAISE EXCEPTION 'already_settled (payment correlation belongs to different fill facts)';
+  END IF;
+
+  IF NOT (SELECT is_new FROM _karum_gate) THEN
+    PERFORM set_config('ls.take_skip', '1', true);
+  END IF;
+END
+\$gates\$;
+
+DO \$category\$
+BEGIN
+  IF (SELECT is_new FROM _karum_gate) AND NOT EXISTS (SELECT 1 FROM _karum_cat) THEN
+    RAISE EXCEPTION 'no_category (% has no live exchange order with a usable category)',
+                    current_setting('ls.karum_tpl');
+  END IF;
+END
+\$category\$;
+
+DO \$caps\$
+DECLARE
+  v_list_count bigint;
+  v_pair_count bigint;
+BEGIN
+  IF COALESCE(current_setting('ls.take_skip', true), '') = '1' THEN RETURN; END IF;
+  SELECT count(*) INTO v_list_count FROM dune.ls_karum_escrow
+   WHERE seller_account_id = ${seller_account_id}
+     AND id <> (SELECT op_id FROM _karum_gate)
+     AND held_at >= now() - interval '1 day';
+  IF v_list_count >= ${KARUM_MAX_LISTINGS_PER_DAY} THEN
+    RAISE EXCEPTION 'rate_limited (filler daily listing cap: % in 24h, max %)',
+                    v_list_count, ${KARUM_MAX_LISTINGS_PER_DAY};
+  END IF;
+
+  SELECT count(*) INTO v_pair_count FROM dune.ls_karum_payments
+   WHERE buyer_account_id = ${buyer_account_id}
+     AND seller_account_id = ${seller_account_id}
+     AND status = 'applied'
+     AND id <> (SELECT op_id FROM _pay_gate)
+     AND applied_at >= now() - interval '1 day';
+  IF v_pair_count >= ${KARUM_MAX_PAIR_PER_DAY} THEN
+    RAISE EXCEPTION 'rate_limited (requester to filler daily cap: % in 24h, max %)',
+                    v_pair_count, ${KARUM_MAX_PAIR_PER_DAY};
+  END IF;
+END
+\$caps\$;
+
+${TAKE_SQL}
+
+-- The shared take publishes the live stack facts. Exact quantity is part of the wanted
+-- order identity, so a larger or smaller stack rolls the entire transaction back.
+DO \$post\$
+DECLARE
+  r record;
+BEGIN
+  IF COALESCE(current_setting('ls.take_skip', true), '') = '1' THEN RETURN; END IF;
+  SELECT * INTO r FROM _take_result;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'take_failed (the shared take published no result row)';
+  END IF;
+  IF r.stack_size <> ${stack_size} THEN
+    RAISE EXCEPTION 'quantity_mismatch (wanted %, filler stack has %)',
+                    ${stack_size}, r.stack_size;
+  END IF;
+  UPDATE dune.ls_karum_escrow
+     SET item_id       = r.item_id,
+         inventory_id  = r.dst_inv,
+         seller_ctrl   = ${seller_ctrl},
+         template_id   = r.template_id,
+         stack_size    = r.stack_size,
+         quality_level = r.quality_level
+   WHERE id = (SELECT op_id FROM _karum_gate);
+END
+\$post\$;
+
+-- The balance rows are locked in controller order. A low balance raises after the take,
+-- but before commit, so PostgreSQL rolls the take and both idempotency rows back with it.
+DO \$pay\$
+DECLARE
+  v_buyer      bigint := ${buyer_ctrl};
+  v_seller     bigint := ${seller_ctrl};
+  v_buyer_bal  bigint;
+  v_seller_bal bigint;
+BEGIN
+  IF NOT (SELECT is_new FROM _pay_gate) THEN RETURN; END IF;
+
+  PERFORM 1 FROM dune.player_virtual_currency_balances
+   WHERE currency_id = 'Solaris'::dune.virtualwallettype
+     AND player_controller_id IN (v_buyer, v_seller)
+   ORDER BY player_controller_id
+   FOR UPDATE;
+
+  SELECT balance INTO v_buyer_bal FROM dune.player_virtual_currency_balances
+   WHERE player_controller_id = v_buyer AND currency_id = 'Solaris'::dune.virtualwallettype;
+  SELECT balance INTO v_seller_bal FROM dune.player_virtual_currency_balances
+   WHERE player_controller_id = v_seller AND currency_id = 'Solaris'::dune.virtualwallettype;
+  IF COALESCE(v_buyer_bal, 0) < ${amount} THEN
+    RAISE EXCEPTION 'insufficient_funds (requester has %, needs %)',
+                    COALESCE(v_buyer_bal, 0), ${amount};
+  END IF;
+
+  UPDATE dune.ls_karum_payments
+     SET buyer_balance_before = COALESCE(v_buyer_bal, 0),
+         seller_balance_before = COALESCE(v_seller_bal, 0)
+   WHERE id = (SELECT op_id FROM _pay_gate);
+
+  PERFORM dune.adjust_player_virtual_currency_balance(v_buyer, 'Solaris'::dune.virtualwallettype, -${amount});
+  PERFORM dune.adjust_player_virtual_currency_balance(v_seller, 'Solaris'::dune.virtualwallettype, ${amount});
+END
+\$pay\$;
+
+SELECT 'FILLED|' || (SELECT op_id FROM _karum_gate)::text || '|'
+       || (SELECT op_id FROM _pay_gate)::text || '|'
+       || CASE WHEN (SELECT is_new FROM _pay_gate) THEN 'applied' ELSE 'replay' END || '|'
+       || e.item_id::text || '|' || e.stack_size::text || '|' || e.quality_level::text
+  FROM dune.ls_karum_escrow e
+ WHERE e.id = (SELECT op_id FROM _karum_gate);
+
+COMMIT;
+EOF
+)
+
+  if ! emit_or_run "-- karum-fill transaction A (take + payment)" "$FILL_SQL"; then
+    local token
+    token=$(error_token_of "$LAST_ERR")
+    printf '{"success":false,"status":"failed","error":%s,"paid":false,"delivered":false,"correlation_id":%s,"message":%s}\n' \
+      "$(json_str "$token")" "$(json_str "$IDEM")" \
+      "$(json_str "fill failed before commit: $(printf '%s' "$LAST_ERR" | tr '\n' ' ' | tail -c 400)")"
+    exit 6
+  fi
+
+  local fill_out="$RUN_OUT"
+  local fill_state=""
+  if [[ "$DRY_RUN" != "1" ]]; then
+    fill_state=$(printf '%s' "$fill_out" | grep -E '^FILLED\|' | tail -n1 | cut -d'|' -f4 \
+                   | tr -d '[:space:]')
+    if [[ "$fill_state" != "applied" && "$fill_state" != "replay" ]]; then
+      printf '{"success":false,"status":"failed","error":"write_failed","paid":false,"delivered":false,"correlation_id":%s,"message":"fill transaction produced no usable result"}\n' \
+        "$(json_str "$IDEM")"
+      exit 6
+    fi
+  fi
+
+  local DLV_SQL
+  DLV_SQL=$(build_delivery_txn "$listing_id" "$buyer_account_id" buyer delivered "$amount" "$buyer_ctrl")
+  if ! emit_or_run "-- karum-fill transaction B (delivery)" "$DLV_SQL"; then
+    printf '{"success":false,"status":"paid_undelivered","error":%s,"paid":true,"delivered":false,"correlation_id":%s,"message":%s}\n' \
+      "$(json_str "$(error_token_of "$LAST_ERR")")" "$(json_str "$IDEM")" \
+      "$(json_str "paid, delivery failed: $(printf '%s' "$LAST_ERR" | tr '\n' ' ' | tail -c 400)")"
+    exit 7
+  fi
+  [[ "$DRY_RUN" != "1" ]] || dry_run_json
+
+  local drow dstate order_id
+  drow=$(printf '%s' "$RUN_OUT" | grep -E '^DLV\|' | tail -n1)
+  dstate=$(printf '%s' "$drow" | cut -d'|' -f2 | tr -d '[:space:]')
+  order_id=$(printf '%s' "$drow" | cut -d'|' -f3 | tr -d '[:space:]')
+  [[ -n "$order_id" ]] || order_id="null"
+
+  if [[ "$dstate" == "escrow_missing" ]]; then
+    printf '{"success":false,"status":"paid_undelivered","error":"escrow_missing","paid":true,"delivered":false,"correlation_id":%s,"message":"paid, but the escrowed item is gone; a refund is owed"}\n' \
+      "$(json_str "$IDEM")"
+    exit 7
+  fi
+  if [[ "$dstate" != "applied" && "$dstate" != "replay" ]]; then
+    printf '{"success":false,"status":"paid_undelivered","error":"write_failed","paid":true,"delivered":false,"correlation_id":%s,"message":"paid, delivery produced no usable result"}\n' \
+      "$(json_str "$IDEM")"
+    exit 7
+  fi
+
+  printf '{"success":true,"status":%s,"paid":true,"delivered":true,"order_id":%s,"correlation_id":%s,"collect_at":"any CHOAM Exchange terminal","message":"wanted order filled; collect it from the Completed tab (it shows as CANCELED)"}\n' \
+    "$(json_str "$([[ "$fill_state" == "replay" && "$dstate" == "replay" ]] && echo replay || echo applied)")" \
     "$order_id" "$(json_str "$IDEM")"
   exit 0
 }
@@ -1061,7 +1466,7 @@ WITH ins AS (
      detail, operator, status, applied_at)
   VALUES
     (:'corr'::uuid, :listing_id, :buyer_account_id, :seller_account_id, :amount,
-     dune.get_solaris_id(), :'detail'::jsonb, :'operator', 'applied', now())
+     0, :'detail'::jsonb, :'operator', 'applied', now())
   ON CONFLICT (correlation_id) DO NOTHING
   RETURNING id
 ),
@@ -1100,15 +1505,15 @@ BEGIN
   END IF;
 
   PERFORM 1 FROM dune.player_virtual_currency_balances
-   WHERE currency_id = dune.get_solaris_id()
+   WHERE currency_id = 'Solaris'::dune.virtualwallettype
      AND player_controller_id IN (v_buyer, v_seller)
    ORDER BY player_controller_id
    FOR UPDATE;
 
   -- Reverse direction: the seller gives it back, the buyer is made whole. Same
   -- value-conserving primitive that made the original payment.
-  PERFORM dune.adjust_player_virtual_currency_balance(v_seller, dune.get_solaris_id(), -${amount});
-  PERFORM dune.adjust_player_virtual_currency_balance(v_buyer,  dune.get_solaris_id(),  ${amount});
+  PERFORM dune.adjust_player_virtual_currency_balance(v_seller, 'Solaris'::dune.virtualwallettype, -${amount});
+  PERFORM dune.adjust_player_virtual_currency_balance(v_buyer,  'Solaris'::dune.virtualwallettype,  ${amount});
 
   -- Both uuids are folded as literals, having been validated as UUIDs in the shell.
   UPDATE dune.ls_karum_payments
@@ -1205,13 +1610,19 @@ do_op() {
       "$(json_str "The Karum is not open yet (LASTSIETCH_KARUM_ENABLED=${LASTSIETCH_KARUM_ENABLED}); nothing was written")"
     exit 0
   fi
+  if [[ "$action" == "karum-fill" && "$LASTSIETCH_KARUM_WTB_ENABLED" != "1" ]]; then
+    printf '{"success":true,"status":"deferred","paid":false,"delivered":false,"message":%s}\n' \
+      "$(json_str "Wanted orders are not open yet (LASTSIETCH_KARUM_WTB_ENABLED=${LASTSIETCH_KARUM_WTB_ENABLED}); nothing was written")"
+    exit 0
+  fi
 
   case "$action" in
     karum-list)   op_list ;;
     karum-buy)    op_buy ;;
+    karum-fill)   op_fill ;;
     karum-cancel) op_cancel ;;
     karum-admin)  op_admin ;;
-    *) fail_json "unknown action: $action (karum-list|karum-buy|karum-cancel|karum-admin)" 2 ;;
+    *) fail_json "unknown action: $action (karum-list|karum-buy|karum-fill|karum-cancel|karum-admin)" 2 ;;
   esac
 }
 

@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 # Read-only online player positions for the Last Sietch relay. No writes.
-# Deployed to <game-host>:/root/dune-positions.py — invoked by the relay over SSH.
+# Deployed to <game-host>:/root/dune-positions.py, invoked by the relay over SSH.
 #
-# PII rule: coordinates only. Never select or emit character names or account ids.
+# PII rule: this feed CARRIES identity and the projection downstream decides who
+# sees it. Every point has `a` (account id) and `n` (character name) beside the
+# coordinates; admin-backend/routers/dune.py positions_payload() strips both back
+# to x/y/p/m/d and drops partition 33 before anything public is served, and the
+# admin Live Map reads positions_raw_payload() behind require_admin. One script
+# feeds both audiences, so the two can never disagree about who is online.
 # `m` (map name) and `p` (partition) are world ids, not identifiers of a person.
 #
 # 2026-07-27: was HARDCODED to HaggaBasin, which is why the admin dashboard could
@@ -12,20 +17,27 @@
 #
 # Now emits every map and tags each player with `m`. Consumers that only want
 # Hagga filter on it; `map` is retained at the top level as "HaggaBasin" for
-# backward compatibility with the public site, which reads this shape today —
+# backward compatibility with the public site, which reads this shape today -
 # changing that field would break a live page for a cosmetic win.
 import json
 import subprocess
 
+# player_state is a VIEW that decrypts character_name (the same join
+# dune-roster.py uses), so `n` needs no decrypt call of its own, and the JOIN
+# this query already had for online_status carries both new columns. A row with
+# a null account or name emits JSON null rather than dropping the player.
 POSITIONS_SQL = """
 SELECT coalesce(json_agg(json_build_object(
-         'x', x, 'y', y, 'p', partition_id, 'm', map, 'd', dim)), '[]'::json)
+         'x', x, 'y', y, 'p', partition_id, 'm', map, 'd', dim,
+         'a', acct, 'n', name)), '[]'::json)
 FROM (
   SELECT round((((a.transform).location).x)::numeric,0)::bigint AS x,
          round((((a.transform).location).y)::numeric,0)::bigint AS y,
          a.partition_id AS partition_id,
          a.map AS map,
-         a.dimension_index AS dim
+         a.dimension_index AS dim,
+         ps.account_id::bigint AS acct,
+         ps.character_name AS name
   FROM dune.actors a
   JOIN dune.player_state ps ON ps.player_pawn_id = a.id
   WHERE ps.online_status='Online'

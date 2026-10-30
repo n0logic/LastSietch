@@ -14,8 +14,8 @@
 #     with TotalXPEarned / TotalSkillPoints / UnspentSkillPoints /
 #     KeystoneBonusSkillPoints (lives on exactly ONE fgl_entity row per actor).
 #   - dune.player_virtual_currency_balances: consolidated wallet, keyed by
-#     player_controller_id (resolved via dune.player_state). currency_id 0 =
-#     Solari, 1 = Scrip. One row per (controller, currency) = the player total.
+#     player_controller_id (resolved via dune.player_state). Wallet enum Solaris
+#     maps to JSON key 0, HouseCredit to 1. One row per controller and currency.
 #
 # Output shape:
 #   {"available": true, "account_id": N,
@@ -98,19 +98,24 @@ WHERE eps.account_id = {account_id}::bigint
 LIMIT 1;
 """
 
-# Consolidated currency balances. currency_id 0 = BANK Solari ("Solari Credits",
-# the in-game top-right wallet number), 1 = House Scrip. Keyed by controller id.
-# (Pocket "Solari Coins" are NOT here — they are SolarisCoin inventory items; see
+# Consolidated currency balances. Solaris is bank Solari, HouseCredit is Scrip.
+# Preserve the existing JSON keys 0 and 1. Keyed by controller id.
+# (Pocket "Solari Coins" are NOT here, they are SolarisCoin inventory items; see
 # POCKET_SOLARI_SQL.) Reconciled 2026-06-04, our internal notes*.
 ECONOMY_SQL = """
 SET search_path TO dune, public;
-SELECT coalesce(jsonb_object_agg(t.currency_id::text, t.bal), '{{}}'::jsonb)
+SELECT coalesce(jsonb_object_agg(
+  CASE t.currency_id
+    WHEN 'Solaris'::dune.virtualwallettype THEN '0'
+    WHEN 'HouseCredit'::dune.virtualwallettype THEN '1'
+  END, t.bal), '{{}}'::jsonb)
 FROM (
   SELECT vcb.currency_id, sum(vcb.balance) AS bal
   FROM dune.player_virtual_currency_balances vcb
   JOIN dune.player_state ps ON ps.player_controller_id = vcb.player_controller_id
   WHERE ps.account_id = {account_id}::bigint
-    AND vcb.currency_id IN (0, 1)
+    AND vcb.currency_id IN ('Solaris'::dune.virtualwallettype,
+                            'HouseCredit'::dune.virtualwallettype)
 {ctrl_ps}
   GROUP BY vcb.currency_id
 ) t;
@@ -256,7 +261,7 @@ def build(account_id, query_json, controller_id=None):
 
     bank_solari = int(econ_raw["0"]) if "0" in econ_raw else None
     economy = {
-        # bank = vcb currency_id 0 = dune.get_solaris_id(). This is what the exchange debits and
+        # bank = the Solaris wallet (legacy JSON key 0). This is what the exchange debits and
         # what the Karum debits.
         # ⚠️ It is NOT necessarily the figure a player sees in game. Measured 2026-07-27 (LT-2):
         # the owner's INVENTORY PANEL header read 100,318, which matched `pocket_solari` exactly

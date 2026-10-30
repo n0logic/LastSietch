@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# Dune Solari GIFT WRITE tool — game-host resident (sibling of dune-guild-op.sh).
+# Dune Solari GIFT WRITE tool, game-host resident (sibling of dune-guild-op.sh).
 #
 # Deployed to the game host:/root/dune-gift-op.sh (mode 0750, owner root). Invoked
 # ONLY by the forced-command dispatcher (a 'gift-op' action reading --op-b64-stdin),
 # reached over the relay SSH key. Runs as root on the game host and does its own
-# `sudo kubectl exec` into the Dune DB pod — no nested ssh.
+# `sudo kubectl exec` into the Dune DB pod, no nested ssh.
 #
 # One value-conserving transaction: debit the sender's BANK Solari and credit the
 # recipient's, both via dune.adjust_player_virtual_currency_balance (currency
-# dune.get_solaris_id() = 0 = BANK Solari, DB-authoritative / atomic — NO offline
+# 'Solaris'::dune.virtualwallettype = 0 = BANK Solari, DB-authoritative / atomic, NO offline
 # gate needed, unlike item grants).
 #
 # D5 (MANDATORY): the proc's negative-RESULT branch clamps to 0, log_cheating's the
 # actor, AND references an undefined in_player_id (so it ERRORS on that path). The
 # sender side uses a NEGATIVE delta, so we PRE-CHECK sender_balance >= amount inside
-# the locked txn and RAISE if short — that keeps the deduction from ever entering the
+# the locked txn and RAISE if short, that keeps the deduction from ever entering the
 # bad branch. This is a correctness requirement, not a nicety.
 #
 # LASTSIETCH_GIFTS_ENABLED (env, default "1" = LIVE as of 2026-07-07): while off (=0), the
-# op is code-complete but refuses — returns {"status":"deferred",...} without opening
+# op is code-complete but refuses, returns {"status":"deferred",...} without opening
 # a DB txn. Un-darked after the 7/6 2-account live test proved the value-conserving
 # two-adjust path; set LASTSIETCH_GIFTS_ENABLED=0 (revert the default + redeploy) to re-dark.
 #
@@ -32,7 +32,11 @@
 set -euo pipefail
 
 # --- caps / tunables ---------------------------------------------------------
-GIFT_MAX_AMOUNT="${GIFT_MAX_AMOUNT:-1000000}"     # per-gift Solari ceiling (abuse brake)
+GIFT_MAX_AMOUNT="${GIFT_MAX_AMOUNT:-5000000}"     # per-gift Solari ceiling (abuse brake)
+# Raised 1,000,000 -> 5,000,000 on 2026-08-26, owner-approved, and CONDITIONAL on the
+# identity-keyed caps in admin-backend/portal_gift_limits.py shipping in the same change:
+# the caps below key on account_id, and multi-accounting is permitted policy, so a 5x
+# raise without the identity keying multiplies an existing alt-relay path by five.
 GIFT_MAX_PER_DAY="${GIFT_MAX_PER_DAY:-20}"        # max gifts a sender may send / 24h (RMT brake)
 GIFT_MAX_PER_PAIR_PER_DAY="${GIFT_MAX_PER_PAIR_PER_DAY:-5}"  # max sender->same-recipient / 24h
 LASTSIETCH_GIFTS_ENABLED="${LASTSIETCH_GIFTS_ENABLED:-1}"       # 1 = live (un-darked 2026-07-07); set 0 to re-dark
@@ -74,15 +78,37 @@ resolve_db_pod() {
 }
 
 run_psql() {
-  local pgpass
-  pgpass=$(sudo kubectl exec -n "$DB_NS" "$DB_POD" -- printenv POSTGRES_PASSWORD 2>/dev/null)
-  if [[ -z "$pgpass" ]]; then
-    echo "FATAL: could not read POSTGRES_PASSWORD from DB pod $DB_POD" >&2
-    exit 3
-  fi
   sudo kubectl exec -i -n "$DB_NS" "$DB_POD" -- \
-    env PGPASSWORD="$pgpass" psql -h localhost -p "$DB_PORT" \
+    sh -c '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"' _ -h localhost -p "$DB_PORT" \
     -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 "$@"
+}
+
+# A cap trip or the balance pre-check RAISEs inside the money transaction, which
+# rolls back that transaction's own ls_guild_gifts audit row along with the
+# money, so a refused gift used to leave NOTHING behind. This writes the attempt
+# in a SECOND, independent transaction after the first has already rolled back.
+#
+# It deliberately does NOT write ls_guild_gifts.fail_reason on the original row:
+# that table's idempotency_key is UNIQUE and IS the idempotency gate, so a
+# 'failed' row under the same key would make the next attempt with that key
+# report "already applied, idempotent replay" having moved no money. Details in
+# scripts/sql/ls_gift_failures.sql.
+#
+# Best-effort by design: it must never mask the real error, so its own failure is
+# swallowed and the caller still reports the original transaction failure.
+record_failure() {
+  local sender="$1" recipient="$2" amount="$3" idem="$4" op="$5" req="$6" reason="$7"
+  [[ -n "${DB_NS:-}" && -n "${DB_POD:-}" ]] || return 0
+  printf '%s\n' "BEGIN;
+INSERT INTO dune.ls_gift_failures
+  (idempotency_key, sender_account_id, recipient_account_id, amount,
+   operator, requested_by_discord_id, fail_reason)
+VALUES (NULLIF(:'idem','')::uuid, :sender, :recipient, :amount,
+        NULLIF(:'op',''), NULLIF(:'req',''), :'reason');
+COMMIT;" | run_psql -tA \
+      -v "idem=${idem}" -v "sender=${sender}" -v "recipient=${recipient}" \
+      -v "amount=${amount}" -v "op=${op}" -v "req=${req}" \
+      -v "reason=${reason}" >/dev/null 2>&1 || true
 }
 
 OP_JSON=""
@@ -137,7 +163,7 @@ do_op() {
   local DETAIL_JSON
   DETAIL_JSON=$(printf '%s' "$OP_JSON" | jq -c '{amount: (.amount|tonumber), currency: "solari"}')
 
-  # Rate caps are embedded directly into the txn SQL — re-validate as integers.
+  # Rate caps are embedded directly into the txn SQL, re-validate as integers.
   [[ "$GIFT_MAX_PER_DAY" =~ ^[0-9]+$ ]] \
     || fail_json "GIFT_MAX_PER_DAY must be an integer: $GIFT_MAX_PER_DAY" 2
   [[ "$GIFT_MAX_PER_PAIR_PER_DAY" =~ ^[0-9]+$ ]] \
@@ -162,7 +188,7 @@ WITH ins AS (
      detail, operator, requested_by_discord_id, status, applied_at)
   VALUES
     (:'idem'::uuid, :sender_account_id, :recipient_account_id, :amount,
-     dune.get_solaris_id(), :'detail'::jsonb, :'operator', :'req_by', 'applied', now())
+     0, :'detail'::jsonb, :'operator', :'req_by', 'applied', now())
   ON CONFLICT (idempotency_key) DO NOTHING
   RETURNING id
 ),
@@ -219,7 +245,7 @@ BEGIN
 
   -- Lock both balance rows FOR UPDATE in deterministic controller order (deadlock-safe).
   PERFORM 1 FROM dune.player_virtual_currency_balances
-   WHERE currency_id = dune.get_solaris_id()
+   WHERE currency_id = 'Solaris'::dune.virtualwallettype
      AND player_controller_id IN (v_sender, v_recipient)
    ORDER BY player_controller_id
    FOR UPDATE;
@@ -227,7 +253,7 @@ BEGIN
   -- PRE-CHECK (D5): sender BANK Solari >= amount so the sender-side negative
   -- delta never drives the proc into its clamp/log_cheating/undefined branch.
   SELECT balance INTO v_sender_bal FROM dune.player_virtual_currency_balances
-   WHERE player_controller_id = v_sender AND currency_id = dune.get_solaris_id();
+   WHERE player_controller_id = v_sender AND currency_id = 'Solaris'::dune.virtualwallettype;
   IF COALESCE(v_sender_bal, 0) < v_amount THEN
     RAISE EXCEPTION 'insufficient balance: sender has % need %', COALESCE(v_sender_bal, 0), v_amount;
   END IF;
@@ -260,8 +286,8 @@ BEGIN
    WHERE id = (SELECT op_id FROM _gift_gate);
 
   -- Two adjusts, value-conserving.
-  PERFORM dune.adjust_player_virtual_currency_balance(v_sender,    dune.get_solaris_id(), -v_amount);
-  PERFORM dune.adjust_player_virtual_currency_balance(v_recipient, dune.get_solaris_id(),  v_amount);
+  PERFORM dune.adjust_player_virtual_currency_balance(v_sender,    'Solaris'::dune.virtualwallettype, -v_amount);
+  PERFORM dune.adjust_player_virtual_currency_balance(v_recipient, 'Solaris'::dune.virtualwallettype,  v_amount);
 END
 \$\$;
 
@@ -291,7 +317,11 @@ EOF
 
   local result
   if ! result=$(printf '%s\n' "$TXN" | run_psql -tA "${vargs[@]}" 2>&1); then
-    fail_json "gift transaction failed: $(printf '%s' "$result" | tr '\n' ' ' | tail -c 400)" 6
+    local reason
+    reason=$(printf '%s' "$result" | tr '\n' ' ' | tail -c 400)
+    record_failure "$sender_account_id" "$recipient_account_id" "$amount" \
+                   "$idem" "$operator" "$req_by" "$reason"
+    fail_json "gift transaction failed: $reason" 6
   fi
 
   local row op_id state

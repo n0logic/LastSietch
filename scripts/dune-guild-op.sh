@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Dune guild-operations WRITE tool — lastsietch-dune-resident.
+# Dune guild-operations WRITE tool, lastsietch-dune-resident.
 #
 # Deployed to lastsietch-dune:/root/dune-guild-op.sh (mode 0750, owner root). Invoked
 # ONLY by the forced-command dispatcher /root/dune-relay-dispatch.sh (guild-op
 # action), which is reached over the lastsietch-relay SSH key. Runs as root on lastsietch-dune
-# and does its own `sudo kubectl exec` into the Dune DB pod — no nested ssh.
+# and does its own `sudo kubectl exec` into the Dune DB pod, no nested ssh.
 #
 # Mirrors scripts/dune-grant.sh: same DB-pod resolution, same psql runner, same
 # server-side idempotency gate + durable audit row, same RESULT-row contract,
@@ -13,17 +13,17 @@
 # dune.ls_guild_ops); do not merge them.
 #
 # Ops:
-#   edit_description   P1 — LIVE. dune.edit_guild_description(guild_id, desc).
+#   edit_description   P1, LIVE. dune.edit_guild_description(guild_id, desc).
 #                      Admin-gated: re-verifies dune.is_player_guild_admin for
 #                      the acting player INSIDE the txn, AFTER the guild lock.
-#   accept_invite      P2 — DARK by default. dune.accept_guild_invite(...).
-#   reject_invite      P2 — DARK by default. dune.reject_guild_invite(...).
-#   send_invite        P3 — DARK by default. dune.add_guild_invite(...).
+#   accept_invite      P2, DARK by default. dune.accept_guild_invite(...).
+#   reject_invite      P2, DARK by default. dune.reject_guild_invite(...).
+#   send_invite        P3, DARK by default. dune.add_guild_invite(...).
 #
-# GUILD_WRITES_DARK (env, default "1" = dark): while dark, the three invite ops
-# are code-complete but refuse — they return {"status":"deferred","..."} without
-# opening a DB txn. Set GUILD_WRITES_DARK=0 to enable them. edit_description is
-# always LIVE regardless of the flag (it is the Phase 1 scope).
+# GUILD_WRITES_DARK (env, default "0" = LIVE since 2026-07-06): when set to 1 the
+# invite + member ops refuse, they return {"status":"deferred","..."} without
+# opening a DB txn. edit_description is always LIVE regardless of the flag (it is
+# the Phase 1 scope). The default lives at the assignment below, not here.
 #
 # HARD CONSTRAINTS (same as dune-grant.sh):
 #   * NEVER restart/reboot any game pod, the BGD, or k3s. Only ever opens a psql
@@ -93,14 +93,8 @@ resolve_db_pod() {
 }
 
 run_psql() {
-  local pgpass
-  pgpass=$(sudo kubectl exec -n "$DB_NS" "$DB_POD" -- printenv POSTGRES_PASSWORD 2>/dev/null)
-  if [[ -z "$pgpass" ]]; then
-    echo "FATAL: could not read POSTGRES_PASSWORD from DB pod $DB_POD" >&2
-    exit 3
-  fi
   sudo kubectl exec -i -n "$DB_NS" "$DB_POD" -- \
-    env PGPASSWORD="$pgpass" psql -h localhost -p "$DB_PORT" \
+    sh -c '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"' _ -h localhost -p "$DB_PORT" \
     -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 "$@"
 }
 
@@ -122,7 +116,7 @@ validate_posint() {
 # Leader-only admin gate (is_player_guild_admin). ONLY edit_description +
 # send_invite use it. Member-management ops (promote/demote/remove) are
 # officers-capable and use a DIFFERENT hierarchy gate (see op_is_member_op / the
-# member-role gate assembled below) — do NOT add them here (contract D1).
+# member-role gate assembled below), do NOT add them here (contract D1).
 op_requires_admin() {
   case "$1" in edit_description|send_invite) return 0 ;; *) return 1 ;; esac
 }
@@ -153,7 +147,7 @@ do_op() {
   # --- common fields ----------------------------------------------------------
   # target_account_id: account-scoped target (send_invite only).
   # target_player_controller_id: controller-scoped target (member ops; this is
-  #   dune.guild_members.player_id straight from the portal roster — contract D2).
+  #   dune.guild_members.player_id straight from the portal roster, contract D2).
   local op guild_id actor_account_id target_account_id target_ctrl idem operator req_by req_mode
   op=$(jq_get '.op')
   guild_id=$(jq_get '.guild_id')
@@ -344,7 +338,7 @@ do_op() {
       ;;
   esac
 
-  # target_account_id / guild_id SQL bindings (NULL when absent — accept/reject
+  # target_account_id / guild_id SQL bindings (NULL when absent, accept/reject
   # carry neither; the proc derives the guild from the invite). Bound ONCE here.
   local target_sql="NULL"
   if [[ -n "$target_account_id" && "$target_account_id" =~ ^[0-9]+$ ]]; then

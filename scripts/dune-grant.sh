@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Dune progression-grant tool — lastsietch-dune-resident core grant script.
+# Dune progression-grant tool, lastsietch-dune-resident core grant script.
 #
 # Deployed to lastsietch-dune:/root/dune-grant.sh (mode 0750, owner root). Invoked
 # ONLY by the forced-command dispatcher /root/dune-relay-dispatch.sh, which
 # itself is reached over the lastsietch-relay SSH key. This script runs as root on
-# lastsietch-dune and does its own `sudo kubectl exec` into the Dune DB pod — there is
+# lastsietch-dune and does its own `sudo kubectl exec` into the Dune DB pod, there is
 # NO nested ssh (the relay forced-command already lands here).
 #
-# Cross-reference: scripts/grant-welcome-pack.sh is the LEGACY workstation
-# welcome-pack script (still used by the welcome-pack watcher). This file is
+# Cross-reference: the welcome pack lives in ops/welcome-pack/grant.sh (the
+# live <game-host> grant.sh; the old scripts/grant-welcome-pack.sh is deleted). This file is
 # the NEW parameterized tool. They are intentionally separate (plan CR-5 / R2):
-# do not merge them. SQL patterns here mirror grant-welcome-pack.sh where they
+# do not merge them. SQL patterns here mirror that grant.sh where they
 # overlap (item INSERT at COALESCE(MAX(position_index),-1)+1, currency UPSERT,
 # Intel jsonb_set).
 #
@@ -33,7 +33,7 @@
 #   * RAM-fragile grants (item/solari/intel/recipe/schematic_item) are
 #     offline-gated: applied immediately only if the target is Offline.
 #   * Every field decoded from the base64 JSON is RE-VALIDATED here (defence in
-#     depth — the dispatcher's base64 regex is layer 1, this is layer 2).
+#     depth, the dispatcher's base64 regex is layer 1, this is layer 2).
 #
 # See docs/DUNE-PROGRESSION-GRANT-TOOL-PLAN.md sections 3, 5, 6, 8.
 
@@ -104,24 +104,76 @@ resolve_db_pod() {
   DB_POD="$pod"
 }
 
-# psql runner — opens a psql session in the resolved DB pod. Extra args (e.g.
+# psql runner, opens a psql session in the resolved DB pod. Extra args (e.g.
 # -t -A -v key=val -f -) are passed through. stdin is forwarded so SQL can be
 # piped in. This is the ONLY place a DB connection is opened.
+# Above this many bytes of SQL, stop streaming it through `kubectl exec -i`
+# and stage it inside the pod instead. See the deadlock note in run_psql.
+# 32 KiB is comfortably under the point where it starts hanging and comfortably
+# above every routine grant, so the fast path still covers the normal case.
+PSQL_STDIN_FILE_THRESHOLD=${PSQL_STDIN_FILE_THRESHOLD:-32768}
+
 run_psql() {
-  local pgpass
-  pgpass=$(sudo kubectl exec -n "$DB_NS" "$DB_POD" -- printenv POSTGRES_PASSWORD 2>/dev/null)
-  if [[ -z "$pgpass" ]]; then
-    echo "FATAL: could not read POSTGRES_PASSWORD from DB pod $DB_POD" >&2
+
+  # ── Why this buffers instead of piping straight through ──────────────────
+  # `kubectl exec -i` multiplexes stdin and stdout over one SPDY/websocket
+  # stream, and it DEADLOCKS on a large stdin payload: the writer blocks once
+  # the stream buffer fills while the remote psql is also trying to write back,
+  # and neither side drains. It is not a psql or Postgres problem - the DB never
+  # sees the statement at all.
+  #
+  # Observed live 2026-08-18: a 777-piece blueprint import produced ~120 KB of
+  # SQL and hung. FIVE such processes accumulated on the game box, each at 0%
+  # CPU in pipe_read with a stranded `kubectl exec` child, three of them a
+  # player's own portal attempts sitting there for half an hour. From the
+  # player's side it just looked like "the website import failed"; nothing
+  # errored, nothing timed out, and pg_stat_activity was completely clean
+  # because no query ever arrived.
+  #
+  # Small payloads are unaffected, which is why this went unnoticed for months -
+  # every routine grant is well under the limit. It also meant the documented
+  # 10,000-piece cap was fiction: the real ceiling was whatever fit in a pipe.
+  #
+  # Above the threshold, stage the SQL as a file inside the pod and run it with
+  # psql -f. stdin then carries nothing, so there is no stream to deadlock on.
+  local buf
+  buf=$(mktemp "${TMPDIR:-/tmp}/dune-grant-sql.XXXXXX") || {
+    echo "FATAL: could not create a temp file for SQL staging" >&2; exit 3; }
+  cat > "$buf"
+
+  local size
+  size=$(wc -c < "$buf" | tr -d '[:space:]')
+
+  if [[ "$size" -le "$PSQL_STDIN_FILE_THRESHOLD" ]]; then
+    local rc=0
+    sudo kubectl exec -i -n "$DB_NS" "$DB_POD" -- \
+      sh -c '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"' _ -h localhost -p "$DB_PORT" \
+      -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 "$@" < "$buf" || rc=$?
+    rm -f "$buf"
+    return "$rc"
+  fi
+
+  # Large path. The remote name is unique per call so concurrent grants cannot
+  # tread on each other, and it is removed even when psql fails.
+  local remote="/tmp/dune-grant-$$-$(date +%s%N).sql" rc=0
+  if ! sudo kubectl cp "$buf" "${DB_NS}/${DB_POD}:${remote}" >/dev/null 2>&1; then
+    rm -f "$buf"
+    echo "FATAL: could not stage ${size}-byte SQL into $DB_POD" >&2
     exit 3
   fi
+  rm -f "$buf"
+
   sudo kubectl exec -i -n "$DB_NS" "$DB_POD" -- \
-    env PGPASSWORD="$pgpass" psql -h localhost -p "$DB_PORT" \
-    -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 "$@"
+    sh -c '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"' _ -h localhost -p "$DB_PORT" \
+    -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 "$@" -f "$remote" < /dev/null || rc=$?
+
+  sudo kubectl exec -n "$DB_NS" "$DB_POD" -- rm -f "$remote" >/dev/null 2>&1 || true
+  return "$rc"
 }
 
 # One-shot scalar SELECT helper (read-only). Returns trimmed stdout.
 # Extra args after the SQL are forwarded to psql (e.g. -v key=val) so values are
-# bound as psql variables — never string-concatenated into the SQL (plan §8).
+# bound as psql variables, never string-concatenated into the SQL (plan §8).
 psql_scalar() {
   local sql="$1"; shift
   printf '%s\n' "$sql" | run_psql -tA "$@" 2>/dev/null | tr -d '[:space:]'
@@ -160,9 +212,9 @@ json_str() {
 # MODE: --list-players
 # =============================================================================
 # Every character row, incl. OFFLINE, for the grant-tool player picker. PII
-# (character names) — the relay route + admin-backend are auth-gated.
+# (character names), the relay route + admin-backend are auth-gated.
 #
-# Row set: dune.encrypted_player_state — the SAME table do_grant resolves
+# Row set: dune.encrypted_player_state, the SAME table do_grant resolves
 # accounts from, so the picker can never show an account the grant path cannot
 # resolve. It carries account_id / online_status / last_login_time /
 # reconnect_grace_period_end for EVERY character (online AND offline).
@@ -225,7 +277,31 @@ EOF
   houses_out=$(printf '%s' "$houses_out" | tr -d '[:space:]')
   [[ -n "$houses_out" ]] || houses_out="[]"
 
-  printf '{"available":true,"players":%s,"active_houses":%s}\n' "$out" "$houses_out"
+  # Character transfers: an incoming transfer gives the player a NEW account id
+  # under the same FLS id. Pairs each removed account ('incoming char transfer')
+  # with the live account that now holds its FLS id, so the portal can re-point
+  # its links (admin-backend portal_transfer_relink). Only ids leave this host,
+  # never the FLS id. A failed query is an empty list, never a failed roster.
+  local transfers_sql
+  transfers_sql=$(cat <<'EOF'
+SELECT COALESCE(json_agg(json_build_object('old_account_id', t.old_id,
+                                           'new_account_id', t.new_id)
+                         ORDER BY t.old_id, t.new_id), '[]'::json)
+FROM (
+  SELECT DISTINCT r.account_id AS old_id, a.id AS new_id
+  FROM dune.account_removal_log r
+  JOIN dune.accounts a ON a."user" = r.fls_id AND a.id <> r.account_id
+  WHERE r.reason = 'incoming char transfer'
+    AND NOT EXISTS (SELECT 1 FROM dune.accounts o WHERE o.id = r.account_id)
+) t;
+EOF
+)
+  local transfers_out
+  transfers_out=$(printf '%s\n' "$transfers_sql" | run_psql -tA 2>/dev/null || true)
+  transfers_out=$(printf '%s' "$transfers_out" | tr -d '[:space:]')
+  [[ -n "$transfers_out" ]] || transfers_out="[]"
+
+  printf '{"available":true,"players":%s,"active_houses":%s,"transfers":%s}\n' "$out" "$houses_out" "$transfers_out"
 }
 
 # =============================================================================
@@ -286,23 +362,23 @@ EOF
 # MODE: --grant-b64 <base64>
 # =============================================================================
 
-# Hardcoded grant_type enum — the airtight allowlist (plan section 8).
+# Hardcoded grant_type enum, the airtight allowlist (plan section 8).
 is_valid_grant_type() {
   case "$1" in
     item|item_live|solari|solari_currency|house_scrip|intel|recipe|schematic_item|faction_rep|spec_xp|keystone|spec_unlock_track|spec_unlock_all|char_xp|progression_preset|teleport|reset_specs|reset_tutorials|wipe_codex|repair_all|import_blueprint|bb_handoff|bb_clone|import_solido_to_basebackup)
       return 0 ;;
-    # P3a — icehunter v0.5.x parity (G23, G24a, G24b, G25a, G25b, g7b).
+    # P3a, icehunter v0.5.x parity (G23, G24a, G24b, G25a, G25b, g7b).
     main_quest_unlock|grant_full_job_tree|grant_skill_block|reset_full_skill_area|set_starter_class|align_faction)
       return 0 ;;
-    # WP-C 2026-06-10 — journey/story full-unlock tag repair (online-safe,
+    # WP-C 2026-06-10, journey/story full-unlock tag repair (online-safe,
     # tabular update_player_tags; same proc class as align_faction).
     journey_full_unlock)
       return 0 ;;
-    # WP-C2 2026-06-11 — journey NODE completion pass (offline-gated Funcom
+    # WP-C2 2026-06-11, journey NODE completion pass (offline-gated Funcom
     # proc; pairs with journey_full_unlock to make the journey UI reflect it).
     journey_node_completion)
       return 0 ;;
-    # 2026-06-12 — Trials-of-Aql / 4th-trial spice-addiction state-machine
+    # 2026-06-12, Trials-of-Aql / 4th-trial spice-addiction state-machine
     # repair (offline-gated FGL jsonb write; advances FSpiceAddictionComponent
     # to FullyEnabled so the 3rd ability slot unlocks). Journey and tag grants
     # do not fire this side effect, which is why it is a separate grant type.
@@ -335,29 +411,29 @@ CAP_SPEC_XP=44182    # icehunter parity Action #2: maxXP per track from db.go:54
 CAP_SPEC_LEVEL=100   # icehunter cmdMaxSpec uses 100.0 as max level
 # G11 char_xp: 344,440 = cumulative XP for character level 200 (in-game cap).
 CAP_CHAR_XP=344440
-# G13 solari_currency (Funcom-proc routed) — same numeric ceiling as G2 since
+# G13 solari_currency (Funcom-proc routed), same numeric ceiling as G2 since
 # both write the Solaris currency surface; difference is the storage path
 # (proc + balance table vs. backpack-item stack).
 CAP_SOLARI_CURRENCY=100000000
 # G20 import_blueprint / G22 import_solido_to_basebackup caps. piece total =
 # instances + placeables + pentashields. Byte cap is the decoded blueprint_data
 # ceiling; defends the psql -v binding size and the SQL string we hand to psql.
-# Piece cap bumped 5000->10000 for G22 — researcher-2 confirmed popular Solidos
+# Piece cap bumped 5000->10000 for G22, researcher-2 confirmed popular Solidos
 # (Tippytoes large sub-fief bases, multi-level deep-desert fortresses) exceed
 # 3000 pieces and several approach 5000 (G22 BUILD SPEC section 2.3).
 CAP_BLUEPRINT_PIECES=10000
 CAP_BLUEPRINT_BYTES=1048576
-# G29 bank_items_batch — per-grant item count cap. A CHOAM bank has finite
+# G29 bank_items_batch, per-grant item count cap. A CHOAM bank has finite
 # slots (max_item_count); even with a perfectly empty bank we hard-cap the
 # batch to keep audit detail readable and prevent fat-finger oversubmits.
 CAP_BATCH_ITEMS=30
-# container_items_batch — per-grant item count cap for a vehicle/storage
+# container_items_batch, per-grant item count cap for a vehicle/storage
 # container (BP_ContainerVehicle holds 150 slots). Larger than the bank cap so a
 # full vehicle-package fleet (e.g. 5 buggies = 65 items) lands in one grant; the
 # preflight still enforces the live free-slot count so we never overflow.
 CAP_CONTAINER_BATCH=150
 
-# jq field extractor — every read of the decoded JSON goes through here so a
+# jq field extractor, every read of the decoded JSON goes through here so a
 # missing key yields empty string, never the literal "null".
 jq_get() {
   printf '%s' "$GRANT_JSON" | jq -r --arg k "$1" \
@@ -416,7 +492,7 @@ validate_active_landsraad_house() {
 # - repair_all: backpack/hotbar items are RAM-fragile (inventory_type 14/15).
 # - reset_tutorials + wipe_codex: tutorial/codex tables are read on-demand by
 #   the game; safe to mutate while the player is online.
-# - import_blueprint (G20): per-grant-instance — backpack delivery (RAM-fragile
+# - import_blueprint (G20): per-grant-instance, backpack delivery (RAM-fragile
 #   inventory_type=0) → offline; bank delivery (inventory_type=30, online-safe
 #   per our internal notes) → online OK. The function reads
 #   .detail.delivery off the global GRANT_JSON for this grant type ONLY; all
@@ -424,7 +500,9 @@ validate_active_landsraad_house() {
 requires_offline() {
   case "$1" in
     item|solari|intel|recipe|schematic_item|char_xp|keystone|spec_unlock_track|spec_unlock_all|faction_rep|progression_preset|teleport|reset_specs|repair_all) return 0 ;;
-    # P3a — icehunter parity FLevelComponent writes (G24a/b, G25a, G25b) + G23
+    # spec_xp: specialization_tracks loads into RAM on login (as reset_specs); an online write is clobbered.
+    spec_xp) return 0 ;;
+    # P3a, icehunter parity FLevelComponent writes (G24a/b, G25a, G25b) + G23
     # main_quest_unlock whose Funcom proc itself raises EXCEPTION if the player
     # is online (complete_journey_story_nodes_for_player). align_faction is
     # TABULAR (player_faction + update_player_tags) so it stays online-safe.
@@ -491,7 +569,7 @@ do_grant() {
   # MULTI-SLOT: encrypted_player_state holds one row per character SLOT, not per
   # account (54 of 168 accounts have 2+). psql_scalar strips whitespace, so a
   # 2-row result CONCATENATES ("63131\n63134" -> 6313163134) and online_status
-  # becomes "OfflineOffline", which never equals "Online" — the requires_offline
+  # becomes "OfflineOffline", which never equals "Online", the requires_offline
   # gate below would fail OPEN against a live player. Resolve the one REAL
   # character by joining player_state (empty slots have no row); ORDER BY+LIMIT 1
   # keeps it single-valued if Funcom ever ships a second live character.
@@ -521,22 +599,22 @@ do_grant() {
       if [[ "$online_status" == "Online" ]]; then
         reason="status=Online"
       else
-        # status=Offline but still in reconnect_grace_period_end window —
+        # status=Offline but still in reconnect_grace_period_end window -
         # the game pod still holds the actor's RAM state during this window,
         # so a JSONB write would get clobbered when the pod flushes RAM.
         local grace_secs
         grace_secs=$(psql_scalar "${RESOLVE_TARGET_SQL//@COL@/GREATEST(0, EXTRACT(EPOCH FROM (eps.reconnect_grace_period_end - NOW())))::int}" -v "account_id=${account_id}")
-        reason="in reconnect grace period (~${grace_secs}s remaining; the game pod still holds RAM state during this window — a JSONB write now would be clobbered on next RAM flush)"
+        reason="in reconnect grace period (~${grace_secs}s remaining; the game pod still holds RAM state during this window, a JSONB write now would be clobbered on next RAM flush)"
       fi
       fail_json "target account ${account_id} cannot receive ${grant_type} right now: ${reason}. Wait for the player to be fully Offline + past the grace timer, then retry." 5
     fi
   fi
 
   # --- per-grant-type SQL build ------------------------------------------
-  # GRANT_PREFLIGHT  — DO $$ ... RAISE EXCEPTION abort blocks, run before the
+  # GRANT_PREFLIGHT , DO $$ ... RAISE EXCEPTION abort blocks, run before the
   #                    write; each guarded on the grant being NEW (replay-safe).
-  # GRANT_BODY       — the actual write, a CTE gated WHERE EXISTS the new grant.
-  # DETAIL_JSON      — compact jsonb detail stored on the audit row.
+  # GRANT_BODY      , the actual write, a CTE gated WHERE EXISTS the new grant.
+  # DETAIL_JSON     , compact jsonb detail stored on the audit row.
   local GRANT_PREFLIGHT="" GRANT_BODY="" DETAIL_JSON="{}"
   # Extra psql -v bindings collected as an array.
   #
@@ -547,7 +625,7 @@ do_grant() {
   # inside a grant body returns MORE THAN ONE ROW and the whole transaction
   # aborts with "more than one row returned by a subquery used as an
   # expression". Hit live on 2026-07-27 applying G7 faction_rep to account
-  # 30313 (2 slots) — it failed closed, but it failed.
+  # 30313 (2 slots), it failed closed, but it failed.
   # The bash layer already resolved the ONE real character above via
   # RESOLVE_TARGET_SQL (joins player_state, orders by last login, LIMIT 1), so
   # bodies must use :controller_id rather than re-deriving it.
@@ -602,7 +680,7 @@ do_grant() {
   #      records the resolved grant id and an is_new flag. TEMP tables are
   #      transaction-scoped and visible to DO blocks and later statements.
   #   2. Per-grant preflight checks are DO $$ ... RAISE EXCEPTION blocks. Each
-  #      is guarded so it only fires when the grant is NEW (is_new) — on a
+  #      is guarded so it only fires when the grant is NEW (is_new), on a
   #      replay the preflight is a no-op. ON_ERROR_STOP makes a RAISE roll the
   #      whole transaction back and exit non-zero.
   #   3. The grant body is gated server-side: its write CTE carries
@@ -629,7 +707,7 @@ BEGIN;
 -- second CTE looks up any pre-existing row. _grant_gate ends up with exactly
 -- one row: (grant_id, is_new, account_id, item_key). is_new = true only when
 -- this call inserted it. account_id/item_key are carried so the preflight
--- DO blocks can read them — psql does NOT substitute :vars inside a \$\$ body.
+-- DO blocks can read them, psql does NOT substitute :vars inside a \$\$ body.
 CREATE TEMP TABLE _grant_gate ON COMMIT DROP AS
 WITH ins AS (
   INSERT INTO dune.ls_progression_grants
@@ -695,7 +773,7 @@ EOF
   fi
 
   # The outcome is a single uniquely-prefixed row: RESULT|<grant_id>|<state>.
-  # Key ONLY on ^RESULT\| — intermediate psql output can never collide with it.
+  # Key ONLY on ^RESULT\|, intermediate psql output can never collide with it.
   local row grant_id state
   row=$(printf '%s' "$result" | grep -E '^RESULT\|' | tail -n1)
   grant_id=$(printf '%s' "$row" | cut -d'|' -f2 | tr -d '[:space:]')
@@ -703,12 +781,12 @@ EOF
   [[ -n "$grant_id" ]] || grant_id="null"
 
   if [[ "$state" == "replay" ]]; then
-    printf '{"success":true,"status":"replay","grant_id":%s,"grant_type":%s,"account_id":%s,"message":"already applied — idempotent replay, no change made"}\n' \
+    printf '{"success":true,"status":"replay","grant_id":%s,"grant_type":%s,"account_id":%s,"message":"already applied, idempotent replay, no change made"}\n' \
       "$grant_id" "$(json_str "$grant_type")" "$account_id"
     exit 0
   fi
 
-  printf '{"success":true,"status":"applied","grant_id":%s,"grant_type":%s,"account_id":%s,"message":"grant applied — the player must relog or change zone before it appears"}\n' \
+  printf '{"success":true,"status":"applied","grant_id":%s,"grant_type":%s,"account_id":%s,"message":"grant applied, the player must relog or change zone before it appears"}\n' \
     "$grant_id" "$(json_str "$grant_type")" "$account_id"
   exit 0
 }
@@ -737,7 +815,7 @@ EOF
           -v "grant_type=${grant_type}" -v "operator=${operator}" \
           -v "detail=${DETAIL_JSON_LOCAL}" 2>&1 | grep -E '^[0-9]+$' | tail -n1 || true)
   [[ -n "$gid" ]] || gid="null"
-  printf '{"success":true,"status":"deferred","grant_id":%s,"grant_type":%s,"account_id":%s,"message":"target online — grant deferred; the sweeper will apply it when the player is next offline"}\n' \
+  printf '{"success":true,"status":"deferred","grant_id":%s,"grant_type":%s,"account_id":%s,"message":"target online, grant deferred; the sweeper will apply it when the player is next offline"}\n' \
     "$gid" "$(json_str "$grant_type")" "$account_id"
   exit 0
 }
@@ -746,14 +824,14 @@ EOF
 # Per-grant-type builders. Each sets GRANT_BODY (SQL run between the idempotency
 # gate and COMMIT), DETAIL_JSON (compact jsonb for the audit row), and appends
 # any extra psql -v bindings to PSQL_VARS. Values are ALWAYS passed as psql
-# variables — never concatenated into SQL text (plan section 8).
+# variables, never concatenated into SQL text (plan section 8).
 #
 # Most of these reference the resolved ids via psql vars set in the txn header:
 #   :account_id is the literal int; actor/controller/inventory are re-resolved
 #   inside the SQL so the grant always uses live ids.
 # -----------------------------------------------------------------------------
 
-# G1 / G6 — inventory item (and schematic item). Additive INSERT into
+# G1 / G6, inventory item (and schematic item). Additive INSERT into
 # dune.items at position_index = COALESCE(MAX,-1)+1, with a capacity check.
 build_item_grant() {
   local gt="$1"
@@ -781,7 +859,7 @@ build_item_grant() {
   GRANT_PREFLIGHT=$(cat <<'EOF'
 -- G1 preflight: resolve the main backpack and refuse if missing or full.
 DO $$
-DECLARE g _grant_gate%ROWTYPE; v_inv bigint; v_cap int; v_used int;
+DECLARE g _grant_gate%ROWTYPE; v_inv bigint; v_cap int; v_used int; v_tmpl text;
 BEGIN
   SELECT * INTO g FROM _grant_gate;
   IF NOT g.is_new THEN RETURN; END IF;
@@ -798,6 +876,21 @@ BEGIN
   IF v_used >= v_cap THEN
     RAISE EXCEPTION 'CAPACITY_FAIL: backpack full (used % of %)', v_used, v_cap;
   END IF;
+  -- 🔴 Fail CLOSED on an augment whose roll shape we cannot measure. See the
+  -- AUGMENT STATS note above the INSERT: handing a player an augment the swap
+  -- picker can never select is worse than refusing the grant outright.
+  -- psql does NOT substitute :vars inside a dollar-quoted DO body, so the
+  -- template is read
+  -- back from the audit row's detail jsonb -- the same trick the batch builders
+  -- use for :items and :target_inv.
+  SELECT gp.detail->>'template_id' INTO v_tmpl
+    FROM dune.ls_progression_grants gp WHERE gp.id = g.grant_id;
+  IF starts_with(v_tmpl, 'T6_Augment_')
+     AND NOT EXISTS (SELECT 1 FROM dune.items
+                      WHERE template_id = v_tmpl
+                        AND stats ? 'FAugmentItemStats') THEN
+    RAISE EXCEPTION 'AUGMENT_SHAPE_UNKNOWN: no standalone % exists to copy a roll shape from; granting it would mint an augment the swap picker cannot select', v_tmpl;
+  END IF;
 END $$;
 EOF
 )
@@ -805,6 +898,18 @@ EOF
   GRANT_BODY=$(cat <<'EOF'
 -- G1 write: additive INSERT at the next free slot. Gated on a NEW grant so a
 -- replay writes nothing.
+--
+-- 🔴 AUGMENT STATS. A standalone augment MUST carry a real FAugmentItemStats
+-- block: the portal's swap picker selects on `stats ? 'FAugmentItemStats'`, so a
+-- '{}' row is INERT -- it sits in the player's bag and cannot be chosen. That is
+-- how 46,909 of the 47,400 augment items on live ended up unusable.
+--
+-- The shape is COPIED from a real row of the same template rather than invented,
+-- because neither half of it is uniform: the StatRolls COUNT is per-template
+-- (1..7 across the catalogue) and a wrong count renders an EMPTY augment slot in
+-- game, while the durability block varies per template too. Only StatRolls is
+-- redrawn, uniform [0,1] at 6dp -- the same draw dune-augment.py makes in
+-- roll_mode 'random'. Non-augment templates keep '{}' exactly as before.
 WITH bp AS (
   SELECT inv.id AS inv_id
     FROM dune.encrypted_player_state eps
@@ -819,14 +924,26 @@ SELECT
   bp.inv_id, :quantity,
   COALESCE((SELECT MAX(position_index) FROM dune.items
              WHERE inventory_id = bp.inv_id), -1) + 1,
-  :'template_id', '{}'::jsonb, :quality, 0, true
+  :'template_id',
+  COALESCE(
+    (SELECT jsonb_set(d.stats, '{FAugmentItemStats,1,StatRolls}',
+              (SELECT COALESCE(jsonb_agg(round(random()::numeric, 6)), '[]'::jsonb)
+                 FROM generate_series(1, jsonb_array_length(
+                        d.stats #> '{FAugmentItemStats,1,StatRolls}'))))
+       FROM dune.items d
+      WHERE d.template_id = :'template_id'
+        AND d.stats ? 'FAugmentItemStats'
+      ORDER BY d.id
+      LIMIT 1),
+    '{}'::jsonb),
+  :quality, 0, true
 FROM bp
 WHERE EXISTS (SELECT 1 FROM _grant_gate WHERE is_new);
 EOF
 )
 }
 
-# G2 — Solari granted as SolarisCoin stackable inventory items. UPDATE an
+# G2, Solari granted as SolarisCoin stackable inventory items. UPDATE an
 # existing SolarisCoin stack if present, else INSERT a new stack. Offline-gated.
 build_solari_grant() {
   local amount
@@ -916,7 +1033,7 @@ EOF
 )
 }
 
-# G13 — Solari via the Funcom adjust_player_virtual_currency_balance proc.
+# G13, Solari via the Funcom adjust_player_virtual_currency_balance proc.
 # Tabular, ONLINE-SAFE: writes the currency balance row directly; no backpack
 # slot needed, no JSONB on the actor, no RAM cache to clobber. Distinct from
 # G2 'solari' which drops a SolarisCoin stack into the backpack (offline-gated,
@@ -946,7 +1063,7 @@ build_solari_currency_grant() {
 SET LOCAL search_path TO dune, public;
 SELECT dune.adjust_player_virtual_currency_balance(
          :controller_id::bigint,
-         dune.get_solaris_id(),
+         'Solaris'::dune.virtualwallettype,
          :amount::bigint
        )
  WHERE EXISTS (SELECT 1 FROM _grant_gate WHERE is_new);
@@ -954,7 +1071,7 @@ EOF
 )
 }
 
-# G3 — House Scrip via dune.player_virtual_currency_balances.
+# G3, House Scrip via dune.player_virtual_currency_balances.
 # Tabular; online-safe. add (default) or set.
 # Currency_id auto-detect (icehunter parity Action #6): resolves to the largest
 # non-Solaris currency_id at run time (matches icehunter's resolveScripCurrencyID
@@ -968,11 +1085,14 @@ build_house_scrip_grant() {
   validate_int_in_range "$amount" 0 "$CAP_HOUSE_SCRIP" "amount"
   validate_mode_addset "$mode"
 
+  # Last Sietch 2026-09-17: 1.5.3 changed currency_id to the enum dune.virtualwallettype (Solaris|HouseCredit).
+  # The numeric scrip resolution below cannot work any more; refuse cleanly until G3 is reworked.
+  fail_json "house scrip grants (G3) need rework for the 1.5.3 enum wallet (currency_id is now dune.virtualwallettype); refusing" 2
   # Resolve scrip currency_id (largest non-Solaris by total balance, then by id;
   # mirrors icehunter resolveScripCurrencyID at db.go:919). We resolve here in
   # bash so the audit row records the actual currency_id used; the SQL body
   # then binds it as a psql variable rather than re-querying mid-transaction.
-  scrip_id=$(psql_scalar "SELECT currency_id FROM dune.player_virtual_currency_balances WHERE currency_id <> dune.get_solaris_id() GROUP BY currency_id ORDER BY SUM(balance) DESC, currency_id LIMIT 1;")
+  scrip_id=$(psql_scalar "SELECT currency_id FROM dune.player_virtual_currency_balances WHERE currency_id <> 'Solaris'::dune.virtualwallettype GROUP BY currency_id ORDER BY SUM(balance) DESC, currency_id LIMIT 1;")
   if [[ ! "$scrip_id" =~ ^[0-9]+$ ]]; then
     fail_json "could not resolve scrip currency_id (no non-solaris currency rows found)" 2
   fi
@@ -1014,7 +1134,7 @@ EOF
   fi
 }
 
-# G4 — Intel points. jsonb_set additive on the pawn actor properties. Offline
+# G4, Intel points. jsonb_set additive on the pawn actor properties. Offline
 # mandatory (jsonb clobber risk if the player is online).
 build_intel_grant() {
   local amount
@@ -1058,9 +1178,9 @@ EOF
 )
 }
 
-# G5 — recipe / schematic unlock (state-flip). Flips a matched ItemKey in the
+# G5, recipe / schematic unlock (state-flip). Flips a matched ItemKey in the
 # pawn's m_TechKnowledgeData array from its current state to Purchased. Only
-# ItemKeys ALREADY PRESENT in the array can be flipped (plan G5 note / OI-4) —
+# ItemKeys ALREADY PRESENT in the array can be flipped (plan G5 note / OI-4) -
 # the SQL RETURNS the matched count and the transaction aborts if zero matched.
 # Offline mandatory.
 build_recipe_grant() {
@@ -1073,7 +1193,7 @@ build_recipe_grant() {
   PSQL_VARS+=( -v "item_key=${item_key}" )
 
   # Preflight: the account must resolve to a pawn, AND the ItemKey must already
-  # be present in m_TechKnowledgeData — only present keys can be flipped (OI-4).
+  # be present in m_TechKnowledgeData, only present keys can be flipped (OI-4).
   GRANT_PREFLIGHT=$(cat <<'EOF'
 -- G5 preflight: pawn resolution + ItemKey-present check.
 DO $$
@@ -1127,23 +1247,23 @@ EOF
 )
 }
 
-# G7 v2 — faction reputation. Writes BOTH:
-#   (1) FactionPlayerComponent JSONB on the controller actor — this is what
+# G7 v2, faction reputation. Writes BOTH:
+#   (1) FactionPlayerComponent JSONB on the controller actor, this is what
 #       the in-game UI reads for the displayed rep + rank. Without this write
 #       the grant lands silently in the table but the UI never updates.
-#   (2) dune.set_player_faction_reputation proc — syncs Faction.X.Tier_N
+#   (2) dune.set_player_faction_reputation proc, syncs Faction.X.Tier_N
 #       gameplay tags + writes the player_faction_reputation tabular store.
 #
 # Source-of-truth read for ADD mode = FactionPlayerComponent JSONB (NOT the
-# table — the table can be stale or empty). Goes BEYOND icehunter parity:
+# table, the table can be stale or empty). Goes BEYOND icehunter parity:
 # icehunter's `cmdGiveFactionRep` calls only the proc and has the same
 # paper-only-grant bug.
 #
-# OFFLINE-GATED — FactionPlayerComponent is the same RAM-fragile pattern as
+# OFFLINE-GATED, FactionPlayerComponent is the same RAM-fragile pattern as
 # FLevelComponent (G11 char_xp). Writes get clobbered by RAM-flush on logout
 # if the player is online. requires_offline() enforces.
 #
-# Faction.Name string mapping is hardcoded — Funcom's faction ids are fixed.
+# Faction.Name string mapping is hardcoded, Funcom's faction ids are fixed.
 # search_path SET LOCAL needed for the proc's unqualified table refs.
 build_faction_rep_grant() {
   local faction_id amount mode faction_name
@@ -1345,22 +1465,22 @@ EOF
 }
 
 # =============================================================================
-# P3a — icehunter v0.5.x parity helpers + new builders.
+# P3a, icehunter v0.5.x parity helpers + new builders.
 # Covers G23 main_quest_unlock, G24a grant_full_job_tree, G24b grant_skill_block,
-# G25a reset_full_skill_area, G25b set_starter_class (UI disabled — see notice
+# G25a reset_full_skill_area, G25b set_starter_class (UI disabled, see notice
 # at builder header), g7b align_faction (standalone alignment-only grant).
 #
 # Cross-cutting:
 #   * Every Funcom-proc-calling builder emits funcom_proc_call_prelude() as the
 #     first SQL line (SET LOCAL search_path TO dune, public). Required because
-#     Funcom procs use unqualified table refs — see
+#     Funcom procs use unqualified table refs, see
 #.
-#   * G24a/G24b/G25a/G25b touch FLevelComponent JSONB on the pawn actor —
+#   * G24a/G24b/G25a/G25b touch FLevelComponent JSONB on the pawn actor -
 #     RAM-fragile, gated offline via requires_offline().
 #   * G23 main_quest_unlock is gated offline too: the Funcom proc
 #     complete_journey_story_nodes_for_player raises EXCEPTION if the player
 #     is online (spec §G23 lines 191-200).
-#   * align_faction is TABULAR (player_faction + update_player_tags) — NOT in
+#   * align_faction is TABULAR (player_faction + update_player_tags), NOT in
 #     requires_offline().
 #   * tags-data.json sidecar (loaded via $TAGS_DATA_JSON) is the single source
 #     of truth for journey-node tag unions + job module lists; pinned to
@@ -1401,13 +1521,13 @@ emit_alignment_sql() {
      | unique'
 }
 
-# G23 — main_quest_unlock. Complete every node in ONE journey arc
+# G23, main_quest_unlock. Complete every node in ONE journey arc
 # (proc complete_journey_story_nodes_for_player) + apply the union of
 # m_TagsToAdd those nodes would emit (proc update_player_tags).
 # Offline-gated upstream (proc raises EXCEPTION if player online). Idempotent
 # via _grant_gate WHERE EXISTS; both procs are server-side idempotent too.
 #
-# Per-arc picker (2026-06-11): the preset is any top-level journey arc root —
+# Per-arc picker (2026-06-11): the preset is any top-level journey arc root -
 # the 18 .core arcs (DA_MQ_*/DA_SQ_*/DA_Dunipedia_*/DA_DLC_LostHarvest) plus the
 # Atreides faction arc DA_FQ_ClimbTheRanks. The relay-side enum
 # (_MAIN_QUEST_PRESETS / catalog entries) is the authoritative allowlist; the
@@ -1460,7 +1580,7 @@ build_main_quest_unlock_grant() {
           "$TAGS_DATA_JSON")
         ;;
       2)
-        fail_json "Harkonnen story set not yet captured — DA_FQ_ClimbTheRanks unavailable for Harkonnen targets" 2
+        fail_json "Harkonnen story set not yet captured, DA_FQ_ClimbTheRanks unavailable for Harkonnen targets" 2
         ;;
       *)
         fail_json "faction story arc is only available for Atreides characters (target faction_id: ${target_faction_id:-unaligned})" 2
@@ -1528,7 +1648,7 @@ EOF
 )
 }
 
-# G24a — grant_full_job_tree. Unlock all 6 Skills.Key.* blocks (3 tier + 3
+# G24a, grant_full_job_tree. Unlock all 6 Skills.Key.* blocks (3 tier + 3
 # capstone) for one job by direct JSONB write on FLevelComponent[1].ModuleData.
 # RAM-fragile, offline-gated upstream. Uses a plpgsql DO block because
 # Postgres does not support bracket-subscript multi-row jsonb_set via JOIN
@@ -1564,7 +1684,7 @@ build_grant_full_job_tree_grant() {
   # plpgsql DO block: loop blocks one-at-a-time, jsonb_set each. The
   # `< 1` predicate preserves any SP the player already spent (skip set blocks).
   # psql `:` variable substitution does NOT happen inside $$...$$ dollar-quoted
-  # blocks — so we hand the blocks JSON in via SET LOCAL above the DO and read
+  # blocks, so we hand the blocks JSON in via SET LOCAL above the DO and read
   # it back inside with current_setting(). Transaction-scoped so it auto-clears
   # on COMMIT.
   GRANT_BODY=$(cat <<'EOF'
@@ -1606,7 +1726,7 @@ EOF
 )
 }
 
-# G24b — grant_skill_block. Single-block surgical version of G24a. Same
+# G24b, grant_skill_block. Single-block surgical version of G24a. Same
 # FLevelComponent path, same `< 1` predicate. CapstoneWeaponry placeholders
 # at SpSpent=0 get promoted to 1 (icehunter v0.5.1 fix).
 build_grant_skill_block_grant() {
@@ -1615,7 +1735,7 @@ build_grant_skill_block_grant() {
   # Static format gate (matches the icehunter Skills.Key.* family).
   [[ "$block" =~ ^Skills\.Key\.[A-Za-z0-9_]+$ ]] \
     || fail_json "invalid block (must match Skills.Key.<id>): $block" 2
-  # Membership gate against tags-data.json — block must be in some job's
+  # Membership gate against tags-data.json, block must be in some job's
   # job_skill_blocks (30 valid values across 5 jobs).
   local valid
   valid=$(jq -r --arg b "$block" \
@@ -1669,14 +1789,14 @@ EOF
 )
 }
 
-# G25a — reset_full_skill_area. Drop every ModuleData entry whose SkillArea
+# G25a, reset_full_skill_area. Drop every ModuleData entry whose SkillArea
 # matches the named job (Key + Ability + Attribute + Perk). Eliminates phantom
 # refundable rows that survive a Key-only delete.
 #
 # HAZARD GUARD: refuses to reset the player's currently-set starter class.
 # The combo (reset starter job) wipes TotalXPEarned + SP + Keystone on next
 # login (actor 31 case, 2026-05-24). Operator must reassign starter class via
-# G25b first (UI disabled — SQL-only recovery path).
+# G25b first (UI disabled, SQL-only recovery path).
 build_reset_full_skill_area_grant() {
   local job
   job=$(jq_get_nested detail job)
@@ -1706,7 +1826,7 @@ SQL
 )" -v "pawn_id=${pawn_id}")
 
   if [[ "$current_starter" == "Skills.Key.${job}1" ]]; then
-    fail_json "refusing to reset ${job} — it is the player's current starter class (StarterSkillTreeTag=${current_starter}). Reassign starter class via set_starter_class (SQL-only) first, then retry." 6
+    fail_json "refusing to reset ${job}, it is the player's current starter class (StarterSkillTreeTag=${current_starter}). Reassign starter class via set_starter_class (SQL-only) first, then retry." 6
   fi
 
   local modules_json
@@ -1746,7 +1866,7 @@ EOF
 )
 }
 
-# G25b — set_starter_class. **UI DISABLED** — backend plumbed for SQL-level
+# G25b, set_starter_class. **UI DISABLED**, backend plumbed for SQL-level
 # recovery only. Actor 31 observed full-wipe on next login (TotalXPEarned + SP
 # + Keystone -> 0) after a Set Starter -> Trooper click. Until empirical alt
 # validation rules out the wipe, this builder MUST NOT be invoked from the
@@ -1788,7 +1908,7 @@ build_set_starter_class_grant() {
 
   # Carry a via_disabled_ui flag from the inbound detail (the admin-backend
   # route stamps it when invoking through the disabled-UI back door). We do
-  # not gate the builder on it — that gate is the admin-backend's job — but
+  # not gate the builder on it, that gate is the admin-backend's job, but
   # we preserve it on the audit row so the disabled-UI invocations are
   # grep-able after the fact.
   local via_disabled_ui
@@ -1875,7 +1995,7 @@ EOF
 )
 }
 
-# g7b — align_faction (standalone). Pushes alignment ONLY (change_player_faction
+# g7b, align_faction (standalone). Pushes alignment ONLY (change_player_faction
 # + the 8 alignment tags via update_player_tags). No rep bump, no tier tags.
 # Tabular-online-safe. Use case: repair character where rep is at rank N but
 # the alignment tags were missed (legacy G7 grants from before the P3a G7
@@ -1938,23 +2058,23 @@ EOF
 )
 }
 
-# WP-C — journey/story full-unlock tag repair. Repairs the panel full-unlock
+# WP-C, journey/story full-unlock tag repair. Repairs the panel full-unlock
 # tag gap (a panel-unlocked alt has ~68 journey tags vs a natural completer's
 # 433). Writes the curated journey/story/contract tag set via the SAME proven
 # online-safe tabular path align_faction uses: dune.update_player_tags(
-# account_id, add[], remove[]). NO offline gate — update_player_tags is tabular
+# account_id, add[], remove[]). NO offline gate, update_player_tags is tabular
 # (not RAM-fragile).
 #
 # Tag buckets live in the tags-data.json sidecar under journey_full_unlock_tags:
-#   .core              — ~333 faction-neutral tags, ALWAYS written
-#   .faction.atreides  — ~66 Atreides-path tags, only when target=Atreides AND
+#   .core             , ~333 faction-neutral tags, ALWAYS written
+#   .faction.atreides , ~66 Atreides-path tags, only when target=Atreides AND
 #                        include_faction_story=true
-#   .faction.harkonnen — [] (snapshot not yet captured — Harkonnen+faction-story
+#   .faction.harkonnen, [] (snapshot not yet captured, Harkonnen+faction-story
 #                        is rejected, never substituted)
-#   .exploration_poi   — ~25 map-discovery tags, only when include_exploration_poi=true
+#   .exploration_poi  , ~25 map-discovery tags, only when include_exploration_poi=true
 #
 # Faction is resolved from the LIVE target (dune.player_faction.faction_id;
-# 1=Atreides 2=Harkonnen). This is the authoritative faction-gate — the UI note
+# 1=Atreides 2=Harkonnen). This is the authoritative faction-gate, the UI note
 # is advisory; this builder NEVER writes Atreides tags to a non-Atreides char.
 #
 # Idempotent: gated on _grant_gate.is_new so a replay never calls the proc, and
@@ -1979,7 +2099,7 @@ build_journey_full_unlock_grant() {
   [[ -n "$tags_json" && "$tags_json" != "null" ]] \
     || fail_json "journey_full_unlock_tags.core is empty or missing" 3
 
-  # Faction-story bucket — resolved against the LIVE target faction.
+  # Faction-story bucket, resolved against the LIVE target faction.
   local faction_label="none"
   if [[ "$include_faction_story" == "true" ]]; then
     local target_faction_id
@@ -1999,7 +2119,7 @@ build_journey_full_unlock_grant() {
           "$TAGS_DATA_JSON")
         ;;
       2)
-        fail_json "Harkonnen story set not yet captured — include_faction_story unavailable for Harkonnen targets" 2
+        fail_json "Harkonnen story set not yet captured, include_faction_story unavailable for Harkonnen targets" 2
         ;;
       *)
         fail_json "faction story unlock is only available for Atreides characters (target faction_id: ${target_faction_id:-unaligned})" 2
@@ -2039,7 +2159,7 @@ EOF
 )
 }
 
-# WP-C2 — journey NODE completion pass. journey_full_unlock repairs the TAG
+# WP-C2, journey NODE completion pass. journey_full_unlock repairs the TAG
 # side; this repairs the journey_story_node side so the in-game journey/mission
 # UI shows the arcs complete. Calls Funcom's own
 # dune.complete_journey_story_nodes_for_player(fls_id, node_ids[]) which
@@ -2049,14 +2169,14 @@ EOF
 #
 # Node buckets live in tags-data.json under journey_node_completion_nodes,
 # snapshotted from a naturally-completed character (1278 completed nodes):
-#   .core              — 1150 nodes: DA_MQ_* / DA_SQ_* / DA_Dunipedia_* /
+#   .core             , 1150 nodes: DA_MQ_* / DA_SQ_* / DA_Dunipedia_* /
 #                        DA_DLC_LostHarvest / NPE. Default-written.
-#   .faction.atreides  — 65 DA_FQ_ClimbTheRanks.* nodes (the completer's
+#   .faction.atreides , 65 DA_FQ_ClimbTheRanks.* nodes (the completer's
 #                        Atreides path), only when target=Atreides AND
 #                        include_faction_story=true
-#   .faction.harkonnen — [] (not yet captured; rejected, never substituted)
-# EXCLUDED from the snapshot entirely: DA_ACH_SteamAchievements.* (62 — never
-# fake achievement progress) + DA_LDR_* (1 — term-bound Landsraad task node).
+#   .faction.harkonnen, [] (not yet captured; rejected, never substituted)
+# EXCLUDED from the snapshot entirely: DA_ACH_SteamAchievements.* (62, never
+# fake achievement progress) + DA_LDR_* (1, term-bound Landsraad task node).
 #
 # Per-arc opt-in: include_main_quest (DA_MQ_*), include_side_quests (DA_SQ_*),
 # include_dunipedia (DA_Dunipedia_*), include_dlc_lostharvest (DA_DLC_LostHarvest)
@@ -2085,7 +2205,7 @@ build_journey_node_completion_grant() {
     "$TAGS_DATA_JSON" >/dev/null 2>&1 \
     || fail_json "tags-data.json missing journey_node_completion_nodes bucket (game-box stage not yet deployed)" 3
 
-  # FLS id — the Funcom proc takes the text FLS id, not account_id.
+  # FLS id, the Funcom proc takes the text FLS id, not account_id.
   local fls_id
   fls_id=$(psql_scalar \
     "SELECT \"user\" FROM dune.encrypted_accounts WHERE id = :account_id;" \
@@ -2134,7 +2254,7 @@ build_journey_node_completion_grant() {
           "$TAGS_DATA_JSON")
         ;;
       2)
-        fail_json "Harkonnen story set not yet captured — include_faction_story unavailable for Harkonnen targets" 2
+        fail_json "Harkonnen story set not yet captured, include_faction_story unavailable for Harkonnen targets" 2
         ;;
       *)
         fail_json "faction story unlock is only available for Atreides characters (target faction_id: ${target_faction_id:-unaligned})" 2
@@ -2171,11 +2291,11 @@ EOF
 )
 }
 
-# 2026-06-12 — spice_addiction_enable. Advances the GAS spice-addiction state
+# 2026-06-12, spice_addiction_enable. Advances the GAS spice-addiction state
 # machine to its post-Trial-4 steady state so the 3rd active-ability slot
 # unlocks. This is the C++ quest-script side effect that completing the 4th
 # Trial of Aql normally fires but the serialized journey/tag/item data does NOT
-# carry — so a DB-side journey/tag grant (journey_full_unlock /
+# carry, so a DB-side journey/tag grant (journey_full_unlock /
 # journey_node_completion) leaves the addiction system stuck at AddictionDisabled
 # and the slot locked. Diagnosed on a character whose third ability slot never
 # unlocked despite the journey showing complete.
@@ -2183,7 +2303,7 @@ EOF
 # Two surgical jsonb writes on the pawn's DuneCharacter FGL entity (same resolve
 # path as build_grant_skill_block_grant / build_keystone_grant):
 #   1. FSpiceAddictionComponent.SystemStatus -> "FullyEnabled". The sibling
-#      SpiceVisionEnabledStatus subfield is LEFT UNTOUCHED — it is already
+#      SpiceVisionEnabledStatus subfield is LEFT UNTOUCHED, it is already
 #      FullyEnabled on stuck characters (the red herring that fooled the prior
 #      verification; icehunter's spiceVisionEnableSQL sets only that subfield and
 #      is a no-op for this bug).
@@ -2196,13 +2316,13 @@ EOF
 # grant_skill_block's COALESCE(...) guard). Offline-required (RAM-fragile FGL
 # write, same class as char_xp/keystone). Snapshots the pre-write component
 # values into the audit detail for byte-exact rollback. No operator detail
-# fields — the target player is the only input.
+# fields, the target player is the only input.
 #
 # NOTE (journey chaining): granting Trials-of-Aql / 4th-trial completion via
 # journey_full_unlock or journey_node_completion ALONE reproduces this exact bug
 # (journey/tag advances, GAS state machine does not). Chain spice_addiction_enable
 # after any 4th-trial completion grant to close the gap. Auto-wiring is FLAGGED
-# (not done) — see the catalog entry's help text and dune_grant.py.
+# (not done), see the catalog entry's help text and dune_grant.py.
 SPICE_ADDICTION_PERSISTENCE_DATA='[{"Class":"/Game/Dune/Systems/SpiceAddiction/Effects/GE_SpiceAddiction_SpiceAbsorption.GE_SpiceAddiction_SpiceAbsorption_C","Level":1.0,"StackCount":1,"DurationRemaining":-1.0},{"Class":"/Game/Dune/Systems/SpiceAddiction/Effects/GE_SpiceAddiction_SpiceDecayRateModifier.GE_SpiceAddiction_SpiceDecayRateModifier_C","Level":1.0,"StackCount":1,"DurationRemaining":-1.0},{"Class":"/Game/Dune/Systems/SpiceAddiction/Effects/GE_SpiceAddiction_ToleranceDecay.GE_SpiceAddiction_ToleranceDecay_C","Level":1.0,"StackCount":1,"DurationRemaining":-1.0}]'
 
 build_spice_addiction_enable_grant() {
@@ -2216,7 +2336,7 @@ build_spice_addiction_enable_grant() {
 
   # Snapshot the current FSpiceAddictionComponent + FGEPersistenceComponent for
   # the audit row (rollback artifact). Resolve via the DuneCharacter entity, the
-  # same path the write uses. If the entity is missing the snapshot is null —
+  # same path the write uses. If the entity is missing the snapshot is null -
   # the write CTE then matches no rows and the grant is a harmless no-op.
   local snapshot
   snapshot=$(psql_scalar "$(cat <<'SQL'
@@ -2307,12 +2427,12 @@ EOF
 )
 }
 
-# G8 — specialization-track XP / level. Tabular upsert on
+# G8, specialization-track XP / level. Tabular upsert on
 # dune.specialization_tracks keyed (player_id, track_type). add (default) or
-# set. player_id is the pawn actor id. Online-safe.
-# G8 v2 — specialization track XP / level. Routes through Funcom proc
+# set. player_id is the pawn actor id. Offline-gated (requires_offline).
+# G8 v2, specialization track XP / level. Routes through Funcom proc
 # dune.set_specialization_xp_and_level(player_id, track, xp, level) so we
-# inherit any Funcom-side hooks. Proc has SET semantics — for ADD mode we
+# inherit any Funcom-side hooks. Proc has SET semantics, for ADD mode we
 # resolve current + delta + clamp inside the SQL.
 #
 # Caps from icehunter parity Action #2: xp <= 44182 per track, level <= 100.
@@ -2320,12 +2440,42 @@ EOF
 # Actor fix: writes to player_controller_id (not pawn). Empirically the in-game
 # spec data exists at the controller (verified 2026-05-23 on a reference character's
 # Exploration track at actor 17 controller, not actor 19 pawn). Old G8 wrote
-# to pawn — same bug class as old G7 faction_rep.
+# to pawn, same bug class as old G7 faction_rep.
 #
-# search_path: Funcom's proc body uses unqualified `specialization_tracks` —
+# search_path: Funcom's proc body uses unqualified `specialization_tracks` -
 # SET LOCAL flips search_path for this transaction only (same workaround as G7).
+#
+# Level hygiene: the proc stores `level` verbatim, so moving xp without moving
+# level leaves the track at a stale level. When the caller gives no level
+# (absent or 0) and xp > 0, the level is derived from the new xp on the live
+# curve below, in both modes. An explicit level is still written as given
+# (set) or added as a delta (add).
+#
+# Live xp->level curve for specialization tracks: the same 46 points as
+# ops/spec-xp-boost/spec-xp-boost.py and scripts/dune-reward-op.sh
+# (scripts/tests/test_spec_xp_level.py pins all three equal). @XP@ is replaced
+# with the SQL expression for the clamped new xp.
+SPEC_LEVEL_FROM_XP_SQL='COALESCE((
+  WITH curve(x, l) AS (VALUES
+    (0,0),(100,1),(125,1.2380953),(225,2.1818182),(250,2.409091),(350,3.3017242),
+    (375,3.5172415),(625,5.5625),(750,6.5111113),(875,7.415493),(1000,8.281879),
+    (1250,9.910828),(1350,10.52439),(1375,10.676829),(1600,12.005618),(1875,13.526882),
+    (1975,14.061855),(2000,14.1907215),(2250,15.460396),(2375,16.075829),(2500,16.668247),
+    (2750,17.818182),(3375,20.475609),(3500,20.98374),(3625,21.47826),(3750,21.972332),
+    (4750,25.665493),(5125,26.958904),(6250,30.56135),(6875,32.432747),(7125,33.16),
+    (7500,34.226257),(8625,37.278645),(9000,38.249363),(10750,42.528168),(11000,43.112904),
+    (12100,45.606667),(12350,46.159042),(14750,51.17729),(15225,52.121567),(17375,56.22836),
+    (18375,58.051693),(21750,63.90339),(26625,71.863785),(42750,97.70513),(44182,100)
+  )
+  SELECT (c.l0 + ((@XP@) - c.x0)::double precision / (c.x1 - c.x0) * (c.l1 - c.l0))::real
+    FROM (SELECT lag(x) OVER (ORDER BY x) AS x0, lag(l) OVER (ORDER BY x) AS l0,
+                 x AS x1, l AS l1
+            FROM curve) c
+   WHERE c.x0 IS NOT NULL AND (@XP@) > c.x0 AND (@XP@) <= c.x1
+), 0)::real'
+
 build_spec_xp_grant() {
-  local track_type xp level mode
+  local track_type xp level mode derive level_sql
   track_type=$(jq_get_nested detail track_type)
   xp=$(jq_get_nested detail xp);        [[ -n "$xp" ]] || xp="0"
   level=$(jq_get_nested detail level);  [[ -n "$level" ]] || level="0"
@@ -2334,13 +2484,20 @@ build_spec_xp_grant() {
   validate_int_in_range "$xp" 0 "$CAP_SPEC_XP" "xp"
   validate_int_in_range "$level" 0 "$CAP_SPEC_LEVEL" "level"
   validate_mode_addset "$mode"
+  derive=false
+  if (( level == 0 && xp > 0 )); then derive=true; fi
 
   DETAIL_JSON=$(jq -nc --arg t "$track_type" --argjson x "$xp" \
-    --argjson l "$level" --arg m "$mode" \
-    '{track_type:$t,xp:$x,level:$l,mode:$m}')
+    --argjson l "$level" --arg m "$mode" --argjson d "$derive" \
+    '{track_type:$t,xp:$x,level:$l,mode:$m,level_from_curve:$d}')
   PSQL_VARS+=( -v "track_type=${track_type}" -v "xp=${xp}" -v "level=${level}" )
 
   if [[ "$mode" == "set" ]]; then
+    if [[ "$derive" == "true" ]]; then
+      level_sql=${SPEC_LEVEL_FROM_XP_SQL//@XP@/"LEAST(GREATEST((:xp)::int, 0), 44182)"}
+    else
+      level_sql='LEAST(GREATEST((:level)::real, 0::real), 100.0)::real'
+    fi
     GRANT_BODY=$(cat <<'EOF'
 -- G8 v2 (set): pass clamped inputs straight to the proc.
 -- The controller subquery is SCALAR, so it MUST return exactly one row. An
@@ -2361,12 +2518,17 @@ SELECT dune.set_specialization_xp_and_level(
          t.ctrl_id::bigint,
          (:'track_type')::dune.specializationtracktype,
          LEAST(GREATEST((:xp)::int, 0), 44182)::integer,
-         LEAST(GREATEST((:level)::real, 0::real), 100.0)::real)
+         @LEVEL@)
   FROM target t
  WHERE EXISTS (SELECT 1 FROM _grant_gate WHERE is_new);
 EOF
 )
   else
+    if [[ "$derive" == "true" ]]; then
+      level_sql=${SPEC_LEVEL_FROM_XP_SQL//@XP@/"(SELECT new_xp FROM new_vals)"}
+    else
+      level_sql='(SELECT new_level FROM new_vals)'
+    fi
     GRANT_BODY=$(cat <<'EOF'
 -- G8 v2 (add): resolve current from spec_tracks, add delta, clamp, pass to proc.
 SET LOCAL search_path TO dune, public;
@@ -2397,18 +2559,19 @@ SELECT dune.set_specialization_xp_and_level(
          (SELECT ctrl_id FROM ctx),
          (:'track_type')::dune.specializationtracktype,
          (SELECT new_xp FROM new_vals),
-         (SELECT new_level FROM new_vals))
+         @LEVEL@)
  WHERE EXISTS (SELECT 1 FROM _grant_gate WHERE is_new);
 EOF
 )
   fi
+  GRANT_BODY=${GRANT_BODY//@LEVEL@/"$level_sql"}
 }
 
-# G9 — specialization keystone. Two writes:
+# G9, specialization keystone. Two writes:
 #   1. INSERT into dune.purchased_specialization_keystones (player_id, keystone_id).
 #   2. If the keystone has sp_bonus > 0 (catalog lookup), delta-credit
 #      TotalSkillPoints + UnspentSkillPoints in the FLevelComponent JSONB by
-#      the sp_bonus value. Delta-credit only — never recompute, never sum
+#      the sp_bonus value. Delta-credit only, never recompute, never sum
 #      ModuleData. Skips the SP write entirely when sp_bonus=0 (effect keystones).
 # Idempotency: the FLevelComponent UPDATE is gated on the keystone INSERT
 # actually inserting a new row (RETURNING from ON CONFLICT DO NOTHING returns
@@ -2428,7 +2591,7 @@ build_keystone_grant() {
   PSQL_VARS+=( -v "keystone_id=${keystone_id}" )
 
   # Single CTE statement: tabular INSERT + conditional FLevelComponent SP credit.
-  # Pattern mirrors G11 char_xp v2 — write only deltas, never recompute.
+  # Pattern mirrors G11 char_xp v2, write only deltas, never recompute.
   GRANT_BODY=$(cat <<'EOF'
 -- G9 write: tabular INSERT plus FLevelComponent SP delta-credit.
 -- purchased_specialization_keystones is keyed by CONTROLLER id (matches the game
@@ -2573,7 +2736,7 @@ build_spec_unlock_all_grant() {
   _emit_spec_unlock_body ""
 }
 
-# G10 v2 — inventory item delivered LIVE via dune.landsraad_house_rewards. The
+# G10 v2, inventory item delivered LIVE via dune.landsraad_house_rewards. The
 # row fires the landsraad_tasks_house_rewards_changed trigger -> pg_notify, which
 # drives the in-game "Claim Rewards" prompt. ONLINE-SAFE: DB-backed, no offline
 # gate. Operator selects a real active Landsraad house; the reward surfaces at
@@ -2622,7 +2785,7 @@ EOF
 )
 }
 
-# G11 v2 — character XP + delta-credited skill points. jsonb_set additive on
+# G11 v2, character XP + delta-credited skill points. jsonb_set additive on
 # FLevelComponent[1] in dune.fgl_entities (DuneCharacter slot of the pawn).
 #
 # v1 (2026-05-23 PM) wrote ONLY TotalXPEarned and relied on Funcom's load path
@@ -2631,12 +2794,12 @@ EOF
 # also NO SP credit (Funcom's pod doesn't auto-grant SP for externally-added
 # XP). HUD showed L27 but Skills UI still showed 24 unspent.
 #
-# v2 credits SP by delta from the observed pre-grant state — read current
+# v2 credits SP by delta from the observed pre-grant state, read current
 # TotalSkillPoints and UnspentSkillPoints, compute levels_gained =
 # ls_xp_to_level(new_xp) - ls_xp_to_level(pre_xp), increment both fields by
 # that delta in the SAME transaction as the XP write. CANNOT trigger
 # icehunter's wipe bug because we never sum ModuleData or guess starter
-# freebie counts — we increment from the player's actual current state.
+# freebie counts, we increment from the player's actual current state.
 #
 # Offline-gated (RAM clobbers DB writes while online). Capped at L200
 # cumulative XP (344,440). Idempotent via _grant_gate. ack flag REQUIRED on
@@ -2689,7 +2852,7 @@ build_char_xp_grant() {
 
   validate_int_in_range "$amount" 1 "$CAP_CHAR_XP" "amount"
 
-  # Ack flag is OPTIONAL — kept as a detail-JSON field for audit traceability
+  # Ack flag is OPTIONAL, kept as a detail-JSON field for audit traceability
   # but no longer gates the grant. Validated empirically 2026-05-23 (grant_id
   # 10 = v1 minimal-write, grant_id 11 = v2 with delta SP credit): Funcom's
   # load path trusts the JSONB blob written by v2 and does NOT clobber
@@ -2771,7 +2934,7 @@ UPDATE dune.fgl_entities fe
 -- actor properties. Computes intel_delta = intel_at(new_level) - intel_at(
 -- old_level) using dune.ls_intel_at_level. Delta-credit (NOT set) so any
 -- intel the player earned/spent through gameplay is preserved. icehunter's
--- cmdAwardCharXP SETs to the cumulative value — would overwrite spent intel.
+-- cmdAwardCharXP SETs to the cumulative value, would overwrite spent intel.
 -- Gated on _grant_gate.is_new (replay-safe).
 WITH player AS (
   SELECT a.id AS actor_id,
@@ -2805,7 +2968,7 @@ EOF
 )
 }
 
-# G12 — progression preset (icehunter parity Action #4). Unbricks players who
+# G12, progression preset (icehunter parity Action #4). Unbricks players who
 # got admin-bumped past the normal Journey unlock chain (e.g. admin granted
 # rank 17 Atreides but the in-game UI still says "advance through the faction
 # journey to unlock Specializations/Landsraad"). Calls Funcom's own procs:
@@ -2819,15 +2982,15 @@ EOF
 #      pattern) + dune.set_player_faction_reputation, to land rep at rank-19
 #      threshold so the in-game UI matches the tag state
 #
-# Presets are HARDCODED — never accept node lists or tag lists from the API
+# Presets are HARDCODED, never accept node lists or tag lists from the API
 # (privilege-escalation-via-payload prevention).
 #
 # Verified pattern: applied to a reference account 2026-05-23, surfaced as Landsraad
 # unlocked + Hunting Skorda revealed in-game. See.
 #
 # Faction.Name resolution via the hardcoded faction_id map (same as G7 v2).
-# FLS ID = dune.accounts."user" (quoted — reserved word).
-# Offline-gated — same RAM-fragility risk class as char_xp/faction_rep.
+# FLS ID = dune.accounts."user" (quoted, reserved word).
+# Offline-gated, same RAM-fragility risk class as char_xp/faction_rep.
 build_progression_preset_grant() {
   local faction preset faction_id faction_name dialogue_flag
 
@@ -2856,7 +3019,7 @@ build_progression_preset_grant() {
   PSQL_VARS+=( -v "faction_id=${faction_id}" -v "faction_name=${faction_name}"
                -v "dialogue_flag=${dialogue_flag}" -v "preset=${preset}" )
 
-  # ClimbTheRanks journey nodes — icehunter v0.5.5 expanded set.
+  # ClimbTheRanks journey nodes, icehunter v0.5.5 expanded set.
   #   - climbTheRanksNodes: 8 Rank5To20 onboarding nodes (faction-neutral baseline)
   #   - climbTheRanksStoryNodes: faction-neutral Ch2 storyline (HuntingSkorda,
   #     GatheringIntelligence, JoinAHouse, ClimbTheRanksR2)
@@ -2867,7 +3030,7 @@ build_progression_preset_grant() {
   #
   # Both ch3_start AND rank19_eligible get climbTheRanks + Story + faction-specific
   # arcs. rank19_eligible adds Landsraad on top. Matches icehunter v0.5.5 fix
-  # (ch3_start no longer truncates to just the 8 Rank5To20 nodes — characters
+  # (ch3_start no longer truncates to just the 8 Rank5To20 nodes, characters
   # were stuck at "Test of Loyalty" rank 1 because rep stayed at zero).
   local CLIMB_RANKS_NODES="
     'DA_FQ_ClimbTheRanks.Rank5To20.MeetSponsor',
@@ -2939,7 +3102,7 @@ build_progression_preset_grant() {
   # Assemble the node array based on preset + faction. ch3_start gets the climb
   # ranks set + story nodes + faction-specific arc. rank19_eligible adds the
   # Landsraad mission tree on top. landsraad_unlock_only is unchanged (just
-  # the 8 base nodes — the existing minimal Last Sietch variant).
+  # the 8 base nodes, the existing minimal Last Sietch variant).
   local STORY_NODES_FACTION
   case "$faction" in
     atreides)  STORY_NODES_FACTION="$CLIMB_RANKS_STORY_ATREIDES"  ;;
@@ -3012,13 +3175,13 @@ build_progression_preset_grant() {
     LANDSRAAD_TAG_SQL="'Journey.LandsraadContractsUnlocked'"
   fi
 
-  # Rep write — icehunter v0.5.5 sets rep to the preset's tier threshold for
+  # Rep write, icehunter v0.5.5 sets rep to the preset's tier threshold for
   # BOTH ch3_start (rank 5 = 2001) and rank19_eligible (rank 19 = 11975).
   # Last Sietch deviation: we use GREATEST(current_rep, target_rep) so the grant NEVER
   # downgrades a player who already has higher rep. This makes the grant safe
   # to re-apply to anyone (icehunter's version would downgrade a rank-17 player
   # who got a "ch3_start" retro). Threshold tags (Tier 0..N) are still set to
-  # match the preset's cap regardless of rep — that's the gate-unlock effect.
+  # match the preset's cap regardless of rep, that's the gate-unlock effect.
   local REP_WRITE_SQL=""
   local TARGET_REP=""
   case "$preset" in
@@ -3119,10 +3282,10 @@ EOF
 }
 
 # =============================================================================
-# v2-base ops actions (icehunter parity) — teleport, resets, repair
+# v2-base ops actions (icehunter parity), teleport, resets, repair
 # =============================================================================
 
-# G15 — Teleport. Move an offline player to a named location via
+# G15, Teleport. Move an offline player to a named location via
 # dune.admin_move_offline_player_to_partition. Offline-enforced server-side
 # AND client-side (requires_offline). The proc body uses UNQUALIFIED table
 # refs so SET LOCAL search_path is required.
@@ -3132,11 +3295,11 @@ EOF
 # icehunter); operator can override via detail.partition_id.
 #
 # Detail shape options:
-#   { "location_name": "CrashSite" }          — picks from TELEPORT_LOCATIONS
-#   { "location_name": "X", "partition_id": 1 } — override partition
-#   { "x": 1.0, "y": 2.0, "z": 3.0, "partition_id": 1 }  — custom coords mode
+#   { "location_name": "CrashSite" }         , picks from TELEPORT_LOCATIONS
+#   { "location_name": "X", "partition_id": 1 }, override partition
+#   { "x": 1.0, "y": 2.0, "z": 3.0, "partition_id": 1 } , custom coords mode
 
-# TELEPORT_LOCATIONS — 10 icehunter-shipped points. Add Last Sietch locations by
+# TELEPORT_LOCATIONS, 10 icehunter-shipped points. Add Last Sietch locations by
 # appending. Format: "name|x|y|z". All Hagga-Basin compatible (partition 1).
 TELEPORT_LOCATIONS=(
   "Windsack|974276.75|20084.312|5112.283"
@@ -3203,7 +3366,7 @@ build_teleport_grant() {
   if [[ -n "$partition_id" ]]; then
     PSQL_VARS+=( -v "tp_partition_id=${partition_id}" )
   else
-    # Sentinel — the SQL falls back to player-current-partition when this is 0.
+    # Sentinel, the SQL falls back to player-current-partition when this is 0.
     PSQL_VARS+=( -v "tp_partition_id=0" )
   fi
 
@@ -3256,7 +3419,7 @@ EOF
 )
 }
 
-# G16 — Reset Specializations. Detail = { track_type?: string }.
+# G16, Reset Specializations. Detail = { track_type?: string }.
 # No track_type or "all" → call BOTH reset procs (tracks + keystones).
 # With track_type → DELETE one track row (mirrors icehunter db.go:744-750).
 # Offline-gated (specialization tables are loaded into RAM on login).
@@ -3305,7 +3468,7 @@ EOF
   fi
 }
 
-# G17 — Reset Tutorials. Calls dune.delete_all_tutorial_entries(player_id).
+# G17, Reset Tutorials. Calls dune.delete_all_tutorial_entries(player_id).
 # Online-safe (tutorial table is read on-demand by the game, not cached
 # per-player in RAM).
 build_reset_tutorials_grant() {
@@ -3324,7 +3487,7 @@ EOF
 )
 }
 
-# G18 — Wipe Codex (Mnemonic Recall lessons). Calls
+# G18, Wipe Codex (Mnemonic Recall lessons). Calls
 # dune.delete_mnemonic_recall_lesson_all(account_id). Online-safe.
 # Note: takes account_id directly, not player_controller_id (icehunter
 # cmdWipeCodex db.go:1498-1513).
@@ -3339,14 +3502,14 @@ EOF
 )
 }
 
-# G19 — Repair All. Restores CurrentDurability = MaxDurability on every
+# G19, Repair All. Restores CurrentDurability = MaxDurability on every
 # repairable item in the player's MAIN backpack (inventory_type=0) and
 # HOTBAR (inventory_type=15). Offline-gated because those inventories are
 # RAM-fragile. The UPDATE only touches rows where MaxDurability > 0 (skips
 # stackable non-durability items like SolarisCoin).
 #
 # Inventory_type reference (verified empirically 2026-05-23 against real lastsietch-dune data):
-#   0  = MAIN BACKPACK (weapons, ammo, tools, blueprints — RAM-fragile)
+#   0  = MAIN BACKPACK (weapons, ammo, tools, blueprints, RAM-fragile)
 #   1  = Equipped armor/shield slot (RAM-fragile)
 #   14 = EMOTE slot (NOT durability-bearing; previous spec error)
 #   15 = HOTBAR (RAM-fragile)
@@ -3379,7 +3542,7 @@ EOF
 )
 }
 
-# G20 — Import Blueprint. Materializes a BuildingBlueprint_CopyDevice item in
+# G20, Import Blueprint. Materializes a BuildingBlueprint_CopyDevice item in
 # either the player's MAIN backpack (inventory_type=0, offline-gated) or their
 # CHOAM bank (inventory_type=30, online-safe). The item carries a PlayerBlueprintId
 # reference to a master row in dune.building_blueprints; instance/placeable/
@@ -3512,7 +3675,7 @@ build_import_blueprint_grant() {
 
   # Preflight: resolve target inventory by delivery mode; refuse if missing or
   # full. BOTH backpack and bank inventories are keyed on `player_pawn_id`
-  # (researcher correction 2026-05-23 — bank inventory is NOT controller-keyed).
+  # (researcher correction 2026-05-23, bank inventory is NOT controller-keyed).
   # Only the inventory_type differs (0 vs 30). Capacity = inv.max_item_count.
   GRANT_PREFLIGHT=$(cat <<'EOF'
 -- G20 preflight: resolve target inventory + capacity check.
@@ -3553,7 +3716,7 @@ EOF
   # Body: multi-statement transactional flow. CTEs in a single statement cannot
   # see each other's writes (PG MVCC snapshot rule), so we split into:
   #   1. Capture inv + create item + create blueprint master + store IDs in a
-  #      transaction-scoped TEMP TABLE (single SQL statement with CTE chain —
+  #      transaction-scoped TEMP TABLE (single SQL statement with CTE chain -
   #      the CTEs only forward data to a SELECT into the temp table, no
   #      cross-CTE table-state reads).
   #   2. UPDATE the item's stats (now visible) with the real PlayerBlueprintId.
@@ -3574,12 +3737,29 @@ WITH gate AS (SELECT is_new FROM _grant_gate),
 inv AS (
   -- Both backpack and bank inventories are pawn-keyed (researcher correction
   -- 2026-05-23). Only the inventory_type distinguishes them.
+  --
+  -- 🔴 PINNED TO THE CHOSEN CHARACTER, not just the account (fixed 2026-08-18).
+  -- encrypted_player_state is keyed per character SLOT, so an account with more
+  -- than one character yields one inventory row PER character. This CTE is
+  -- consumed as a scalar (`inventory_id = (SELECT inv_id FROM inv)`), so a
+  -- multi-character account produced:
+  --     ERROR: more than one row returned by a subquery used as an expression
+  -- and the whole grant aborted. Blueprint import was therefore broken for every
+  -- player with a second character and fine for everyone else, which is why it
+  -- looked intermittent for months rather than reproducible.
+  --
+  -- The caller has already resolved the exact character via RESOLVE_TARGET_SQL
+  -- and binds it as :controller_id, so pin on that. Deliberately NOT `LIMIT 1`:
+  -- with two real characters that picks one arbitrarily and would silently
+  -- deliver a player's blueprint into a character they were not importing to,
+  -- which is worse than the error it replaces.
   SELECT i.id AS inv_id
     FROM dune.encrypted_player_state eps
     JOIN dune.inventories i
       ON i.actor_id = eps.player_pawn_id
      AND i.inventory_type = CASE :'delivery' WHEN 'backpack' THEN 0 ELSE 30 END
    WHERE eps.account_id = :account_id
+     AND eps.player_controller_id = :controller_id
 ),
 nextpos AS (
   SELECT COALESCE(MAX(position_index), -1) + 1 AS p
@@ -3686,7 +3866,7 @@ EOF
 )
 }
 
-# G21a — bb_handoff. ONLINE-SAFE ownership transfer of an existing
+# G21a, bb_handoff. ONLINE-SAFE ownership transfer of an existing
 # dune.base_backups row to the recipient. The source backup row is mutated
 # (player_id is rewritten); the source admin no longer owns it after the
 # grant. Recipient also gets an empty BaseBackupTool delivered to their CHOAM
@@ -3695,8 +3875,8 @@ EOF
 #
 # Refuses if the recipient already has 3 or more base_backups rows (Funcom's
 # in-game tool max is 3 stored bases per player; pushing past that may break
-# the in-game slot UI). The slot cap is C++-enforced — the DB has zero
-# CHECK / trigger to back it up — so this preflight is our only line of
+# the in-game slot UI). The slot cap is C++-enforced, the DB has zero
+# CHECK / trigger to back it up, so this preflight is our only line of
 # defence.
 #
 # Required detail: recipient_account_id, source_backup_id.
@@ -3704,14 +3884,14 @@ EOF
 #
 # The recipient_account_id is the player's account_id (matches selectedPlayer
 # .account_id in the admin UI). We resolve it here to (controller_id, pawn_id)
-# via dune.encrypted_player_state — same pattern as char_xp/spec_xp/other
+# via dune.encrypted_player_state, same pattern as char_xp/spec_xp/other
 # grants. controller_id drives dune.base_backups.player_id; pawn_id drives
 # the CHOAM bank inventory lookup (inventory_type=30 is keyed on pawn actor_id).
 #
 # Authorization is upstream: the admin-backend's
 # /api/dune/bb/available-sources endpoint filters source backups before this
 # script ever sees a request, and the audit row captures the operator. The
-# UPDATE here therefore matches on source_backup_id alone — no source-admin
+# UPDATE here therefore matches on source_backup_id alone, no source-admin
 # guard CTE (a previous version checked `player_id = src_admin.ctrl` against
 # the top-level :account_id which is actually the RECIPIENT in our flow,
 # guaranteeing 0 rows). We still 1/0-ROLLBACK on 0 rows updated, which now
@@ -3740,13 +3920,13 @@ build_bb_handoff_grant() {
   fi
 
   # Resolve recipient account_id -> (controller_id, pawn_id) the same way every
-  # other grant does. Refuse loudly if either is missing — without a pawn the
+  # other grant does. Refuse loudly if either is missing, without a pawn the
   # bank inventory lookup cannot resolve, and without a controller the
   # base_backups ownership write would land on a garbage id.
   # RESOLVE_TARGET_SQL, not a bare account_id lookup: encrypted_player_state
   # has one row per character SLOT, and psql_scalar strips whitespace, so a
   # 2-slot recipient CONCATENATES both ids into a garbage number instead of
-  # failing — exactly the "land on a garbage id" outcome this block warns about.
+  # failing, exactly the "land on a garbage id" outcome this block warns about.
   recipient_controller_id=$(psql_scalar \
     "${RESOLVE_TARGET_SQL//@COL@/eps.player_controller_id}" \
     -v "account_id=${recipient_account_id}")
@@ -3818,7 +3998,7 @@ END $$;
 EOF
 )
 
-  # Write body — three logical operations, all gated on _grant_gate.is_new:
+  # Write body, three logical operations, all gated on _grant_gate.is_new:
   #   1. UPDATE dune.base_backups.player_id (with override_name option). The
   #      admin-backend pre-authorizes source_backup_id, so no admin-controller
   #      guard is needed; we only ROLLBACK if 0 rows updated (source vanished
@@ -3887,7 +4067,7 @@ EOF
 )
 }
 
-# G21b — bb_clone. ONLINE-SAFE deep-clone of a base subgraph anchored on a
+# G21b, bb_clone. ONLINE-SAFE deep-clone of a base subgraph anchored on a
 # source totem actor. The 16-step procedure (see
 # our internal design notes) duplicates every dune.actors row
 # in the source set, every linked dune.fgl_entities + actor_fgl_entities row,
@@ -3906,7 +4086,7 @@ EOF
 #
 # recipient_account_id is the player's account_id (matches the admin UI's
 # selectedPlayer.account_id). We resolve it here to (controller_id, pawn_id)
-# via dune.encrypted_player_state — controller_id drives base_backups.player_id
+# via dune.encrypted_player_state, controller_id drives base_backups.player_id
 # and the slot-cap check; pawn_id drives the CHOAM bank inventory lookup
 # (inventory_type=30 is keyed on pawn actor_id).
 #
@@ -3937,7 +4117,7 @@ build_bb_clone_grant() {
   # RESOLVE_TARGET_SQL, not a bare account_id lookup: encrypted_player_state
   # has one row per character SLOT, and psql_scalar strips whitespace, so a
   # 2-slot recipient CONCATENATES both ids into a garbage number instead of
-  # failing — exactly the "land on a garbage id" outcome this block warns about.
+  # failing, exactly the "land on a garbage id" outcome this block warns about.
   recipient_controller_id=$(psql_scalar \
     "${RESOLVE_TARGET_SQL//@COL@/eps.player_controller_id}" \
     -v "account_id=${recipient_account_id}")
@@ -4022,30 +4202,30 @@ EOF
   # Step-by-step:
   #   0. (preflight handled the source set existence + single-totem rule)
   #   1. Allocate ID maps:
-  #      - _g21_actor_map (old_actor_id -> new_actor_id) — one row per
+  #      - _g21_actor_map (old_actor_id -> new_actor_id), one row per
   #        source actor (linked via base_backup_linked_actors).
-  #      - _g21_entity_map (old_entity_id -> new_entity_id) — one row per
+  #      - _g21_entity_map (old_entity_id -> new_entity_id), one row per
   #        source actor_fgl_entities row.
   #   2. INSERT new dune.actors rows (copy class/transform/etc; properties is
   #      rewritten in step 2b).
   #   2b. Regex-rewrite !!act#<old>([^0-9]) -> !!act#<new>\1 across the cloned
   #       actors' properties JSONB. The [^0-9] anchor prevents !!act#66 from
   #       matching inside !!act#660.
-  #   3. INSERT new dune.fgl_entities rows (components JSONB AS-IS — per spec
+  #   3. INSERT new dune.fgl_entities rows (components JSONB AS-IS, per spec
   #      m_ConnectedCircuit is a per-base index, NOT an entity_id).
   #   4. INSERT new dune.actor_fgl_entities rows (slot_name preserved).
-  #   5. INSERT new dune.totems row (last_backup_timestamp NULL — clone is
+  #   5. INSERT new dune.totems row (last_backup_timestamp NULL, clone is
   #      cooldown-free at restore time).
   #   6. INSERT new dune.landclaim_segments rows.
   #   7. INSERT new dune.buildings rows.
   #   8. INSERT new dune.placeables rows (owner_entity_id translated).
   #   9. INSERT new dune.building_instances rows (owner_entity_id translated;
-  #      instance_id preserved — it's per-building unique).
+  #      instance_id preserved, it's per-building unique).
   #  10. INSERT new dune.inventories rows.
   #  11. INSERT new dune.actor_inventories rows.
   #  12. INSERT new dune.items rows.
   #  13. INSERT dune.actor_state rows ('BaseBackup' for every cloned actor).
-  #  14. (SKIP permission_actor — Funcom save already deletes those.)
+  #  14. (SKIP permission_actor, Funcom save already deletes those.)
   #  15. INSERT dune.base_backups + base_backup_linked_actors rows.
   #  16. Deliver empty BaseBackupTool to recipient's CHOAM bank + write all
   #      minted IDs onto the audit row for rollback.
@@ -4147,7 +4327,7 @@ BEGIN
         'g');
     END LOOP;
 
-    -- Pass 2: placeholder -> final !!act# form. This pass is unambiguous —
+    -- Pass 2: placeholder -> final !!act# form. This pass is unambiguous -
     -- placeholders carry the NEW id so a single regexp_replace per row
     -- collapses them, regardless of how many distinct new ids appear.
     v_new_props := regexp_replace(
@@ -4166,7 +4346,7 @@ BEGIN
   END LOOP;
 END $$;
 
--- Step 2b: post-pass invariant — no cloned actor's properties JSONB may
+-- Step 2b: post-pass invariant, no cloned actor's properties JSONB may
 -- still reference a source actor id (via !!act# or via the placeholder).
 -- If any survive, abort.
 DO $$
@@ -4190,7 +4370,7 @@ BEGIN
 END $$;
 
 -- Step 3: new fgl_entities. components JSONB copied AS-IS (m_ConnectedCircuit
--- is a per-base index, NOT an entity_id — verified pre-build per spec).
+-- is a per-base index, NOT an entity_id, verified pre-build per spec).
 INSERT INTO dune.fgl_entities (entity_id, components)
 SELECT m.new_entity_id, fe.components
   FROM dune.fgl_entities fe
@@ -4212,10 +4392,10 @@ SELECT am.new_actor_id, afe.slot_name, em.new_entity_id
 -- the original 2-column INSERT left landclaim_vertical_level,
 -- landclaim_original_global_location, landclaim_original_global_yaw_rotation
 -- as NULL. Game tolerates NULL there (those columns get rewritten on first
--- restore — empirically confirmed F4) but the schema's design intent is to
+-- restore, empirically confirmed F4) but the schema's design intent is to
 -- have them populated. Carry the source totem's values through, falling back
 -- to a Hagga-safe anchor when NULL. The landclaim_original_global_location
--- default uses the 0-indexed '[0:2]={x,y,z}'::real[] literal — Funcom C++
+-- default uses the 0-indexed '[0:2]={x,y,z}'::real[] literal, Funcom C++
 -- reads arr[0..2] so a 1-indexed ARRAY[...]::real[] would surface NULL at
 -- index 0 and silently corrupt world coords.
 INSERT INTO dune.totems (id, landclaim_vertical_level, last_backup_timestamp,
@@ -4265,7 +4445,7 @@ SELECT am.new_actor_id,
 -- G22 bundled bugfix (ITEM-G21-BUILD-SPEC §8 /):
 -- the original column list referenced `hologram` and `provides_stability` which
 -- do NOT exist on dune.building_instances (those names live on
--- dune.building_blueprint_instances, the G20 paste table — different schema).
+-- dune.building_blueprint_instances, the G20 paste table, different schema).
 -- Real columns per the live `\d dune.building_instances`: building_flags
 -- (integer), health (real NOT NULL), shelter (smallint NOT NULL),
 -- stabilization_begin_timespan/end_timespan/state (bigint/bigint/smallint),
@@ -4284,7 +4464,7 @@ SELECT am.new_actor_id, bi.instance_id, bi.building_type, bi.transform,
   JOIN _g21_actor_map am ON am.old_actor_id = bi.building_id
  WHERE EXISTS (SELECT 1 FROM _grant_gate WHERE is_new);
 
--- Step 9b: post-step-9 invariant — every cloned placeables.owner_entity_id
+-- Step 9b: post-step-9 invariant, every cloned placeables.owner_entity_id
 -- and building_instances.owner_entity_id must point at our minted entity
 -- set (no leakage to source entities).
 DO $$
@@ -4312,7 +4492,7 @@ END $$;
 
 -- Step 10: new inventories rows. Mint fresh IDs from the sequence; carry
 -- inventory_type / max_item_count / max_item_volume; null out variant FKs
--- (exchange_id, item_id, vehicle_module_id) — clones use the actor_id path.
+-- (exchange_id, item_id, vehicle_module_id), clones use the actor_id path.
 --
 -- We do the inserts row-by-row in a PL/pgSQL loop so we can record the exact
 -- (old_inventory_id -> new_inventory_id) pairing per source row. The earlier
@@ -4356,7 +4536,7 @@ BEGIN
 
   -- Assert every old_inv maps to exactly 1 new_inv. This should be tautological
   -- given the row-by-row loop, but a duplicate would indicate something is
-  -- inserting into _g21_inv_map outside this block — abort loudly.
+  -- inserting into _g21_inv_map outside this block, abort loudly.
   SELECT COUNT(*) INTO v_dupe FROM (
     SELECT old_inventory_id FROM _g21_inv_map
      GROUP BY old_inventory_id HAVING COUNT(*) > 1
@@ -4369,7 +4549,7 @@ END $$;
 -- Step 11: new actor_inventories rows. inventory_id translated;
 -- component_name_hash preserved AS-IS.
 --
--- actor_inventories is (inventory_id, component_name_hash) only — verified
+-- actor_inventories is (inventory_id, component_name_hash) only, verified
 -- against live schema 2026-05-24. The old 3-column form referenced a
 -- non-existent actor_id column (the `actor_id` lives upstream on
 -- dune.inventories.actor_id, not on this join table). The _g21_actor_map JOIN
@@ -4395,7 +4575,7 @@ SELECT im.new_inventory_id, it.stack_size, it.position_index, it.template_id,
  WHERE EXISTS (SELECT 1 FROM _grant_gate WHERE is_new);
 
 -- Step 13: actor_state ('BaseBackup') for every cloned actor. ON CONFLICT
--- DO NOTHING because actor_state.actor_id is the PK — defends against any
+-- DO NOTHING because actor_state.actor_id is the PK, defends against any
 -- duplicate id in _g21_actor_map (shouldn't happen, but cheap insurance).
 INSERT INTO dune.actor_state (actor_id, state)
 SELECT am.new_actor_id, 'BaseBackup'
@@ -4407,7 +4587,7 @@ ON CONFLICT (actor_id) DO NOTHING;
 -- these; recipient repopulates on first interaction with the new totem).
 
 -- Step 15: new base_backups row + linked_actors fanout. The
--- base_backup_linked_actors.id column is the FK back to base_backups.id —
+-- base_backup_linked_actors.id column is the FK back to base_backups.id -
 -- every row shares the same id value (the new backup id).
 CREATE TEMP TABLE IF NOT EXISTS _g21_backup_state
   (new_backup_id bigint) ON COMMIT DROP;
@@ -4434,7 +4614,7 @@ SELECT bs.new_backup_id, am.new_actor_id
   FROM _g21_backup_state bs, _g21_actor_map am
  WHERE EXISTS (SELECT 1 FROM _grant_gate WHERE is_new);
 
--- Step 15b: post-step-15 invariant — recipient's base_backups count must be
+-- Step 15b: post-step-15 invariant, recipient's base_backups count must be
 -- exactly the new backup row (we already gated <3 in preflight).
 DO $$
 DECLARE v_recipient bigint; v_slots int;
@@ -4446,7 +4626,7 @@ BEGIN
     JOIN _grant_gate g ON g.grant_id = gp.id;
   SELECT COUNT(*) INTO v_slots FROM dune.base_backups WHERE player_id = v_recipient;
   IF v_slots > 3 THEN
-    RAISE EXCEPTION 'BB_CLONE_FAIL: recipient now has % stored bases (>3 — preflight passed but body over-inserted?)', v_slots;
+    RAISE EXCEPTION 'BB_CLONE_FAIL: recipient now has % stored bases (>3, preflight passed but body over-inserted?)', v_slots;
   END IF;
 END $$;
 
@@ -4499,8 +4679,8 @@ EOF
 )
 }
 
-# G22 — import_solido_to_basebackup. ONLINE-SAFE synthesis of a placeable,
-# restorable base subgraph from Solido JSON alone — no source totem required
+# G22, import_solido_to_basebackup. ONLINE-SAFE synthesis of a placeable,
+# restorable base subgraph from Solido JSON alone, no source totem required
 # on the server side. Builds the actor + fgl_entity + totem + buildings +
 # placeables + building_instances + inventory subgraph from scratch using a
 # per-class default registry (dune.ls_solido_class_defaults), links it via
@@ -4518,7 +4698,7 @@ EOF
 #
 # Required detail: recipient_account_id, blueprint_data (Solido JSON object),
 #                  base_backup_name (the recipient-facing label).
-# Optional detail: source_blueprint_id (Solido UUID, audit only — admin-backend
+# Optional detail: source_blueprint_id (Solido UUID, audit only, admin-backend
 #                                       resolves the UUID before invocation).
 #
 # Constraints:
@@ -4527,7 +4707,7 @@ EOF
 #   - MTX placeables refused (full_class_path under /Game/DLC/ → caller
 #     filters before invocation; class-registry miss → REFUSE here too).
 #   - v1 SKIPS items population (empty containers).
-#   - v1 SKIPS landclaim_segments (per F6 — game synthesizes at restore time).
+#   - v1 SKIPS landclaim_segments (per F6, game synthesizes at restore time).
 #   - All Funcom proc invocations + table refs prefixed with
 #     SET LOCAL search_path TO dune, public per.
 build_import_solido_to_basebackup_grant() {
@@ -4586,7 +4766,7 @@ build_import_solido_to_basebackup_grant() {
   fi
 
   # Per-element validation: building_type charset, numeric coords. Same jq
-  # predicates as G20 import_blueprint — defends the dollar-quoted JSONB embed
+  # predicates as G20 import_blueprint, defends the dollar-quoted JSONB embed
   # below and surfaces malformed Solido payloads early.
   if ! printf '%s' "$blueprint_data" | jq -e '
         (.instances // []) | all(
@@ -4618,9 +4798,9 @@ build_import_solido_to_basebackup_grant() {
     | map(select(.building_type | startswith("MTX_"))) | length')
   [[ "$mtx_count" =~ ^[0-9]+$ ]] || mtx_count=0
 
-  # MTX placeables are refused in v1 (per spec §6) — the class registry has no
+  # MTX placeables are refused in v1 (per spec §6), the class registry has no
   # entry for /Game/DLC/* paths and we cannot synthesize default_components.
-  # MTX building_instances (instances list) ARE allowed — Funcom's
+  # MTX building_instances (instances list) ARE allowed, Funcom's
   # base_backup_finish_placing accepts them at restore-time with only a
   # cosmetic preview warning (empirically confirmed via G20 paste 2026-05-24).
   local mtx_placeables
@@ -4633,13 +4813,13 @@ build_import_solido_to_basebackup_grant() {
   fi
 
   # Resolve recipient account_id → (controller_id, pawn_id). Same pattern as
-  # bb_handoff / bb_clone — controller_id drives base_backups.player_id +
+  # bb_handoff / bb_clone, controller_id drives base_backups.player_id +
   # permission_actor_rank.player_id; pawn_id drives the CHOAM bank lookup
   # (inventory_type=30 is pawn-keyed per researcher correction 2026-05-23).
   # RESOLVE_TARGET_SQL, not a bare account_id lookup: encrypted_player_state
   # has one row per character SLOT, and psql_scalar strips whitespace, so a
   # 2-slot recipient CONCATENATES both ids into a garbage number instead of
-  # failing — exactly the "land on a garbage id" outcome this block warns about.
+  # failing, exactly the "land on a garbage id" outcome this block warns about.
   recipient_controller_id=$(psql_scalar \
     "${RESOLVE_TARGET_SQL//@COL@/eps.player_controller_id}" \
     -v "account_id=${recipient_account_id}")
@@ -4738,7 +4918,7 @@ CREATE TEMP TABLE IF NOT EXISTS _g22_stage_placeables (
 ) ON COMMIT DROP;
 -- N3: dropped staging .building_type column. dune.placeables.building_type
 -- is now sourced from dune.ls_solido_class_defaults.placeables_building_type
--- (captured empirically per class — see scripts/capture-placeable-defaults.sh).
+-- (captured empirically per class, see scripts/capture-placeable-defaults.sh).
 -- Derivation from class_short was wrong on at least Door + Choam_FloorLamp_2
 -- (captured: 'Choam_Shelter_Door_Placeable', 'Choam_LightFloor_Placeable').
 TRUNCATE _g22_stage_placeables;
@@ -4809,7 +4989,7 @@ END \$\$;
 
 -- Step 2b: registry-readiness preflight (N2 + OQ2). Refuse the whole grant if
 -- ANY staged class has an incomplete registry row. Catches the failure modes
--- the OQ1 empirical-capture work was designed to prevent — silently shipping
+-- the OQ1 empirical-capture work was designed to prevent, silently shipping
 -- a base where a placeable has empty default_components (no render / no
 -- interact), an unknown placeables_building_type (wrong Funcom enum), or an
 -- explicitly disabled class (is_active=false, e.g. uncaptured v1.1 backlog).
@@ -4930,7 +5110,7 @@ END \$\$;
 -- Step 6: new dune.actors rows. Transform is a composite of (location vector,
 -- rotation quaternion). For the synthetic anchor and the building shell we use
 -- identity rotation (0,0,0,1). Placeables get their relative offset added to
--- the anchor; rotation is left identity in v1 — the game rewrites all
+-- the anchor; rotation is left identity in v1, the game rewrites all
 -- transforms on first restore (F4) so absolute coords here are throwaway.
 --
 -- m_SelfUniqueID = '!!act#<new_id>' is the Funcom saved-state invariant
@@ -5092,11 +5272,11 @@ SELECT am.new_actor_id, NULL
 -- 'Actor'-slot entity (F2 model). health falls back to the class registry's
 -- default_health, then to a generic 100.0 if neither is set.
 -- N3 (D1 fix): building_type sourced from the registry's empirical
--- placeables_building_type column, NOT derived from class_short — Door,
+-- placeables_building_type column, NOT derived from class_short, Door,
 -- Choam_FloorLamp_2 and others have building_type values that don't follow
 -- the simple class-short + _Placeable suffix pattern. The preflight check
 -- ensures every staged class has a non-NULL placeables_building_type before
--- we reach here. (NB: no backticks in this comment — the heredoc is unquoted
+-- we reach here. (NB: no backticks in this comment, the heredoc is unquoted
 -- so backticks would trigger bash command substitution.)
 INSERT INTO dune.placeables
   (id, owner_entity_id, health, building_type, has_hit_ground,
@@ -5165,11 +5345,11 @@ BEGIN
     INSERT INTO _g22_inv_map (synth_local_id, new_inventory_id)
     VALUES (v_row.synth_local_id, v_new_inv);
 
-    -- actor_inventories is (inventory_id, component_name_hash) only — verified
+    -- actor_inventories is (inventory_id, component_name_hash) only, verified
     -- against live schema 2026-05-24. component_name_hash MUST be non-null or
     -- the in-game container UI silently fails to render.
     IF v_row.component_name_hash IS NULL THEN
-      RAISE EXCEPTION 'G22_FAIL: class % has has_container_inventory=true but component_name_hash is NULL — capture from a live placement before granting',
+      RAISE EXCEPTION 'G22_FAIL: class % has has_container_inventory=true but component_name_hash is NULL, capture from a live placement before granting',
                       (SELECT class_short FROM _g22_stage_placeables
                         WHERE solido_index + 2 = v_row.synth_local_id);
     END IF;
@@ -5191,7 +5371,7 @@ ON CONFLICT (actor_id) DO NOTHING;
 --   - Totem: permission_actor (actor_type=3, is_child=false) + 1 rank row
 --           (rank=1 = OWNER, player_id = recipient's controller actor).
 --   - Placeables: permission_actor only (actor_type=1, is_child=true).
---                 No rank rows — inherit from totem via is_child cascade.
+--                 No rank rows, inherit from totem via is_child cascade.
 --   - Building shells: NONE (empirically confirmed F2 table).
 INSERT INTO dune.permission_actor
   (actor_id, actor_name, actor_type, access_level, is_child)
@@ -5248,7 +5428,7 @@ SELECT bs.new_backup_id, am.new_actor_id
   FROM _g22_backup_state bs, _g22_actor_map am
  WHERE EXISTS (SELECT 1 FROM _grant_gate WHERE is_new);
 
--- Step 18b: post-step invariants — owner-entity leakage, rank-row count,
+-- Step 18b: post-step invariants, owner-entity leakage, rank-row count,
 -- minted entity_id range, slot cap. D3 adds 4 more pure-read assertions
 -- (actor_map size, base_backups +1 delta, actor_state count, permission_actor
 -- count) so dry-run + smoke test self-verify the mint shape.
@@ -5293,7 +5473,7 @@ BEGIN
     FROM dune.permission_actor_rank
    WHERE permission_actor_id IN (SELECT new_actor_id FROM _g22_actor_map);
   IF v_bad <> 1 THEN
-    RAISE EXCEPTION 'G22_FAIL: permission_actor_rank row count = % (expected 1 — totem owner)', v_bad;
+    RAISE EXCEPTION 'G22_FAIL: permission_actor_rank row count = % (expected 1, totem owner)', v_bad;
   END IF;
 
   -- D3-a: actor_map size must equal staged placeable count + 2 (totem + building shell).
@@ -5304,7 +5484,7 @@ BEGIN
                     v_bad, v_expected;
   END IF;
 
-  -- D3-b: strict +1 delta per spec §4 — recipient's post-step base_backups
+  -- D3-b: strict +1 delta per spec §4, recipient's post-step base_backups
   -- count == prev_count + 1. Catches both (a) silent drops in step 18a's CTE
   -- (prev+0==post) and (b) any rogue/duplicate INSERT outside the staged path
   -- (prev+2==post or more). prev_count stashed in _g22_pre_bb pre-INSERT.
@@ -5417,7 +5597,7 @@ EOF
 )
 }
 
-# G29 — Bank Items Batch. ONLINE-SAFE multi-item insert into the player's CHOAM
+# G29, Bank Items Batch. ONLINE-SAFE multi-item insert into the player's CHOAM
 # bank (inventory_type=30). One audit row per panel submission with the full
 # items array in detail JSONB; N item rows materialize in dune.items in a single
 # transaction. Online-safe per our internal notes
@@ -5466,14 +5646,14 @@ build_bank_items_batch_grant() {
   fi
 
   # Audit detail (carry the items array verbatim so a single grant_id documents
-  # the whole batch — operator-friendly + replay-safe).
+  # the whole batch, operator-friendly + replay-safe).
   DETAIL_JSON=$(jq -nc --argjson its "$items_json" --argjson bs "$batch_size" \
     '{items:$its, item_count:$bs, delivery:"bank"}')
 
   PSQL_VARS+=( -v "items=${items_json}" )
 
   # Preflight: resolve bank inventory + check capacity (used + batch_size <= cap).
-  # Bank is keyed on player_pawn_id (researcher correction 2026-05-23 — bank is
+  # Bank is keyed on player_pawn_id (researcher correction 2026-05-23, bank is
   # NOT controller-keyed). inventory_type=30 differentiates from backpack=0.
   GRANT_PREFLIGHT=$(cat <<'EOF'
 -- G29 preflight: resolve bank inventory + capacity check (sum batch_size).
@@ -5491,13 +5671,33 @@ BEGIN
     FROM dune.encrypted_player_state eps
     JOIN dune.inventories inv
       ON inv.actor_id = eps.player_pawn_id AND inv.inventory_type = 30
-   WHERE eps.account_id = g.account_id;
+   WHERE eps.account_id = g.account_id
+     AND eps.character_state IS DISTINCT FROM 'Deleted'
+   ORDER BY eps.player_controller_id DESC
+   LIMIT 1;
   IF v_inv IS NULL THEN
     RAISE EXCEPTION 'BANK_BATCH_FAIL: no bank inventory for account=% (player offline AND never logged in? bank is pawn-keyed)', g.account_id;
   END IF;
   IF v_used + v_batch > v_cap THEN
     RAISE EXCEPTION 'BANK_BATCH_FAIL: bank capacity exceeded (used % + batch % > cap %)',
                     v_used, v_batch, v_cap;
+  END IF;
+  -- 🔴 Fail CLOSED on any augment in the batch whose roll shape we cannot
+  -- measure. See the AUGMENT STATS note above the INSERT. Refusing the whole
+  -- batch is deliberate: a partial delivery that silently drops the augment is
+  -- harder for an operator to notice than an outright refusal.
+  -- psql does not substitute :vars inside a dollar-quoted DO body, so the
+  -- batch is read
+  -- back from the audit row's detail jsonb, exactly as v_batch is above.
+  IF EXISTS (SELECT 1
+               FROM dune.ls_progression_grants gp,
+                    jsonb_array_elements(gp.detail->'items') e
+              WHERE gp.id = g.grant_id
+                AND starts_with(e->>'template_id', 'T6_Augment_')
+                AND NOT EXISTS (SELECT 1 FROM dune.items d
+                                 WHERE d.template_id = e->>'template_id'
+                                   AND d.stats ? 'FAugmentItemStats')) THEN
+    RAISE EXCEPTION 'AUGMENT_SHAPE_UNKNOWN: the batch contains an augment with no standalone row to copy a roll shape from; it would mint an augment the swap picker cannot select';
   END IF;
 END $$;
 EOF
@@ -5509,6 +5709,15 @@ EOF
   GRANT_BODY=$(cat <<'EOF'
 -- G29 write: batched INSERT into bank (inventory_type=30) at successive positions.
 WITH bank AS (
+  -- 🔴 character_state + LIMIT 1 are LOAD-BEARING, do not remove either.
+  -- encrypted_player_state holds one row per character SLOT. Without the filter
+  -- this CTE returns a row per bank, and the INSERT below cross-joins it against
+  -- new_items, so every granted item is minted into EVERY bank the account has
+  -- ever had, including a deleted character's that the player cannot open.
+  -- Measured on live 2026-08-01: 21 accounts own a deleted character's type-30
+  -- inventory, and accounts 30308 and 31072 each held duplicate weekly reward
+  -- weapons (RocketLauncher_Unique_Homing_06, UniqueSda6, quality 3,
+  -- acquisition_time 0) in both their real and their unreachable bank.
   SELECT inv.id AS inv_id,
          COALESCE((SELECT MAX(position_index) FROM dune.items
                     WHERE inventory_id = inv.id), -1) AS max_pos
@@ -5516,6 +5725,9 @@ WITH bank AS (
     JOIN dune.inventories inv
       ON inv.actor_id = eps.player_pawn_id AND inv.inventory_type = 30
    WHERE eps.account_id = :account_id
+     AND eps.character_state IS DISTINCT FROM 'Deleted'
+   ORDER BY eps.player_controller_id DESC
+   LIMIT 1
 ),
 new_items AS (
   SELECT (ord - 1) AS rn,
@@ -5533,7 +5745,22 @@ SELECT
   ni.stack,
   bank.max_pos + ni.rn + 1,
   ni.template_id,
-  '{}'::jsonb,
+  -- 🔴 AUGMENT STATS -- see the note on the G1 write. A '{}' augment is INERT:
+  -- the swap picker selects on `stats ? 'FAugmentItemStats'` and cannot see it.
+  -- Shape is copied from a real row of the same template (roll COUNT is
+  -- per-template and a wrong one renders an empty slot in game); only StatRolls
+  -- is redrawn. Non-augment templates keep '{}' exactly as before.
+  COALESCE(
+    (SELECT jsonb_set(d.stats, '{FAugmentItemStats,1,StatRolls}',
+              (SELECT COALESCE(jsonb_agg(round(random()::numeric, 6)), '[]'::jsonb)
+                 FROM generate_series(1, jsonb_array_length(
+                        d.stats #> '{FAugmentItemStats,1,StatRolls}'))))
+       FROM dune.items d
+      WHERE d.template_id = ni.template_id
+        AND d.stats ? 'FAugmentItemStats'
+      ORDER BY d.id
+      LIMIT 1),
+    '{}'::jsonb),
   ni.quality,
   0,
   true
@@ -5555,7 +5782,7 @@ EOF
 #                   -> afe.actor_id = permission_actor_rank.permission_actor_id
 #                   (rank 1) -> par.player_id -> eps -> account; inv on p.id type 0
 # This is correct ownership (NOT proximity): it cleanly separates co-located
-# allies' containers (proven 2026-06-26 — inv 36193 resolves to Medic, not the operator,
+# allies' containers (proven 2026-06-26, inv 36193 resolves to Medic, not the operator,
 # even though their DD bases are ~6k units apart).
 #
 # container_ownership_guard_sql emits SQL binding :account_id + :target_inv that
@@ -5594,7 +5821,7 @@ SELECT 1 FROM owned WHERE inv_id = :target_inv LIMIT 1;
 SQL
 }
 
-# G30 (2026-06-26) — container_items_batch. Batched INSERT of an items array into
+# G30 (2026-06-26), container_items_batch. Batched INSERT of an items array into
 # a chosen vehicle/storage container's type-0 inventory (detail.target_inv),
 # guarded so the inventory must be one the target player owns (proximity). Mirror
 # of build_bank_items_batch_grant but with an explicit target inventory instead
@@ -5631,7 +5858,7 @@ build_container_items_batch_grant() {
   fi
 
   # OWNERSHIP GUARD (anti-footgun): target_inv must be a container inventory the
-  # account actually OWNS (permission_actor_rank rank=1 chain — same source as the
+  # account actually OWNS (permission_actor_rank rank=1 chain, same source as the
   # containers-list picker). Refuse a stranger's box or an unrelated inventory.
   local owned
   owned=$(printf '%s\n' "$(container_ownership_guard_sql)" \
@@ -5670,6 +5897,20 @@ BEGIN
     RAISE EXCEPTION 'CONTAINER_BATCH_FAIL: container slots exceeded (used % + batch % > cap %)',
                     v_used, v_batch, v_cap;
   END IF;
+  -- 🔴 Fail CLOSED on any augment in the batch whose roll shape we cannot
+  -- measure. See the AUGMENT STATS note above the INSERT. Batch is read from the
+  -- audit detail because psql does not substitute :vars inside a
+  -- dollar-quoted DO body.
+  IF EXISTS (SELECT 1
+               FROM dune.ls_progression_grants gp,
+                    jsonb_array_elements(gp.detail->'items') e
+              WHERE gp.id = g.grant_id
+                AND starts_with(e->>'template_id', 'T6_Augment_')
+                AND NOT EXISTS (SELECT 1 FROM dune.items d
+                                 WHERE d.template_id = e->>'template_id'
+                                   AND d.stats ? 'FAugmentItemStats')) THEN
+    RAISE EXCEPTION 'AUGMENT_SHAPE_UNKNOWN: the batch contains an augment with no standalone row to copy a roll shape from; it would mint an augment the swap picker cannot select';
+  END IF;
 END $$;
 EOF
 )
@@ -5696,7 +5937,21 @@ INSERT INTO dune.items
    quality_level, acquisition_time, is_new)
 SELECT
   tgt.inv_id, ni.stack, tgt.max_pos + ni.rn + 1, ni.template_id,
-  '{}'::jsonb, ni.quality, 0, true
+  -- 🔴 AUGMENT STATS -- see the note on the G1 write. A '{}' augment is INERT:
+  -- the swap picker selects on `stats ? 'FAugmentItemStats'` and cannot see it.
+  -- Shape copied from a real row of the same template; only StatRolls redrawn.
+  COALESCE(
+    (SELECT jsonb_set(d.stats, '{FAugmentItemStats,1,StatRolls}',
+              (SELECT COALESCE(jsonb_agg(round(random()::numeric, 6)), '[]'::jsonb)
+                 FROM generate_series(1, jsonb_array_length(
+                        d.stats #> '{FAugmentItemStats,1,StatRolls}'))))
+       FROM dune.items d
+      WHERE d.template_id = ni.template_id
+        AND d.stats ? 'FAugmentItemStats'
+      ORDER BY d.id
+      LIMIT 1),
+    '{}'::jsonb),
+  ni.quality, 0, true
 FROM tgt, new_items ni
 WHERE EXISTS (SELECT 1 FROM _grant_gate WHERE is_new);
 EOF

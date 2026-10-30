@@ -159,12 +159,28 @@ def _resolve_vehicle_sql(owner, inv_id):
 
 
 def _mod_ceil(alias):
-    """Per-INSTANCE factory ceiling for one module row: its own MaxDurability, floored
-    by its own Decayed/Current so a refurbish never lowers a value. Replaces the old
-    cross-vehicle per-template MAX that caused the 200% laundering bug."""
+    """Factory ceiling for one module row: the PAK BASE for its template (from
+    dune.ls_module_base_max, loaded via ops/repair-module-basemax/) lifted by the
+    row's own MaxDurability/Decayed/Current so a refurbish never lowers a value.
+
+    WHY THE PAK BASE ARM EXISTS (2026-08-27): 83% of live vehicle_modules rows
+    (4,626/5,597) carry NO MaxDurability at all, and the game's repair decay
+    (RepairDurabilityPercentageDecay) erodes DecayedMaxDurability below factory -
+    so the previous purely per-instance ceiling could never restore an eroded
+    part (first field report: an Assault orni wing stuck at 1884.7 vs factory
+    2000). The base is Funcom's own per-template constant (positional keys match
+    the DB exactly, all 8 live anchors validated), NOT an observed server max -
+    so the 200%-laundering bug this clamp originally fixed stays fixed: a
+    spec-crafted part above base keeps its own recorded values via GREATEST.
+    Missing table ROW -> COALESCE 0 -> per-instance behavior. A missing TABLE is
+    a loud SQL error by design (deploy order: load ops/repair-module-basemax/
+    load-basemax.sql BEFORE this writer)."""
     d = f"{alias}.{_MODDUR}"
+    base = (f"COALESCE((SELECT b.base_max FROM dune.ls_module_base_max b "
+            f"WHERE b.template_id = {alias}.template_id), 0)")
     return (
         "GREATEST("
+        f"{base}, "
         f"COALESCE(({d}->>'MaxDurability')::float8, 0), "
         f"COALESCE(({d}->>'DecayedMaxDurability')::float8, 0), "
         f"COALESCE(({d}->>'CurrentDurability')::float8, 0))"
@@ -172,8 +188,8 @@ def _mod_ceil(alias):
 
 
 def _mod_below(alias):
-    """A module has Current or Decayed below its own factory ceiling (MaxDurability is
-    the ceiling, so it is never below itself -> not checked). Only decayed rows lift."""
+    """A module has Current or Decayed below its factory ceiling (pak base or its own
+    recorded values, whichever is highest -- see _mod_ceil). Only such rows lift."""
     d = f"{alias}.{_MODDUR}"
     ceil = _mod_ceil(alias)
     return (
@@ -327,20 +343,18 @@ def resolve_db_pod():
 
 
 def run_psql(ns, pod, sql, timeout=30):
-    """The ONLY place a write DB connection is opened. Reads POSTGRES_PASSWORD from the
-    pod env then execs psql inside the already-running pod. SQL arrives on stdin."""
+    """The ONLY place a write DB connection is opened. Uses POSTGRES_PASSWORD inside the pod shell, which execs psql inside the already-running pod. SQL arrives on stdin."""
     try:
-        pw_out = subprocess.run(
+        auth_out = subprocess.run(
             ["sudo", "kubectl", "exec", "-n", ns, pod, "--",
-             "printenv", "POSTGRES_PASSWORD"],
+             "sh", "-c", 'test -n "${POSTGRES_PASSWORD:-}"'],
             capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
         fail("timeout reading POSTGRES_PASSWORD", 3)
-    pgpass = (pw_out.stdout or "").strip()
-    if not pgpass:
+    if auth_out.returncode != 0:
         fail("no_pgpass", 3)
     cmd = ["sudo", "kubectl", "exec", "-i", "-n", ns, pod, "--",
-           "env", f"PGPASSWORD={pgpass}", "psql",
+           "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_",
            "-h", "localhost", "-p", DB_PORT, "-U", DB_USER, "-d", DB_NAME,
            "-tA", "-v", "ON_ERROR_STOP=1"]
     try:

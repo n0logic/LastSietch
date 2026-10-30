@@ -65,9 +65,18 @@ import sys
 # Roll modes. 'perfect' is the prize path (every StatRolls value 1.0); 'random'
 # is the player-facing reroll, which must be able to come out worse or it is not
 # a reroll at all. Default stays 'perfect' so existing callers are unchanged.
+#
+# 'transplant' is the swap path: the rolls written into a slot are the REAL rolls
+# of the copy consumed to fill it, read and spliced inside the same transaction
+# that locks and deletes that copy. Under 'random' a swap redrew the incoming
+# augment's rolls, so a hand-picked roll was replaced by an average draw and a
+# player could spend a rare augment to make their weapon WORSE (live audit rows
+# 133/134: 0.263386 -> 0.252256). Transplant is what makes a swap carry what the
+# player earned.
 ROLL_MODE_PERFECT = "perfect"
 ROLL_MODE_RANDOM = "random"
-ROLL_MODES = (ROLL_MODE_PERFECT, ROLL_MODE_RANDOM)
+ROLL_MODE_TRANSPLANT = "transplant"
+ROLL_MODES = (ROLL_MODE_PERFECT, ROLL_MODE_RANDOM, ROLL_MODE_TRANSPLANT)
 
 # Go-live gate. Mirrors dune-reward-op.sh: an env var for ad-hoc operator runs,
 # PLUS a flag FILE, because the env var alone can never reach a player-initiated
@@ -115,6 +124,21 @@ DB_PORT = "15432"
 DB_USER = "postgres"
 DB_NAME = "dune"
 
+# 🔴 ORDER IS LOAD-BEARING, and matching is FIRST-SUBSTRING-WINS. parse_psql_error
+# walks this tuple in order and returns the first entry that appears anywhere in
+# psql's stderr, so an entry placed ahead of a token it is a substring of would
+# silently reroute that refusal to the wrong message. APPEND new tokens to the
+# end; do not insert mid-tuple.
+#
+# 🔴 The near-miss, named so nobody disarms it by accident: `augment_disabled` and
+# `augment_count_shrank` share an 8-character prefix with the augment_* tokens at
+# the end, and are safe ONLY because a substring match needs the whole token.
+# That is the exact shape of the bug this tuple already had -- `not_owner` looks
+# like it covers `augment_not_owned` and does not ("not_own" + "ed" is not
+# "not_own" + "er"), so nothing matched, parse_psql_error fell through to
+# write_failed, and a player whose augment was not pawn-side was told "The change
+# did not go through" instead of "You no longer own that augment." A careless
+# rename here turns that from a near-miss back into a live defect.
 ERROR_TOKENS = (
     "player_online",
     "item_not_found",
@@ -144,6 +168,27 @@ ERROR_TOKENS = (
     # REPLACES the whole block and silently deletes the omitted slots. This token
     # means the writer refused rather than destroying a slot. See build_augment_sql.
     "augment_count_shrank",
+    # The consume loop's own refusal: 'augment_not_owned (% G% not carried)'.
+    # 478 of 484 standalone augments on live are not pawn-side, so this is the
+    # most common refusal the writer emits, and until now it was the one nobody
+    # could read -- see the prefix note above.
+    "augment_not_owned",
+    # transplant-path refusals. All three are FAIL-CLOSED: nothing is written and
+    # nothing is consumed, because a RAISE rolls the whole DO block back.
+    #
+    # no_improvement -- a same-template, same-grade replacement where no copy the
+    # player carries rolls higher than the one already fitted at any position.
+    # This is the old portal-side 409 moved to where the rolls actually are.
+    # augment_arrays_desynced -- AppliedAugments / AppliedAugmentQualities /
+    # AppliedAugmentRollData disagree in length, or a transplant would write the
+    # wrong number of rolls into a slot. We refuse rather than find out whether
+    # the game tolerates it (unverified).
+    # augment_roll_data_missing -- the source copy carries no readable StatRolls.
+    # '[]'::jsonb and 'null'::jsonb are both NOT NULL, so an IS NULL guard passes
+    # both, and an empty StatRolls renders an EMPTY AUGMENT SLOT in game.
+    "no_improvement",
+    "augment_arrays_desynced",
+    "augment_roll_data_missing",
 )
 
 
@@ -237,17 +282,16 @@ def resolve_db_pod():
 
 def run_psql(ns, pod, sql, timeout=20):
     try:
-        pw_out = subprocess.run(
+        auth_out = subprocess.run(
             ["sudo", "kubectl", "exec", "-n", ns, pod, "--",
-             "printenv", "POSTGRES_PASSWORD"],
+             "sh", "-c", 'test -n "${POSTGRES_PASSWORD:-}"'],
             capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
         fail("timeout reading POSTGRES_PASSWORD", 3)
-    pgpass = (pw_out.stdout or "").strip()
-    if not pgpass:
+    if auth_out.returncode != 0:
         fail("no_pgpass", 3)
     cmd = ["sudo", "kubectl", "exec", "-i", "-n", ns, pod, "--",
-           "env", f"PGPASSWORD={pgpass}", "psql",
+           "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_",
            "-h", "localhost", "-p", DB_PORT, "-U", DB_USER, "-d", DB_NAME,
            "-tA", "-v", "ON_ERROR_STOP=1"]
     try:
@@ -571,11 +615,26 @@ def installed_augment_ids(item_stats):
         return []
 
 
-def newly_installed(augment_ids, item_stats):
+def newly_installed_slots(augment_ids, item_stats, swap_slot=None):
+    """SLOT INDICES this write installs into, and therefore must consume for.
+
+    🔴 An augment's identity is (name, GRADE), not name. A player replacing their
+    installed Damage1 G3 with a Damage1 G5 sends a list whose NAMES are unchanged,
+    so the name difference below sees nothing new: the writer would consume nothing
+    and print the player a free grade upgrade. `swap_slot` names the slot being
+    replaced and is ALWAYS treated as installed, whatever its name.
+
+    Indices rather than names because the caller has to pair each consumed item with
+    the GRADE being written into that slot -- see build_augment_sql's consume loop."""
+    have = set(installed_augment_ids(item_stats))
+    return [i for i, a in enumerate(augment_ids) if i == swap_slot or a not in have]
+
+
+def newly_installed(augment_ids, item_stats, swap_slot=None):
     """Requested ids that are not already installed, i.e. what must be consumed.
     Order-preserving; duplicates already removed by validate_augment_ids()."""
-    have = set(installed_augment_ids(item_stats))
-    return [a for a in augment_ids if a not in have]
+    return [augment_ids[i] for i in
+            newly_installed_slots(augment_ids, item_stats, swap_slot)]
 
 
 _IDEM_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -592,6 +651,27 @@ def validate_idem_key(val):
     if not _IDEM_RE.match(s):
         fail("bad_idempotency_key", 2)
     return s
+
+
+def validate_swap_slot(val, augment_ids):
+    """Index into `augments` of the slot a swap replaces, or None for "infer it".
+
+    Bounds-checked against the list it indexes and validated AFTER
+    validate_augment_ids(), which drops blanks and de-dupes and so can shift
+    positions. An out-of-range index would silently match no slot, consume
+    nothing and hand out a free upgrade -- the exact failure this parameter
+    exists to remove -- so it is a hard refusal, not a clamp."""
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        fail("bad_swap_slot", 2)
+    try:
+        i = int(val)
+    except (TypeError, ValueError):
+        fail("bad_swap_slot", 2)
+    if i < 0 or i >= len(augment_ids):
+        fail("bad_swap_slot", 2)
+    return i
 
 
 def validate_roll_mode(val):
@@ -695,6 +775,14 @@ def build_roll_payloads(augment_ids, grade, roll_shapes, roll_mode=ROLL_MODE_PER
                    makes a reroll an actual reroll: it can come out worse. Matches
                    the observed live distribution, where real rolls span the full
                    0.0-1.0 range (n=1053, min 0.0, max 1.0).
+      'transplant' -> the same fresh draw, but the value is a THROWAWAY PLACEHOLDER
+                   of the correct SHAPE. build_augment_sql overwrites every
+                   transplanted slot with the consumed copy's real rolls, under
+                   the lock that deletes it. The placeholder must still exist and
+                   still be the right length: the splice uses
+                   jsonb_set(..., create_missing => false), which no-ops rather
+                   than creating a slot, and the length is what the writer's own
+                   shape assert compares against.
 
     Roll COUNT varies per augment (live: Spitdart 7, Melee6 2, Rateoffire1 1), so
     the shape is always taken from a real standalone augment row where one exists
@@ -721,7 +809,7 @@ def build_roll_payloads(augment_ids, grade, roll_shapes, roll_mode=ROLL_MODE_PER
         if not isinstance(indices, list):
             indices = []
         n = max(1, n)
-        if roll_mode == ROLL_MODE_RANDOM:
+        if roll_mode in (ROLL_MODE_RANDOM, ROLL_MODE_TRANSPLANT):
             rolls = [round(rng.random(), 6) for _ in range(n)]
         else:
             rolls = [1.0] * n
@@ -821,14 +909,47 @@ def installed_grades(item_stats):
         return {}
 
 
-def resolve_grades(augment_ids, item_stats, default_grade, preserve):
+def installed_grades_by_slot(item_stats):
+    """Installed grades in SLOT ORDER, index-aligned with installed_augment_ids().
+
+    installed_grades() above keys by NAME, which is what the preserve-a-reroll
+    lookup wants but cannot answer "what grade is slot 1 carrying". The portal
+    needs exactly that to tell a same-name/different-grade swap (a real change)
+    apart from a no-op. None for a slot whose quality is missing or out of range,
+    so a caller can tell "grade unknown" from "grade 1"."""
+    try:
+        block = (item_stats or {}).get("FAugmentedItemStats")
+        applied = block[1].get("AppliedAugments") or []
+        quals = block[1].get("AppliedAugmentQualities") or []
+        out = []
+        for i, a in enumerate(applied):
+            if not (isinstance(a, dict) and a.get("Name")):
+                continue
+            g = quals[i] if i < len(quals) else None
+            out.append(g if (isinstance(g, int) and not isinstance(g, bool)
+                             and 1 <= g <= 5) else None)
+        return out
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return []
+
+
+def resolve_grades(augment_ids, item_stats, default_grade, preserve, swap_slot=None):
     """Per-slot grades for the write. With preserve=True (the reroll/swap path) an
     augment that is ALREADY installed keeps the grade it has; anything newly added
-    takes default_grade. With preserve=False every slot takes default_grade."""
+    takes default_grade. With preserve=False every slot takes default_grade.
+
+    🔴 `swap_slot` overrides the preserved grade for exactly the slot being replaced.
+    The lookup below is by NAME, so on a same-name swap it finds the OUTGOING
+    augment and hands back its grade -- silently discarding the grade the player
+    just spent a rare item on. The slot being replaced always takes default_grade,
+    which the portal has already proved the player owns."""
     if not preserve:
         return [default_grade for _ in augment_ids]
     have = installed_grades(item_stats)
-    return [have.get(a, default_grade) for a in augment_ids]
+    out = [have.get(a, default_grade) for a in augment_ids]
+    if swap_slot is not None and 0 <= swap_slot < len(out):
+        out[swap_slot] = default_grade
+    return out
 
 
 def sql_jsonb_literal(obj):
@@ -886,20 +1007,42 @@ def read_reroll_window(item_id):
 
 
 def build_augment_sql(owner, item_id, template_id, is_weapon, keystone_ids, faug_value,
-                      consume_ids=None, roll_mode=ROLL_MODE_PERFECT, reroll_only=None,
+                      consume_specs=None, roll_mode=ROLL_MODE_PERFECT, reroll_only=None,
                       augment_ids_for_audit=None, operator=None, idempotency_key=None):
     faug_obj = {"FAugmentedItemStats": faug_value}
     faug_lit = sql_jsonb_literal(faug_obj)
     tmpl_lit = "'" + str(template_id).replace("'", "''") + "'"
     keystones_arr = "ARRAY[" + ",".join(str(int(k)) for k in keystone_ids) + "]::bigint[]"
     weapon_flag = "true" if is_weapon else "false"
-    # Consume list: the augment ids being NEWLY installed (a pure reroll installs
-    # nothing new and so consumes nothing). Ids are charset-validated upstream.
-    consume_ids = list(consume_ids or [])
-    consume_arr = ("ARRAY[" + ",".join("'" + a.replace("'", "''") + "'" for a in consume_ids)
-                   + "]::text[]") if consume_ids else "ARRAY[]::text[]"
+    # Consume list: the augments being NEWLY installed, as (template, GRADE, SLOT)
+    # triples (a pure reroll installs nothing new and so consumes nothing). Ids are
+    # charset-validated upstream; grades are ints from resolve_grades(); SLOT is the
+    # destination index from newly_installed_slots(), the one thing SQL cannot
+    # derive for itself.
+    #
+    # 🔴 The GRADE is half the key, not decoration. Matching on template alone with
+    # `ORDER BY ci.id LIMIT 1` deletes whichever copy happens to be OLDEST, and six
+    # pawns on live carry the same augment at two grades right now (e.g. Damage1 at
+    # G4 and G5). A player spending their G5 could lose their G4 instead -- silently,
+    # permanently, and looking exactly like a successful swap. The grade paired here
+    # is the one being WRITTEN into the slot, so the item destroyed is always exactly
+    # the item installed.
+    #
+    # 🔴 No item id crosses any boundary, deliberately. One statement locks the
+    # candidate, reads its rolls, applies the improvement guard and feeds the
+    # DELETE, so "the row we judged is the row we locked is the row we deleted" is
+    # a property of the statement rather than an agreement between two selections.
+    transplant = (roll_mode == ROLL_MODE_TRANSPLANT)
+    consume_specs = [(str(a), int(g), int(s)) for a, g, s in (consume_specs or [])]
+    consume_arr = ("ARRAY[" + ",".join("'" + a.replace("'", "''") + "'"
+                                       for a, _, _ in consume_specs)
+                   + "]::text[]") if consume_specs else "ARRAY[]::text[]"
+    consume_grade_arr = ("ARRAY[" + ",".join(str(g) for _, g, _ in consume_specs)
+                         + "]::int[]") if consume_specs else "ARRAY[]::int[]"
+    consume_slot_arr = ("ARRAY[" + ",".join(str(s) for _, _, s in consume_specs)
+                        + "]::int[]") if consume_specs else "ARRAY[]::int[]"
     # op classification for the audit row: what the player actually did.
-    if consume_ids:
+    if consume_specs:
         op = "swap"
     elif reroll_only is not None or roll_mode == ROLL_MODE_RANDOM:
         op = "reroll"
@@ -907,8 +1050,18 @@ def build_augment_sql(owner, item_id, template_id, is_weapon, keystone_ids, faug
         op = "install"
     op_lit = "'" + op + "'"
     roll_mode_lit = "'" + str(roll_mode or "").replace("'", "''") + "'"
-    rerolled_lit = sql_jsonb_literal(sorted(reroll_only) if reroll_only is not None
-                                     else list(augment_ids_for_audit or []))
+    # Nothing was rerolled on a TRANSPLANT: the draw in build_roll_payloads was a
+    # throwaway placeholder and the splice below overwrote it with the consumed
+    # copy's real rolls, so it never reached the item. The portal sets
+    # reroll_only=[incoming] on every swap, so without this the audit row claims
+    # a reroll that did not happen -- on every swap. ls_augment_audit is the
+    # table this bug was PROVEN from, so it has to stay truthful about what
+    # actually happened or the next investigation is blind. Same reasoning as
+    # do_live's replay case; see the comment there, which names both.
+    rerolled_lit = sql_jsonb_literal(
+        [] if transplant else
+        (sorted(reroll_only) if reroll_only is not None
+         else list(augment_ids_for_audit or [])))
     operator_lit = ("'" + str(operator).replace("'", "''") + "'") if operator else "NULL"
     idem_lit = (("'" + str(idempotency_key).replace("'", "''") + "'")
                 if idempotency_key else "NULL")
@@ -948,7 +1101,7 @@ def build_augment_sql(owner, item_id, template_id, is_weapon, keystone_ids, faug
   IF v_recent >= {int(REROLL_CAP)} THEN
     RAISE EXCEPTION 'reroll_capped (% in the last {int(REROLL_WINDOW_HOURS)}h)', v_recent;
   END IF;
-""" if (idempotency_key and not consume_ids) else ""
+""" if (idempotency_key and not consume_specs) else ""
     # With a client key the audit INSERT is the idempotency claim, so it must be
     # able to ABORT the transaction. Without one it stays best-effort on a
     # missing table (the operator/prize paths must not fail on absent audit).
@@ -958,6 +1111,324 @@ def build_augment_sql(owner, item_id, template_id, is_weapon, keystone_ids, faug
         audit_open = "  BEGIN\n  "
         audit_close = ("\n  EXCEPTION WHEN undefined_table THEN\n"
                        "    NULL;\n  END;")
+
+    # ---------------------------------------------------------------------
+    # TRANSPLANT-ONLY SQL: FOUR emissions, ONE condition. The improvement
+    # conjunct in the WHERE, the preference in the ORDER BY, the per-slot
+    # accumulation, and the splice loop. Nothing else is gated, and these four
+    # are never gated separately.
+    #
+    # 🔴 That is the whole kill-switch. With the portal flag off it dispatches
+    # roll_mode='random', none of this is emitted, and a swap behaves exactly as
+    # it does today -- the revert is structural, not a label on an audit row.
+    # It is also this file's own standard (see replay_block above): dead SQL in a
+    # writer that edits player gear is the last place to leave something that
+    # looks live and is not. Do not "harmlessly" emit the accumulation without
+    # the splice; that leaves the loaded gun next to the trigger.
+    #
+    # 🔴 These are PLAIN strings, NOT f-strings, so their jsonb path literals
+    # carry SINGLE braces. A value substituted into an f-string is not formatted
+    # again. Anything written directly into the return's f-string below must
+    # double them ('{{FAugmentItemStats,1,StatRolls}}'). If you convert one of
+    # these to an f-string, double every brace in it or it will KeyError at
+    # build time -- or worse, render '{{' and fail only at SQL parse time.
+    # ---------------------------------------------------------------------
+
+    # (c) the slot being REPLACED, read out of v_before -- the pre-mutation
+    # snapshot taken under this item's OWN FOR UPDATE at step 2, so the
+    # comparison cannot be fooled by a stale read anywhere upstream.
+    #
+    # 🔴 v_slot indexes the OUTGOING augment list, so on a fresh install v_before
+    # has nothing at that index. That is NORMAL and must NOT raise: a new slot has
+    # no predecessor to improve on. Bounding v_slot against v_before here would
+    # reject every legitimate install, including the operator prize path that is
+    # live today. The upper bound belongs in the splice loop, against the block
+    # actually being written.
+    #   name absent, rolls absent  -> newly added slot, no guard, no RAISE
+    #   name present, rolls absent -> pre-existing array desync, RAISE
+    #   both present               -> normal replacement, evaluate the guard
+    #
+    # Not gated on transplant: only the four emissions listed above are. This
+    # block just reads and classifies, and its RAISE can only fire on an item
+    # that is already corrupt.
+    fitted_block = """    v_inst_name := v_before #>> ARRAY['FAugmentedItemStats','1','AppliedAugments', v_slot::text, 'Name'];
+    v_inst_grade := (v_before #>> ARRAY['FAugmentedItemStats','1','AppliedAugmentQualities', v_slot::text])::int;
+    v_inst_rolls := v_before #> ARRAY['FAugmentedItemStats','1','AppliedAugmentRollData', v_slot::text, 'StatRolls'];
+    -- Also rejects a fitted slot whose StatRolls is a SCALAR rather than an array.
+    -- That is not pedantry: past this point v_inst_rolls is passed to
+    -- jsonb_array_length and jsonb_array_elements_text, both of which ERROR on a
+    -- scalar, and the caller would see write_failed instead of a real token.
+    IF v_inst_name IS NOT NULL
+       AND (v_inst_rolls IS NULL OR jsonb_typeof(v_inst_rolls) <> 'array') THEN
+      RAISE EXCEPTION 'augment_arrays_desynced (fitted slot desync)';
+    END IF;
+    -- The guard applies ONLY to a same-template, same-grade replacement. Roll
+    -- order is the game's asset order and roll counts differ per template
+    -- (Spitdart 7, Melee6 2), so comparing across templates or grades compares
+    -- unrelated numbers.
+    v_same_upgrade := (v_inst_name IS NOT NULL
+                       AND v_inst_name = v_aug
+                       AND v_inst_grade IS NOT DISTINCT FROM v_cons_grade[v_ci]);
+"""
+
+    # (d) THE IMPROVEMENT GUARD, as a WHERE conjunct of the locking SELECT rather
+    # than a check after it. A post-check on an arbitrarily-chosen copy tells a
+    # player "nothing you own beats it" while they are carrying something that
+    # does; a filter cannot. It also means a non-improving copy is unselectable,
+    # so the same-grade path can never destroy the wrong one.
+    #
+    # 🔴 THE RULE IS ANY-BETTER: one position strictly better admits the copy.
+    # There is NO not-worse conjunct here and NONE MAY BE ADDED. Adding one
+    # silently converts the rule to DOMINANCE, which refuses 16% of all genuine
+    # improvements and 77-95% of them on 4+ roll augments -- measured on live --
+    # because 86 of 105 catalogued augments mix rolled and FLAT effects, and a
+    # flat effect still occupies a roll position the game ignores. A not-worse
+    # expression DOES appear in this statement, in the ORDER BY, where it is a
+    # PREFERENCE. Do not move it up here.
+    #
+    # 🔴 EPSILON. `::numeric` casts to exact decimal, so the comparison itself
+    # carries no drift; the epsilon absorbs noise in the STORED float32 value,
+    # which does not round-trip (0.178757 reads back 0.178755). Under a bare `>`
+    # that ~2e-6 of storage noise counts as "strictly better" and an identical
+    # copy is destroyed for nothing -- the exact no-op this guard exists to stop.
+    # The boundary is EXCLUSIVE on purpose: with rolls stored at 6 decimals the
+    # ten smallest increments above the fitted value are rejected, which on a G5
+    # Blade Sharpener (48 + roll*22) is 0.00022 percentage points. Nobody can
+    # perceive that, and "0.600010 does not beat 0.600000" is not a bug. Do not
+    # loosen it to `>=`. The epsilon is per-element and INDEPENDENT by design: a
+    # copy that is -2e-6 on one roll and +2e-5 on another qualifies, and that is
+    # correct -- do not "fix" it into an all-or-nothing comparison.
+    #
+    # 🔴 Roll counts must match EXACTLY. Two independent reasons, and BOTH must
+    # survive any future change to the comparison rule:
+    #   1. COMPARISON. `USING (ord)` joins on ordinality, so a shorter candidate
+    #      leaves the surplus positions unmatched and a longer one dereferences to
+    #      SQL NULL. Either way the extra positions are silently ignored -- both
+    #      directions demonstrated by execution. Never relax `=` to `>=` or `<=`.
+    #   2. WRITE SHAPE. The transplant WRITES this array into the slot, so a
+    #      length mismatch silently reshapes it. Per build_roll_payloads'
+    #      docstring a wrong roll count RENDERS AN EMPTY AUGMENT SLOT IN GAME.
+    # Reason 2 holds even if the rule changes to one where reason 1 does not apply.
+    #
+    # 🔴 ONE CASE, not a chain of ANDs, and not a style choice. SQL does NOT
+    # short-circuit AND or OR -- PostgreSQL may evaluate either operand first --
+    # while jsonb_array_length and jsonb_array_elements_text both ERROR on a
+    # scalar instead of returning NULL. So a candidate whose StatRolls is a JSON
+    # `null` or a bare number aborts the whole statement before any typeof guard
+    # can exclude it, and a player carrying one good copy and one corrupt sibling
+    # gets write_failed. A CASE evaluates its WHEN arms in order and stops at the
+    # first match, so the type check genuinely gates every call beneath it; the
+    # arms are non-constant, so the planner cannot fold them out of order.
+    #
+    # 🔴 The shape test and the improvement test are ONE CASE on purpose. Split
+    # into two sibling AND conjuncts -- even with the shape half CASE-guarded --
+    # the improvement half calls jsonb_array_length on the same unvalidated value
+    # and is protected only by conjunct ORDERING, which is a planner decision.
+    # Both halves are transplant-only, so merging them costs nothing.
+    #
+    # Proven, not assumed (postgres 16 and 17, 2026-08-21, and pinned as a
+    # permanent case in test_augment_pg.sh): the plain conjunct chain raised
+    # `cannot get array length of a scalar`. A chain that merely replaced the
+    # length call survived only because the planner sorted the expensive OR last
+    # -- correct by optimiser behaviour, which is what this file declines to
+    # depend on. This form is correct by construction.
+    guard_conjunct = """       AND CASE
+             WHEN jsonb_typeof(ci.stats #> '{FAugmentItemStats,1,StatRolls}') <> 'array'
+               THEN false
+             WHEN jsonb_array_length(ci.stats #> '{FAugmentItemStats,1,StatRolls}') < 1
+               THEN false
+             WHEN NOT v_same_upgrade
+               THEN true
+             WHEN jsonb_array_length(ci.stats #> '{FAugmentItemStats,1,StatRolls}')
+                    <> jsonb_array_length(v_inst_rolls)
+               THEN false
+             ELSE EXISTS (
+               SELECT 1
+                 FROM jsonb_array_elements_text(
+                        ci.stats #> '{FAugmentItemStats,1,StatRolls}') WITH ORDINALITY c(val, ord)
+                 JOIN jsonb_array_elements_text(v_inst_rolls) WITH ORDINALITY f(val, ord) USING (ord)
+                WHERE c.val::numeric > f.val::numeric + 0.00001)
+           END
+""" if transplant else ""
+
+    # The ORDER BY. `random`/`perfect` emit the byte-identical bare `ci.id`, so
+    # ops/augment-swap-live-verify.sh's lowest-id assertions stay valid BY
+    # CONSTRUCTION rather than by optimiser behaviour.
+    #
+    # Inside transplant mode the preference is gated AGAIN, at runtime, on
+    # v_same_upgrade. Any-better admits mixed copies, so among several qualifying
+    # copies a plain lowest-id pick can spend one that is a net downgrade
+    # (fitted [0.50,0.90], X id100 [0.51,0.05], Y id200 [0.99,0.99] -> X wins and
+    # position 1 collapses 0.90 -> 0.05). Sorting "nothing is worse" first makes
+    # a dominating copy always beat a mixed one. It aggregates nothing and
+    # compares no magnitudes across positions, so it is not a scalar score: it
+    # can only ever refuse to put a dominated copy above a dominating one.
+    #
+    # The runtime CASE matters because on a fresh install v_inst_rolls is NULL and
+    # on a cross-augment swap it is the OUTGOING, unrelated augment's rolls --
+    # different template, usually a different roll count -- so USING (ord) would
+    # compare noise and silently drop the lowest-id property that T9/T28/T34 and
+    # ops tooling rely on. Where there is no meaningful predecessor every
+    # candidate sorts true, ties, and falls through to ci.id.
+    #
+    # jsonb_array_elements_text is STRICT: NULL input yields ZERO ROWS rather than
+    # erroring, which is what makes the install path safe here AND in the WHERE
+    # above. 🔴 SQL `OR` is not guaranteed to short-circuit, so that NULL-safety
+    # is not something the `NOT v_same_upgrade OR ...` shape merely hides -- it is
+    # what stops the install path erroring at all. If T27 raises, look here first.
+    order_by_clause = """(CASE WHEN v_same_upgrade
+                THEN NOT EXISTS (
+                       SELECT 1
+                         FROM jsonb_array_elements_text(
+                                ci.stats #> '{FAugmentItemStats,1,StatRolls}') WITH ORDINALITY c(val, ord)
+                         JOIN jsonb_array_elements_text(v_inst_rolls) WITH ORDINALITY f(val, ord) USING (ord)
+                        WHERE c.val::numeric < f.val::numeric - 0.00001)
+                ELSE true END) DESC,
+          ci.id""" if transplant else "ci.id"
+
+    # (f, second half) HOLE C.
+    #
+    # 🔴 A MISSING AppliedEffectIndices IS THE NORMAL CASE, NOT A DEFECT.
+    # Measured on live 2026-08-21, read-only:
+    #   standalone augments carrying the key ....   0 of 482
+    #   weapon slots carrying the key .......... 690 of 690
+    # The four key-sets that actually occur on the standalone side are
+    # {StatRolls} x269, {RollBias,StatRolls} x111, {AugmentItemHash,StatRolls}
+    # x75 and {AugmentItemHash,RollBias,StatRolls} x27 -- none of them contain
+    # it. AppliedEffectIndices is a WEAPON-SIDE field: it describes a fitted
+    # slot, not a loose augment.
+    #
+    # So the read COALESCEs to '[]', exactly as read_roll_shapes does on every
+    # other path, and a missing key is NOT refused. Refusing it would have
+    # rejected 100% of live transplants the day the flag went on, telling every
+    # player their augment "carries no effect indices" -- which is true of every
+    # augment in the game. Do not reinstate that as hardening.
+    #
+    # What remains refused is a key that is PRESENT and not an array, which is a
+    # genuine corruption signal rather than the ordinary shape.
+    #
+    # 🔴 Transplant-only, deliberately. v_cons_idx is only ever WRITTEN on this
+    # path; under random/perfect the writer supplies its own indices from
+    # read_roll_shapes and never reads this value.
+    # 🔴 SCOPE LIMIT ON THE CASE RULE -- read this before "tidying" the guard
+    # below to match the one above it.
+    #
+    # The rule is: wherever jsonb_typeof GUARDS jsonb_array_length, use a CASE.
+    # There is no length call here, so the rule does not reach this guard and
+    # converting it would be ceremony. And the obvious way to make it "match" its
+    # neighbour -- adding a length test -- would refuse an EMPTY array, which is
+    # what the COALESCE above produces for all 482 live augments. That single
+    # edit would refuse every swap in the game.
+    #
+    # This test is TOTAL and needs no ordering guarantee: jsonb_typeof is strict,
+    # so it yields NULL rather than raising, and no branch can error. Verified on
+    # postgres:17-alpine across every input shape, on the pre-COALESCE value:
+    #   SQL NULL -> (now impossible)   'null' -> refuse   0.5 -> refuse
+    #   '"x"'    -> refuse             '[]'   -> ACCEPT   '[1]' -> ACCEPT
+    idx_shape_block = """    IF jsonb_typeof(v_cons_idx) <> 'array' THEN
+      RAISE EXCEPTION 'augment_roll_data_missing (the consumed copy carries malformed effect indices)';
+    END IF;
+""" if transplant else ""
+
+    # (f, first half) HOLES A/B, transplant-only for the same reason as hole C:
+    # v_cons_rolls is only ever WRITTEN on this path. Under random/perfect the
+    # source is destroyed and the slot redrawn, so its rolls are irrelevant and
+    # refusing on them would make an augment that is swappable today unswappable
+    # -- inside a change that is supposed to be inert when the flag is off.
+    # (Whether a malformed augment should be swappable at all in random mode is a
+    # fair question and a separate ticket; it narrows a live path.)
+    #
+    # 🔴 CASE for the same reason as the WHERE: a plpgsql IF condition is
+    # evaluated as one SQL expression, so on a jsonb-null v_cons_rolls the
+    # IS NULL test is false, the typeof test is true, and the length test still
+    # ERRORS. Unlike the WHERE site this one is not demonstrated -- it rests on
+    # PostgreSQL documenting subexpression evaluation order as undefined and
+    # naming CASE as the way to force it. Same idiom at all three sites so the
+    # next author gets it right at whichever one they touch.
+    # 🔴 The CASE is PARENTHESISED, and it must be. plpgsql reads an IF condition
+    # up to the first `THEN` at paren-depth zero -- so a bare CASE, whose own
+    # arms carry `THEN`, truncates the condition and the block dies with
+    # `syntax error at end of input`. Caught by executing it; nothing static
+    # sees it, because the SQL is well-formed as a fragment. This is the only
+    # place the CASE idiom lands inside a plpgsql IF rather than inside SQL.
+    rolls_shape_block = """    IF v_cons_rolls IS NULL
+       OR (CASE WHEN jsonb_typeof(v_cons_rolls) <> 'array' THEN true
+                ELSE jsonb_array_length(v_cons_rolls) = 0 END) THEN
+      RAISE EXCEPTION 'augment_roll_data_missing (the consumed copy carries no stat rolls)';
+    END IF;
+""" if transplant else ""
+
+    # (c) The usable-copy count. Transplant-only: in other modes every owned copy
+    # is usable by definition, so usable == total and the ladder's second branch
+    # is unreachable. Emitting count(*) twice rather than a separate assignment
+    # keeps the two builds the same shape.
+    usable_count_expr = ("""count(*) FILTER (WHERE CASE
+             WHEN jsonb_typeof(ci.stats #> '{FAugmentItemStats,1,StatRolls}') <> 'array'
+               THEN false
+             ELSE jsonb_array_length(ci.stats #> '{FAugmentItemStats,1,StatRolls}') >= 1
+           END)""" if transplant else "count(*)")
+
+    # 🔴 Per-slot ACCUMULATION, not a scalar. The consume loop genuinely runs more
+    # than once (a CLI three-augment install returns slots [0,1,2]), so a scalar
+    # would hold only the last iteration and every earlier slot would keep
+    # build_roll_payloads' throwaway placeholder -- the original bug, in the code
+    # written to fix it.
+    accumulate_block = """    v_cons_rolls_arr := v_cons_rolls_arr || v_cons_rolls;
+    v_cons_idx_arr := v_cons_idx_arr || v_cons_idx;
+    v_cons_slot_used := v_cons_slot_used || v_slot;
+""" if transplant else ""
+
+    # THE SPLICE. Runs after the `|| faug_lit` block-replace, so it overwrites
+    # build_roll_payloads' placeholder in every slot this write consumed for.
+    #
+    # 🔴 HOLE D, correctly bounded: against the AppliedAugmentRollData being
+    # WRITTEN, not against v_before. Proven by execution before this assert
+    # existed: swap_slot=5 on a 2-slot item was ACCEPTED and COMMITTED, the source
+    # consumed, the arrays left 2/2/3, and the player's real roll landed on a
+    # phantom index while slot 0 kept the placeholder. create_missing => false is
+    # NOT the fix on its own -- it silently no-ops and leaves the placeholder,
+    # reproducing the original bug while reporting success. The RAISE is what is
+    # load-bearing.
+    #
+    # The roll-count assert covers the paths v_same_upgrade's equal-length
+    # conjunct cannot reach -- cross-augment and cross-grade transplants also
+    # write the candidate's array into the slot. Their placeholder length comes
+    # from read_roll_shapes, which reads the newest row of that template anywhere
+    # on the server, while the candidate is this player's specific copy. Those
+    # agree only because roll count is constant per template, which is an
+    # EMPIRICAL invariant measured on 87 of 105 catalogued templates. Fail closed.
+    splice_block = """  FOR v_si IN 1 .. COALESCE(array_length(v_cons_slot_used, 1), 0) LOOP
+    IF v_cons_slot_used[v_si] >= COALESCE(jsonb_array_length(
+         v_stats #> '{FAugmentedItemStats,1,AppliedAugmentRollData}'), 0) THEN
+      RAISE EXCEPTION 'augment_arrays_desynced (transplant slot out of range)';
+    END IF;
+    IF jsonb_array_length(v_cons_rolls_arr[v_si]) IS DISTINCT FROM
+       COALESCE(jsonb_array_length(v_stats #> ARRAY['FAugmentedItemStats','1',
+                 'AppliedAugmentRollData', v_cons_slot_used[v_si]::text, 'StatRolls']), -1) THEN
+      RAISE EXCEPTION 'augment_arrays_desynced (transplanted roll count does not match the slot)';
+    END IF;
+    -- 🔴 Every roll must be a NUMBER. jsonb_array_elements_text yields SQL NULL
+    -- for a JSON null element and NULL is never TRUE, so a null position simply
+    -- cannot be "better" and the COMPARISON degrades safe. The WRITE does not:
+    -- without this, a candidate like [0.9, null] is admitted on the strength of
+    -- position 0 and the null is transplanted into the player's item. The
+    -- hole-A/B checks test the array, not its elements.
+    -- Same stage and same argument as the roll-count assert directly above: this
+    -- guards the WRITE SHAPE. The admission predicate is deliberately untouched --
+    -- adding an element-type conjunct there would change which copies qualify,
+    -- which is a rule change, not a safety check.
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_cons_rolls_arr[v_si]) e
+                WHERE jsonb_typeof(e) <> 'number') THEN
+      RAISE EXCEPTION 'augment_arrays_desynced (transplanted rolls contain a non-numeric value)';
+    END IF;
+    v_stats := jsonb_set(v_stats,
+      ARRAY['FAugmentedItemStats','1','AppliedAugmentRollData', v_cons_slot_used[v_si]::text],
+      jsonb_build_object('StatRolls', v_cons_rolls_arr[v_si],
+                         'AppliedEffectIndices', v_cons_idx_arr[v_si]),
+      false);
+  END LOOP;
+""" if transplant else ""
+
     return f"""\\set ON_ERROR_STOP on
 SET search_path TO dune, public;
 BEGIN;
@@ -978,6 +1449,15 @@ DECLARE
   v_inv bigint; v_tmpl text; v_stats jsonb;
   v_ks_ins int := 0;
   v_aug text; v_cons_id bigint; v_consumed int := 0;
+  v_cons_tpl text[] := {consume_arr}; v_cons_grade int[] := {consume_grade_arr};
+  v_cons_slot int[] := {consume_slot_arr};
+  v_ci int; v_slot int; v_owned_cnt int; v_owned_usable_cnt int;
+  v_cons_rolls jsonb; v_cons_idx jsonb;
+  v_inst_rolls jsonb; v_inst_name text; v_inst_grade int; v_same_upgrade boolean;
+  v_cons_rolls_arr jsonb[] := ARRAY[]::jsonb[];
+  v_cons_idx_arr jsonb[] := ARRAY[]::jsonb[];
+  v_cons_slot_used int[] := ARRAY[]::int[];
+  v_si int;
   v_before jsonb; v_consumed_ids bigint[] := ARRAY[]::bigint[];
   v_prior bigint; v_recent int;
   v_before_cnt int; v_after_cnt int;
@@ -1031,20 +1511,94 @@ BEGIN
   -- player keeps the augment AND wears it. 335 of the 341 standalone augments on
   -- live currently sit in exactly those unsafe places, so this refuses most of
   -- them on purpose. Players carry the augment in game first, which is safe.
-  FOREACH v_aug IN ARRAY {consume_arr} LOOP
-    SELECT ci.id INTO v_cons_id
+  -- Indexed rather than FOREACH: each consumed item is matched on its GRADE as
+  -- well as its template, and the three arrays are index-aligned triples.
+  --
+  -- 🔴 plpgsql returns NULL for an out-of-range subscript rather than erroring,
+  -- so a short array does not fail, it silently degrades: a missing grade would
+  -- match no copy and a missing slot would transplant nowhere. Assert the three
+  -- lengths agree before the loop can read any of them.
+  IF COALESCE(array_length(v_cons_grade, 1), 0)
+       IS DISTINCT FROM COALESCE(array_length(v_cons_tpl, 1), 0)
+     OR COALESCE(array_length(v_cons_slot, 1), 0)
+       IS DISTINCT FROM COALESCE(array_length(v_cons_tpl, 1), 0) THEN
+    RAISE EXCEPTION 'write_failed (consume arrays desynced)';
+  END IF;
+  FOR v_ci IN 1 .. COALESCE(array_length(v_cons_tpl, 1), 0) LOOP
+    v_aug := v_cons_tpl[v_ci];
+    v_slot := v_cons_slot[v_ci];
+    -- HOLE D, cheap half. A NULL or negative destination slot is nonsense in any
+    -- mode. The UPPER bound cannot be checked here -- v_slot indexes the block
+    -- being written, which does not exist yet -- so it lives in the splice loop.
+    IF v_slot IS NULL OR v_slot < 0 THEN
+      RAISE EXCEPTION 'augment_arrays_desynced (transplant slot out of range)';
+    END IF;
+{fitted_block}    -- Unfiltered count on the same pawn/template/grade scope, taken BEFORE the
+    -- filtered SELECT so a refusal can say WHICH kind of no it is: "you are not
+    -- carrying one" and "you are carrying one but it is not better" are different
+    -- conversations with the player. Deliberately NOT locking -- both branches
+    -- RAISE and roll the transaction back, so this only chooses wording.
+    SELECT count(*), {usable_count_expr}
+      INTO v_owned_cnt, v_owned_usable_cnt
       FROM dune.items ci
       JOIN dune.inventories cinv ON cinv.id = ci.inventory_id
      WHERE cinv.actor_id = v_pawn
        AND ci.template_id = v_aug
+       AND ci.quality_level = v_cons_grade[v_ci]
+       AND ci.stats ? 'FAugmentItemStats';
+    -- The rolls are read from the row this statement LOCKS and then DELETEs, so
+    -- the row we judged, locked and destroyed cannot come apart. Under READ
+    -- COMMITTED a row that unblocks is re-checked against this WHERE, so a copy
+    -- a racing transaction already spent stops qualifying instead of being spent
+    -- twice. It does NOT fall through to the next copy (ORDER BY/LIMIT are not
+    -- re-evaluated) -- that refusal is intended, not a bug to build a retry
+    -- loop around.
+    SELECT ci.id,
+           ci.stats #> '{{FAugmentItemStats,1,StatRolls}}',
+           -- COALESCE because standalone augments do NOT carry this key: 0 of 482
+           -- on live, against 690 of 690 weapon slots. Same default
+           -- read_roll_shapes applies on every other path. Without it the guard
+           -- below refuses every swap in the game.
+           COALESCE(ci.stats #> '{{FAugmentItemStats,1,AppliedEffectIndices}}', '[]'::jsonb)
+      INTO v_cons_id, v_cons_rolls, v_cons_idx
+      FROM dune.items ci
+      JOIN dune.inventories cinv ON cinv.id = ci.inventory_id
+     WHERE cinv.actor_id = v_pawn
+       AND ci.template_id = v_aug
+       AND ci.quality_level = v_cons_grade[v_ci]
        AND ci.stats ? 'FAugmentItemStats'
-     ORDER BY ci.id
+{guard_conjunct}     ORDER BY {order_by_clause}
      LIMIT 1
      FOR UPDATE OF ci;
+    -- 🔴 FOUR branches, because "nothing qualified" has three distinct causes and
+    -- every branch has to be a TRUE statement. Two branches cannot express the
+    -- inert-copy case: it would either tell a player carrying one that they are
+    -- not carrying one, or reclassify corrupt augment data as "nothing better
+    -- available" -- and that second one matters operationally, because
+    -- augment_roll_data_missing is how we LEARN that our own grant path minted
+    -- an inert augment again (ac2adb9 exists because it did once).
+    -- Branch 2 is unreachable when the transplant is not emitted (usable = total).
+    -- Branch 4 is unreachable by construction: it fails closed with a distinct
+    -- token rather than guessing a plausible-sounding reason.
     IF v_cons_id IS NULL THEN
-      RAISE EXCEPTION 'augment_not_owned (% not carried)', v_aug;
+      IF v_owned_cnt = 0 THEN
+        RAISE EXCEPTION 'augment_not_owned (% G% not carried)', v_aug, v_cons_grade[v_ci];
+      ELSIF v_owned_usable_cnt = 0 THEN
+        RAISE EXCEPTION 'augment_roll_data_missing (the copy carried has no stat rolls)';
+      ELSIF v_same_upgrade THEN
+        RAISE EXCEPTION 'no_improvement (nothing carried rolls higher than the fitted one)';
+      ELSE
+        RAISE EXCEPTION 'write_failed (usable copy exists but none selected)';
+      END IF;
     END IF;
-    -- standalone augments are never stacked (live: all 297 rows stack_size=1),
+    -- HOLES A/B. '[]'::jsonb IS NULL and 'null'::jsonb IS NULL are BOTH FALSE, so
+    -- an IS NULL guard passes both and COALESCE cannot help. Proven by execution:
+    -- both were ACCEPTED, the source CONSUMED, and the slot written
+    -- {{"StatRolls":[]}} / {{"StatRolls":null}} -- the player loses the augment and
+    -- gets an inert slot. Redundant with the WHERE exclusion above BY DESIGN:
+    -- they guard different stages, and this one still stands if the WHERE is
+    -- ever relaxed.
+{rolls_shape_block}{idx_shape_block}{accumulate_block}    -- standalone augments are never stacked (live: all 297 rows stack_size=1),
     -- so consuming one is a row delete, not a decrement
     DELETE FROM dune.items WHERE id = v_cons_id;
     v_consumed_ids := v_consumed_ids || v_cons_id;
@@ -1062,7 +1616,7 @@ BEGIN
     v_stats := v_stats || '{{"FWeaponItemStats":[[],{{"CurrentAmmo":0}}]}}'::jsonb;
   END IF;
   v_stats := v_stats || {faug_lit};  -- top-level || REPLACES FAugmentedItemStats (= swap)
-  -- 5b. BUG-019 INVARIANT (authoritative, atomic). A reroll/swap/install must
+{splice_block}  -- 5b. BUG-019 INVARIANT (authoritative, atomic). A reroll/swap/install must
   -- NEVER reduce the augment-slot count -- the || above REPLACES the whole block,
   -- so a caller that sends a short `augments` list would silently delete the
   -- omitted slots (this destroyed two of a player's augments on 2026-08-06). v_before
@@ -1074,6 +1628,19 @@ BEGIN
   v_after_cnt  := COALESCE(jsonb_array_length(v_stats  #> '{{FAugmentedItemStats,1,AppliedAugments}}'), 0);
   IF v_after_cnt < v_before_cnt THEN
     RAISE EXCEPTION 'augment_count_shrank (before=% after=% -- refusing to drop an augment slot)', v_before_cnt, v_after_cnt;
+  END IF;
+  -- 5c. THE THREE PARALLEL ARRAYS MUST STAY INDEX-ALIGNED. There was no length
+  -- assertion anywhere in this writer, and block_slots() truncates to the
+  -- SHORTEST array on read-back, so a desync was invisible in the response as
+  -- well as in the DB. RAISE rather than repair: whether the game tolerates
+  -- desynced arrays is UNVERIFIED, and jsonb_set with create_missing => true
+  -- APPENDS on an out-of-range index instead of erroring. Unconditional by
+  -- design -- it can only fire on a state that is already broken.
+  IF jsonb_array_length(v_stats #> '{{FAugmentedItemStats,1,AppliedAugments}}')
+       IS DISTINCT FROM jsonb_array_length(v_stats #> '{{FAugmentedItemStats,1,AppliedAugmentQualities}}')
+     OR jsonb_array_length(v_stats #> '{{FAugmentedItemStats,1,AppliedAugments}}')
+       IS DISTINCT FROM jsonb_array_length(v_stats #> '{{FAugmentedItemStats,1,AppliedAugmentRollData}}') THEN
+    RAISE EXCEPTION 'augment_arrays_desynced (AppliedAugments / Qualities / RollData lengths disagree)';
   END IF;
   -- 6. write; reset is_new so the game reloads the item's stats on next login
   UPDATE dune.items SET stats = v_stats, is_new = false WHERE id = {item_id} AND inventory_id = v_inv;
@@ -1092,18 +1659,23 @@ BEGIN
     VALUES (
       {owner}, {item_id}, v_tmpl, {op_lit}, {roll_mode_lit},
       COALESCE(v_before #> '{{FAugmentedItemStats,1,AppliedAugments}}', '[]'::jsonb),
-      COALESCE({faug_lit} #> '{{FAugmentedItemStats,1,AppliedAugments}}', '[]'::jsonb),
-      COALESCE({faug_lit} #> '{{FAugmentedItemStats,1,AppliedAugmentQualities}}', '[]'::jsonb),
+      -- 🔴 v_stats, NOT the faug_lit literal. faug_lit is baked in Python at build
+      -- time and still carries build_roll_payloads' throwaway placeholder; v_stats
+      -- is what the UPDATE above actually wrote. Reading the literal here would
+      -- make the audit row and the API response report rolls the item does not
+      -- have -- the same silent divergence this whole change exists to kill.
+      COALESCE(v_stats #> '{{FAugmentedItemStats,1,AppliedAugments}}', '[]'::jsonb),
+      COALESCE(v_stats #> '{{FAugmentedItemStats,1,AppliedAugmentQualities}}', '[]'::jsonb),
       {rerolled_lit},
       -- The rolls ARE the payload of a reroll. Without them "did the values
       -- change" was unanswerable from stored data (player report 2026-08-03).
       -- On a swap, rolls_before is the only record of the destroyed slot.
       COALESCE(v_before #> '{{FAugmentedItemStats,1,AppliedAugmentRollData}}', '[]'::jsonb),
-      COALESCE({faug_lit} #> '{{FAugmentedItemStats,1,AppliedAugmentRollData}}', '[]'::jsonb),
+      COALESCE(v_stats #> '{{FAugmentedItemStats,1,AppliedAugmentRollData}}', '[]'::jsonb),
       to_jsonb(v_consumed_ids), {operator_lit}, {idem_lit});{audit_close}
   INSERT INTO _aug_result VALUES ({item_id}, v_tmpl, v_ks_ins,
-    jsonb_array_length({faug_lit} #> '{{FAugmentedItemStats,1,AppliedAugments}}'),
-    v_consumed, false, {faug_lit} -> 'FAugmentedItemStats');
+    jsonb_array_length(v_stats #> '{{FAugmentedItemStats,1,AppliedAugments}}'),
+    v_consumed, false, v_stats -> 'FAugmentedItemStats');
 END $augment$;
 COMMIT;
 SELECT json_build_object(
@@ -1143,16 +1715,21 @@ def last_json_line(stdout):
 # ---------------------------------------------------------------------------
 
 def do_dry_run(owner, item_id, augment_ids, grade, roll_mode=ROLL_MODE_PERFECT, consume=False,
-               preserve_grades=False, reroll_only=None):
+               preserve_grades=False, reroll_only=None, swap_slot=None):
     plan = read_item_plan(owner, item_id)
     errs, item_kind = preflight(plan, augment_ids, grade)
     roll_shapes = read_roll_shapes(augment_ids) if augment_ids else {}
     keep = installed_rolls(plan.get("item_stats"))
     payloads = build_roll_payloads(augment_ids, grade, roll_shapes, roll_mode,
                                    keep, reroll_only)
-    grades = resolve_grades(augment_ids, plan.get("item_stats"), grade, preserve_grades)
+    grades = resolve_grades(augment_ids, plan.get("item_stats"), grade, preserve_grades,
+                            swap_slot)
     faug = build_augmented_item_stats_value(augment_ids, grade, payloads, grades)
     kind_for_ks = item_kind if item_kind != "unknown" else "weapon"
+    # Same pairing the live write will consume on, so a probe can be checked
+    # against what actually gets destroyed rather than just which name.
+    cons_slots = (newly_installed_slots(augment_ids, plan.get("item_stats"), swap_slot)
+                  if consume else [])
     emit({
         "dry_run": True, "action": "augment", "augment_enabled": AUGMENT_ENABLED,
         "owner_ctrl": owner, "item_id": item_id,
@@ -1166,7 +1743,13 @@ def do_dry_run(owner, item_id, augment_ids, grade, roll_mode=ROLL_MODE_PERFECT, 
         "rerolled": sorted(reroll_only) if reroll_only is not None else augment_ids,
         "consume": consume,
         "already_installed": installed_augment_ids(plan.get("item_stats")),
-        "would_consume": newly_installed(augment_ids, plan.get("item_stats")) if consume else [],
+        # Grades in SLOT ORDER, index-aligned with already_installed. The portal
+        # cannot otherwise tell a same-name/different-grade swap (a real change)
+        # from a request that changes nothing.
+        "already_installed_grades": installed_grades_by_slot(plan.get("item_stats")),
+        "swap_slot": swap_slot,
+        "would_consume": [augment_ids[i] for i in cons_slots],
+        "would_consume_grades": [grades[i] for i in cons_slots],
         "roll_shapes_from_db": roll_shapes,
         "keystones_to_ensure": keystones_for(kind_for_ks, augment_ids),
         "faugmented_item_stats": faug,
@@ -1175,7 +1758,8 @@ def do_dry_run(owner, item_id, augment_ids, grade, roll_mode=ROLL_MODE_PERFECT, 
 
 
 def do_live(owner, item_id, augment_ids, grade, roll_mode=ROLL_MODE_PERFECT, consume=False,
-            preserve_grades=False, reroll_only=None, operator=None, idempotency_key=None):
+            preserve_grades=False, reroll_only=None, operator=None, idempotency_key=None,
+            swap_slot=None):
     if not AUGMENT_ENABLED:
         emit({"ok": False, "error": "augment_disabled"}, 0)
     # Fail CLOSED before touching anything: a caller that asked for idempotency
@@ -1203,15 +1787,27 @@ def do_live(owner, item_id, augment_ids, grade, roll_mode=ROLL_MODE_PERFECT, con
     keep = installed_rolls(plan.get("item_stats"))
     payloads = build_roll_payloads(augment_ids, grade, roll_shapes, roll_mode,
                                    keep, reroll_only)
-    grades = resolve_grades(augment_ids, plan.get("item_stats"), grade, preserve_grades)
+    grades = resolve_grades(augment_ids, plan.get("item_stats"), grade, preserve_grades,
+                            swap_slot)
     faug = build_augmented_item_stats_value(augment_ids, grade, payloads, grades)
     # Consume only what is NEWLY installed. A reroll of the same augments takes
     # nothing from the player; a swap costs them the augment they swapped in.
-    consume_ids = newly_installed(augment_ids, plan.get("item_stats")) if consume else []
+    # Paired with the grade being WRITTEN into that slot, so what is destroyed is
+    # always exactly what is installed -- see build_augment_sql's consume loop.
+    # The slot index rides along because it is the one thing the SQL cannot
+    # derive: it is what the transplant splices the consumed copy's rolls into.
+    cons_slots = (newly_installed_slots(augment_ids, plan.get("item_stats"), swap_slot)
+                  if consume else [])
+    # Transplant has nothing to transplant FROM without a consumed copy. Refused
+    # here, before any DB work, rather than quietly degrading to a fresh draw --
+    # a swap that silently stops transplanting is exactly the bug being fixed.
+    if roll_mode == ROLL_MODE_TRANSPLANT and not cons_slots:
+        fail("bad_roll_mode", 2)
+    consume_specs = [(augment_ids[i], grades[i], i) for i in cons_slots]
 
     ns, pod = resolve_db_pod()
     sql = build_augment_sql(owner, item_id, template_id, is_weapon, keystone_ids, faug,
-                            consume_ids, roll_mode, reroll_only, augment_ids, operator,
+                            consume_specs, roll_mode, reroll_only, augment_ids, operator,
                             idempotency_key)
     out = run_psql(ns, pod, sql, timeout=20)
     if out.returncode != 0:
@@ -1236,8 +1832,15 @@ def do_live(owner, item_id, augment_ids, grade, roll_mode=ROLL_MODE_PERFECT, con
     result["augments"] = after_ids or augment_ids
     result["grades"] = after_grades or grades
     result["stat_rolls"] = after_rolls or [p["StatRolls"] for p in payloads]
-    # Nothing was rerolled on a replay: the draw above never reached the item.
-    result["rerolled"] = ([] if replayed else
+    # Nothing was rerolled on a replay, and nothing was rerolled on a transplant:
+    # in both cases the draw above never reached the item. The reasons differ --
+    # a replay never wrote at all, a transplant overwrote the placeholder with the
+    # consumed copy's real rolls under lock -- but the claim being made to the
+    # player is the same one, and on a swap it would be false. The portal sets
+    # reroll_only=[incoming] on every swap, so this is not an edge case; without
+    # it the response tells the player their incoming augment got fresh rolls,
+    # which is exactly the confusion this whole change exists to end.
+    result["rerolled"] = ([] if (replayed or roll_mode == ROLL_MODE_TRANSPLANT) else
                           (sorted(reroll_only) if reroll_only is not None else augment_ids))
     result.pop("faug_after", None)
     emit(result, 0)
@@ -1264,6 +1867,7 @@ def gather_args():
         _ro = payload.get("reroll_only")
         reroll_only = set(validate_augment_ids(_ro)) if isinstance(_ro, list) else None
         idempotency_key = validate_idem_key(payload.get("idempotency_key"))
+        raw_swap_slot = payload.get("swap_slot")
     else:
         ap = argparse.ArgumentParser(description="Augment perfect-roll / swap writer (Phase 1)")
         ap.add_argument("--owner-ctrl", required=True)
@@ -1273,7 +1877,9 @@ def gather_args():
         ap.add_argument("--grade", default="5")
         ap.add_argument("--roll-mode", default=ROLL_MODE_PERFECT, choices=list(ROLL_MODES),
                         help="perfect = every roll 1.0 (prize path); "
-                             "random = a fresh uniform draw per roll slot (player reroll)")
+                             "random = a fresh uniform draw per roll slot (player reroll); "
+                             "transplant = the consumed copy's REAL rolls (swap; "
+                             "requires --consume and something to consume)")
         ap.add_argument("--consume", action="store_true",
                         help="require the player to OWN each newly installed augment "
                              "and destroy it in the same transaction (player-facing "
@@ -1292,6 +1898,11 @@ def gather_args():
                              "no-op replay. REQUIRED on any player-facing swap: "
                              "without it a dropped response plus a retry "
                              "consumes a second augment.")
+        ap.add_argument("--swap-slot", default=None,
+                        help="0-based index into --augments of the slot a swap is "
+                             "REPLACING. Required when the incoming augment has the "
+                             "same name as the one it replaces (a grade change), "
+                             "because nothing in the name list distinguishes them.")
         ap.add_argument("--dry-run", action="store_true")
         a = ap.parse_args()
         owner = pos_int("owner_ctrl", a.owner_ctrl)
@@ -1305,23 +1916,27 @@ def gather_args():
         reroll_only = (set(validate_augment_ids(a.reroll_only.split(",")))
                        if a.reroll_only else None)
         idempotency_key = validate_idem_key(a.idempotency_key)
+        raw_swap_slot = a.swap_slot
 
     augment_ids = validate_augment_ids(augments)
     if not augment_ids:
         fail("no_augments", 2)
+    # AFTER validate_augment_ids, never before: it drops blanks and de-dupes, so an
+    # index taken against the raw list can point at the wrong slot.
+    swap_slot = validate_swap_slot(raw_swap_slot, augment_ids)
     return (owner, item_id, augment_ids, grade, dry_run, roll_mode, consume,
-            preserve_grades, reroll_only, idempotency_key)
+            preserve_grades, reroll_only, idempotency_key, swap_slot)
 
 
 def main():
     (owner, item_id, augment_ids, grade, dry_run, roll_mode, consume,
-     preserve_grades, reroll_only, idempotency_key) = gather_args()
+     preserve_grades, reroll_only, idempotency_key, swap_slot) = gather_args()
     if dry_run:
         do_dry_run(owner, item_id, augment_ids, grade, roll_mode, consume,
-                   preserve_grades, reroll_only)
+                   preserve_grades, reroll_only, swap_slot)
     else:
         do_live(owner, item_id, augment_ids, grade, roll_mode, consume,
-                preserve_grades, reroll_only, None, idempotency_key)
+                preserve_grades, reroll_only, None, idempotency_key, swap_slot)
 
 
 if __name__ == "__main__":

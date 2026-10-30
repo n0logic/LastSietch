@@ -92,7 +92,7 @@ snapshot() {
     local oc sc bk
     oc=$(dq "SELECT COUNT(*)::int FROM dune.dune_exchange_orders;")
     sc=$(dq "SELECT COUNT(*)::int FROM dune.dune_exchange_sell_orders;")
-    bk=$(dq "SELECT balance FROM dune.player_virtual_currency_balances WHERE player_controller_id=${2} AND currency_id=0;")
+    bk=$(dq "SELECT balance FROM dune.player_virtual_currency_balances WHERE player_controller_id=${2} AND currency_id='Solaris';")
     echo "${it}|${oc}|${sc}|${bk}"
 }
 
@@ -255,7 +255,7 @@ neg_snapshot() {
     local oc sc bk
     oc=$(dq "SELECT COUNT(*)::int FROM dune.dune_exchange_orders;")
     sc=$(dq "SELECT COUNT(*)::int FROM dune.dune_exchange_sell_orders;")
-    bk=$(dq "SELECT balance FROM dune.player_virtual_currency_balances WHERE player_controller_id=${VALID_CTRL} AND currency_id=0;")
+    bk=$(dq "SELECT balance FROM dune.player_virtual_currency_balances WHERE player_controller_id=${VALID_CTRL} AND currency_id='Solaris';")
     echo "${oc}|${sc}|${bk}"
 }
 

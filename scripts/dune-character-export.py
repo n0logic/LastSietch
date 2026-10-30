@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-# Character Export — full per-player snapshot for the Last Sietch admin v2 Player
+# Character Export, full per-player snapshot for the Last Sietch admin v2 Player
 # Tools "Export" subtab. Specced in ADMIN-PANEL-V2-OVERHAUL.md:116
 # ("full FLevelComponent + FactionPlayerComponent + tags + spec_tracks +
 # actor properties snapshot"). Originally orphaned from P3b; ships in Order 0
 # alongside G30 v1 per V2-ADMIN-CONTINUATION-PLAN-2026-05-26.md.
 #
-# Deployed to lastsietch-dune:/root/dune-character-export.py — invoked by the relay
+# Deployed to lastsietch-dune:/root/dune-character-export.py, invoked by the relay
 # over SSH via dispatcher's `character-export <account_id>` token.
 #
 # Read-only. No game-state mutation. Last Sietch-internal JSON schema, NOT
-# Solido-compatible — this is for Last Sietch-internal data portability (player can
+# Solido-compatible, this is for Last Sietch-internal data portability (player can
 # restore their own character snapshot on a future server, the admin can
 # diff snapshots for forensic work, etc.).
 #
@@ -22,7 +22,7 @@
 #                        (Funcom GA persists char level/XP/SP here per
 #)
 #   - dune.specialization_tracks: keyed by (player_id=controller_id, track_type)
-#   - dune.admin_read_player_tags(account_id): proc-wrapped tag listing
+#   - dune.player_tags: keyed by character_id = encrypted_player_state.id
 
 import argparse
 import json
@@ -31,20 +31,39 @@ import sys
 from datetime import datetime, timezone
 
 
-# Optional single-character scoping (portal multichar): when a controller id is
-# given, every query is narrowed to that character. The default (no --controller)
-# path leaves the filters EMPTY so the SQL is byte-identical to the pre-multichar
-# helper -- the admin "Export" subtab is unchanged. The portal derives the
-# controller server-side from the selected-character cookie; a controller that
-# doesn't resolve just yields an empty snapshot (fail-safe, never another char).
+# Every snapshot is scoped to exactly ONE live character. encrypted_player_state
+# holds one row per character SLOT, Deleted tombstones included (143 of 269 live
+# accounts carried one on 2026-10-28), and _query_json keeps the LAST output row,
+# so an unscoped account-level read could take controller/pawn props, components
+# and tracks from a Deleted slot. RESOLVE_SQL picks the controller first (the
+# requested one, or the most-recently-active), never a Deleted one, and every
+# later query is pinned to it AND re-filters Deleted. A requested controller
+# that is Deleted or not on this account yields account_not_found: it never
+# falls back to another character.
 def _ctrl_filters(controller_id):
-    if controller_id is None:
-        return {"ps_ctrl": "", "eps_ctrl": ""}
     cid = int(controller_id)
     return {
         "ps_ctrl":  "  AND ps.player_controller_id = %d::bigint" % cid,
         "eps_ctrl": "  AND eps.player_controller_id = %d::bigint" % cid,
     }
+
+
+def _requested_filter(controller_id):
+    if controller_id is None:
+        return ""
+    return "  AND eps.player_controller_id = %d::bigint" % int(controller_id)
+
+
+RESOLVE_SQL = """
+SET search_path TO dune, public;
+SELECT eps.player_controller_id
+FROM dune.encrypted_player_state eps
+WHERE eps.account_id = {account_id}::bigint
+  AND eps.character_state IS DISTINCT FROM 'Deleted'
+{requested}
+ORDER BY eps.last_avatar_activity DESC NULLS LAST, eps.player_controller_id DESC
+LIMIT 1;
+"""
 
 
 # Header: identity + online state + map/coords (from pawn actor).
@@ -61,14 +80,17 @@ SELECT coalesce(json_build_object(
   'transform',            a.transform::text
 ), '{{}}'::json)
 FROM dune.player_state ps
+JOIN dune.encrypted_player_state eps
+  ON eps.player_controller_id = ps.player_controller_id
 LEFT JOIN dune.actors a ON a.id = ps.player_pawn_id
 WHERE ps.account_id = {account_id}::bigint
+  AND eps.character_state IS DISTINCT FROM 'Deleted'
 {ps_ctrl}
 ORDER BY ps.last_avatar_activity DESC NULLS LAST, ps.player_controller_id DESC
 LIMIT 1;
 """
 
-# Controller actor properties JSONB — contains FactionPlayerComponent and
+# Controller actor properties JSONB, contains FactionPlayerComponent and
 # the rest of the controller-side component bag.
 CONTROLLER_PROPERTIES_SQL = """
 SET search_path TO dune, public;
@@ -76,20 +98,22 @@ SELECT coalesce(a.properties, '{{}}'::jsonb)
 FROM dune.actors a
 JOIN dune.encrypted_player_state eps ON eps.player_controller_id = a.id
 WHERE eps.account_id = {account_id}::bigint
+  AND eps.character_state IS DISTINCT FROM 'Deleted'
 {eps_ctrl};
 """
 
-# Pawn actor properties JSONB — placement + per-actor state.
+# Pawn actor properties JSONB, placement + per-actor state.
 PAWN_PROPERTIES_SQL = """
 SET search_path TO dune, public;
 SELECT coalesce(a.properties, '{{}}'::jsonb)
 FROM dune.actors a
 JOIN dune.encrypted_player_state eps ON eps.player_pawn_id = a.id
 WHERE eps.account_id = {account_id}::bigint
+  AND eps.character_state IS DISTINCT FROM 'Deleted'
 {eps_ctrl};
 """
 
-# Pawn fgl_entities.components JSONB — contains FLevelComponent. The pawn
+# Pawn fgl_entities.components JSONB, contains FLevelComponent. The pawn
 # actor maps to MULTIPLE fgl_entity rows (each a different component bag),
 # so we aggregate into an array of {entity_id, components} objects. The
 # primary char entity carrying FLevelComponent is one element of the array;
@@ -105,10 +129,11 @@ FROM dune.fgl_entities fe
 JOIN dune.actor_fgl_entities afe ON afe.entity_id = fe.entity_id
 JOIN dune.encrypted_player_state eps ON eps.player_pawn_id = afe.actor_id
 WHERE eps.account_id = {account_id}::bigint
+  AND eps.character_state IS DISTINCT FROM 'Deleted'
 {eps_ctrl};
 """
 
-# Controller fgl_entities.components JSONB — same multi-entity aggregation
+# Controller fgl_entities.components JSONB, same multi-entity aggregation
 # on the controller side. May be empty for accounts where the controller
 # has no fgl_entities rows.
 CONTROLLER_COMPONENTS_SQL = """
@@ -121,33 +146,30 @@ FROM dune.fgl_entities fe
 JOIN dune.actor_fgl_entities afe ON afe.entity_id = fe.entity_id
 JOIN dune.encrypted_player_state eps ON eps.player_controller_id = afe.actor_id
 WHERE eps.account_id = {account_id}::bigint
+  AND eps.character_state IS DISTINCT FROM 'Deleted'
 {eps_ctrl};
 """
 
-# Player tags. Default (admin) path = the account-level read proc, unchanged.
-# The controller-scoped path (portal, single character) reads player_tags
-# directly, keyed by character_id = encrypted_player_state.id, so an alt's tags
-# don't bleed into the export. Tags here are ALL Funcom game-progression flags
-# (Contract/Journey/DialogueFlags/Exploration/Faction/... verified 2026-07-17);
-# the portal applies a namespace allowlist before returning them to a player.
-TAGS_SQL = """
-SET search_path TO dune, public;
-SELECT coalesce(json_agg(tags ORDER BY tags), '[]'::json)
-FROM dune.admin_read_player_tags({account_id}::bigint);
-"""
-
+# Player tags for the resolved character, read directly from player_tags keyed
+# by character_id = encrypted_player_state.id, so neither an alt's nor a Deleted
+# slot's tags bleed into the export. (The account-level admin_read_player_tags
+# proc is no longer used here: it cannot be scoped to one live character.) Tags
+# are ALL Funcom game-progression flags (Contract/Journey/DialogueFlags/
+# Exploration/Faction/... verified 2026-07-17); the portal applies a namespace
+# allowlist before returning them to a player.
 TAGS_CTRL_SQL = """
 SET search_path TO dune, public;
 SELECT coalesce(json_agg(pt.tag ORDER BY pt.tag), '[]'::json)
 FROM dune.player_tags pt
 JOIN dune.encrypted_player_state eps ON eps.id = pt.character_id
 WHERE eps.account_id = {account_id}::bigint
+  AND eps.character_state IS DISTINCT FROM 'Deleted'
 {eps_ctrl};
 """
 
 # Specialization tracks: tabular, keyed by controller_id. Each row = one track.
 # Live schema (verified 2026-05-26): columns are (player_id, track_type,
-# xp_amount int, level real). There's no unspent_points column on this table —
+# xp_amount int, level real). There's no unspent_points column on this table -
 # unspent specialization SP lives in FLevelComponent JSONB on the pawn, which
 # the snapshot's pawn_fgl_entities_components dump carries verbatim.
 SPEC_TRACKS_SQL = """
@@ -160,6 +182,7 @@ SELECT coalesce(json_agg(json_build_object(
 FROM dune.specialization_tracks st
 JOIN dune.encrypted_player_state eps ON eps.player_controller_id = st.player_id
 WHERE eps.account_id = {account_id}::bigint
+  AND eps.character_state IS DISTINCT FROM 'Deleted'
 {eps_ctrl};
 """
 
@@ -185,8 +208,8 @@ def main():
     ap = argparse.ArgumentParser(description="Last Sietch character snapshot export (read-only)")
     ap.add_argument("account_id")
     ap.add_argument("--controller", type=int, default=None,
-                    help="scope the snapshot to one character (portal multichar); "
-                         "omit for the account-level admin export")
+                    help="export this character (portal multichar); omit to "
+                         "export the most-recently-active non-Deleted character")
     args = ap.parse_args()
 
     account_id = args.account_id
@@ -194,9 +217,17 @@ def main():
         print(json.dumps({"available": False,
                           "error": "account_id must be digits"}))
         sys.exit(2)
-    cf = _ctrl_filters(args.controller)
 
     try:
+        resolved = _query_json(
+            RESOLVE_SQL.format(account_id=account_id,
+                               requested=_requested_filter(args.controller)),
+            fallback="null")
+        if not isinstance(resolved, int):
+            print(json.dumps({"available": False, "error": "account_not_found"}))
+            sys.exit(0)
+        cf = _ctrl_filters(resolved)
+
         header = _query_json(HEADER_SQL.format(account_id=account_id, **cf),
                              fallback="{}")
         if not header or not header.get("account_id"):
@@ -213,12 +244,7 @@ def main():
             PAWN_COMPONENTS_SQL.format(account_id=account_id, **cf), fallback="[]")
         controller_components = _query_json(
             CONTROLLER_COMPONENTS_SQL.format(account_id=account_id, **cf), fallback="[]")
-        # Controller-scoped tags read directly from player_tags (portal); the
-        # account-level proc for the default admin path.
-        if args.controller is not None:
-            tags = _query_json(TAGS_CTRL_SQL.format(account_id=account_id, **cf), fallback="[]")
-        else:
-            tags = _query_json(TAGS_SQL.format(account_id=account_id), fallback="[]")
+        tags = _query_json(TAGS_CTRL_SQL.format(account_id=account_id, **cf), fallback="[]")
         spec_tracks = _query_json(
             SPEC_TRACKS_SQL.format(account_id=account_id, **cf), fallback="[]")
     except subprocess.TimeoutExpired:
@@ -233,7 +259,7 @@ def main():
     # while the full JSONB bags are preserved below for fidelity. Tolerant
     # of either being absent on never-played characters.
     #
-    # The pawn maps to multiple fgl_entities rows — walk them to find the one
+    # The pawn maps to multiple fgl_entities rows, walk them to find the one
     # carrying FLevelComponent (only one entity has it; the others carry
     # FItemCraftingComponent etc.).
     flevel = None

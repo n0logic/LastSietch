@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Forced-command dispatcher for the lastsietch-relay service SSH key on the game host.
-# Pinned via authorized_keys command="..." — the key can ONLY run the
+# Pinned via authorized_keys command="...", the key can ONLY run the
 # read-only Dune dashboard operations below, never an arbitrary shell.
 # Deployed to <game-host>:/root/dune-relay-dispatch.sh.
 set -euo pipefail
@@ -172,12 +172,18 @@ case "$action" in
       exit 2
     fi
     [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
-    _adopt=$(/root/dune-claim-takeover.py --check "$arg" 2>/dev/null || echo '{}')
-    _backup=$(/root/dune-base-backup-op.py --check "$arg" 2>/dev/null || echo '{}')
+    # A failed check still prints its own JSON error and exits non-zero, so
+    # fall back to {} only when there was no output at all; appending {} after
+    # real output would produce two JSON values and an unreadable merge.
+    _adopt=$(/root/dune-claim-takeover.py --check "$arg" 2>/dev/null) || true
+    _backup=$(/root/dune-base-backup-op.py --check "$arg" 2>/dev/null) || true
+    [ -n "$_adopt" ] || _adopt='{}'
+    [ -n "$_backup" ] || _backup='{}'
     # Operator roster rides along on the same call: the panel needs it at exactly
     # the moment it renders the adopt option, and a picker that cannot show who
     # has a free claim slot is just a dropdown of names.
-    _ops=$(/root/dune-claim-takeover.py --operators 2>/dev/null || echo '{}')
+    _ops=$(/root/dune-claim-takeover.py --operators 2>/dev/null) || true
+    [ -n "$_ops" ] || _ops='{}'
     printf '{"adopt":%s,"backup":%s,"operators":%s}\n' "$_adopt" "$_backup" "$_ops"
     exit 0
     ;;
@@ -219,13 +225,13 @@ case "$action" in
     exec /root/dune-presence.py "$arg"
     ;;
   grant-players)
-    # Progression-grant player picker — every character incl. OFFLINE.
+    # Progression-grant player picker, every character incl. OFFLINE.
     # Read-only SELECT inside dune-grant.sh; no arg accepted.
     [ -z "$arg" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     exec /root/dune-grant.sh --list-players
     ;;
   grant-recent)
-    # Recent grants — last N rows of dune.ls_progression_grants for the
+    # Recent grants, last N rows of dune.ls_progression_grants for the
     # admin panel's "Recent grants" widget. arg = optional integer limit
     # (1..200; defaults to 20 inside the script). Numeric-only allowlist.
     if [ -n "$arg" ]; then
@@ -406,7 +412,7 @@ case "$action" in
     ;;
   grant)
     # Progression-grant WRITE path. arg is a single base64-encoded JSON blob
-    # — the ONLY thing accepted. The base64 alphabet [A-Za-z0-9+/=] contains
+    #, the ONLY thing accepted. The base64 alphabet [A-Za-z0-9+/=] contains
     # no whitespace, no ';', no '$', no backtick: shell injection is
     # impossible. /root/dune-grant.sh re-decodes and re-validates every field.
     if [[ ! "$arg" =~ ^[A-Za-z0-9+/=]+$ ]]; then
@@ -422,7 +428,7 @@ case "$action" in
     # (~128KB on older kernels, 2MB on modern Linux but SSH adds overhead)
     # that breaks G20/G22 Solido imports above ~2900 pieces. The payload is
     # piped through stdin all the way to dune-grant.sh's matching
-    # --grant-b64-stdin handler — no large argv anywhere in the chain.
+    # --grant-b64-stdin handler, no large argv anywhere in the chain.
     # Defense in depth: validate the b64 alphabet here AND in dune-grant.sh.
     [ -z "$arg" ] || { echo "rejected: grant-stdin takes no args" >&2; exit 1; }
     [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
@@ -432,7 +438,7 @@ case "$action" in
       echo "rejected: invalid grant payload" >&2
       exit 2
     fi
-    # printf is a shell builtin — no exec, no kernel argv limit on its
+    # printf is a shell builtin, no exec, no kernel argv limit on its
     # operand. /root/dune-grant.sh reads stdin for the actual payload.
     printf '%s' "$payload" | /root/dune-grant.sh --grant-b64-stdin
     exit $?
@@ -563,6 +569,15 @@ case "$action" in
       exit 2
     fi
     printf '%s' "$payload" | base64 -d | /opt/lastsietch-rmq-bridge/dune-chat-send.py
+    exit $?
+    ;;
+  auth-whisper)
+    [ -z "$arg" ] && [ -z "${_extra:-}" ] || exit 2
+    payload=$(head -c 8193)
+    if [ "${#payload}" -gt 8192 ] || [[ ! "$payload" =~ ^[A-Za-z0-9+/=]+$ ]]; then
+      exit 2
+    fi
+    printf '%s' "$payload" | base64 -d | /opt/lastsietch-rmq-bridge/dune-auth-whisper.py
     exit $?
     ;;
   broadcast-send)
@@ -758,7 +773,7 @@ case "$action" in
     exec /root/dune-vehicle-parts.py "$vp_acct" "$vp_container"
     ;;
   blueprints-list)
-    # Order 0 / G30 v1 — per-player BuildingBlueprint_CopyDevice listing for
+    # Order 0 / G30 v1, per-player BuildingBlueprint_CopyDevice listing for
     # the v2 admin "Export" subtab. arg = numeric account_id; the helper
     # re-validates and rejects non-digits.
     if [[ ! "$arg" =~ ^[0-9]+$ ]]; then
@@ -769,7 +784,7 @@ case "$action" in
     exec /root/dune-blueprints-list.py "$arg"
     ;;
   blueprint-export)
-    # Order 0 / G30 v1 — single-blueprint Solido-market JSON dump (verbatim
+    # Order 0 / G30 v1, single-blueprint Solido-market JSON dump (verbatim
     # MIT port of icehunter cmdExportBlueprint). Multi-arg: <account_id> <bp_id>.
     # Ownership is re-verified inside the helper; cross-account fat-finger
     # returns "not_owned" instead of leaking data.
@@ -811,25 +826,20 @@ case "$action" in
     exec /root/dune-progression-state.py "$arg"
     ;;
   cvars-read)
-    # P8 — 5-layer INI merge read from the pinned game pod
+    # P8, 5-layer INI merge read from the pinned game pod
     # (sg-survival-1-pod-1). Read-only kubectl exec inside the pod; no args.
     [ -z "$arg" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     exec /opt/lastsietch-relay-helpers/dune-cvars-read.sh
     ;;
   cvars-write)
-    # P8 — single-target write to UserOverrides.ini on the pinned game pod.
-    # arg = base64-encoded JSON payload (same alphabet allowlist as `grant`).
-    # The helper re-decodes and re-validates every field; backup-before-write
-    # is automatic; NEVER restarts game pods/BGD/k3s.
-    if [[ ! "$arg" =~ ^[A-Za-z0-9+/=]+$ ]]; then
-      echo "rejected: invalid cvars-write payload" >&2
-      exit 2
-    fi
-    [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
-    exec /opt/lastsietch-relay-helpers/dune-cvars-write.sh "$arg"
+    # Retired (admin plan P0-4). It wrote UserOverrides.ini, and cvars do not
+    # apply from INI files: only -execcmds at start or RMQ ServerExec set them.
+    # The helper also still targets the dead host lastsietch-dune. Refused outright.
+    echo "rejected: cvars-write is retired; cvars do not apply from INI files" >&2
+    exit 2
     ;;
   cvars-diff)
-    # P8 — settingsUpdate capture diff. arg = optional ISO8601 UTC anchor
+    # P8, settingsUpdate capture diff. arg = optional ISO8601 UTC anchor
     # in compact form (`20260526T091342Z`).
     if [ -n "$arg" ]; then
       if [[ ! "$arg" =~ ^[0-9TZ]+$ ]]; then
@@ -841,7 +851,7 @@ case "$action" in
     exec /opt/lastsietch-rmq-bridge/diff-settingsupdate.sh "${arg:-}"
     ;;
   cvars-history)
-    # P8 — paginated lsadmin.cvar_changes read. Multi-arg: <limit> <offset>;
+    # P8, paginated lsadmin.cvar_changes read. Multi-arg: <limit> <offset>;
     # the helper re-validates and clamps. Read-only psql SELECT.
     read -r _action ch_limit ch_offset ch_extra <<<"$cmd"
     if [ -n "${ch_limit:-}" ] && [[ ! "$ch_limit" =~ ^[0-9]+$ ]]; then
@@ -856,13 +866,13 @@ case "$action" in
     exec /opt/lastsietch-relay-helpers/dune-cvars-history.sh "${ch_limit:-50}" "${ch_offset:-0}"
     ;;
   preset-list)
-    # VC3 — Read lsadmin.grant_presets. No args.
+    # VC3, Read lsadmin.grant_presets. No args.
     [ -z "$arg" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     exec /root/dune-presets-list.sh
     ;;
   grant-recent-by-player)
-    # VC3 — Recent grants for a single account_id. Multi-arg: <aid> [limit];
+    # VC3, Recent grants for a single account_id. Multi-arg: <aid> [limit];
     # the helper re-validates + clamps limit to 1..50 (default 10).
     read -r _action rp_aid rp_limit rp_extra <<<"$cmd"
     if [[ ! "$rp_aid" =~ ^[0-9]+$ ]]; then
@@ -876,8 +886,21 @@ case "$action" in
     [ -z "${rp_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     exec /root/dune-grant-recent-by-player.sh "$rp_aid" "${rp_limit:-10}"
     ;;
+  deliveries-by-player)
+    # Fremkit wave 12: the Welcome/Return packages the server sent one account.
+    # Single numeric arg, no limit: the helper's own caps (60 welcome lines, 5
+    # returns) are the whole bound, so there is no second field to validate and
+    # anything past the account id is rejected rather than ignored.
+    read -r _action dl_aid dl_extra <<<"$cmd"
+    if [[ ! "$dl_aid" =~ ^[0-9]+$ ]]; then
+      echo "rejected: invalid account_id (positive integer)" >&2
+      exit 2
+    fi
+    [ -z "${dl_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    exec /root/dune-deliveries-by-player.sh "$dl_aid"
+    ;;
   grant-postprocess)
-    # VC3 — UPDATE just-applied grant row with batch_id + preset_name.
+    # VC3, UPDATE just-applied grant row with batch_id + preset_name.
     # Multi-arg: <grant_id> <batch_id_or_dash> <preset_name_or_dash>. Each
     # field re-validated by the helper. '-' = no update for that column.
     read -r _action gp_gid gp_bid gp_preset gp_extra <<<"$cmd"
@@ -897,21 +920,21 @@ case "$action" in
     exec /root/dune-grant-postprocess.sh "$gp_gid" "${gp_bid:--}" "${gp_preset:--}"
     ;;
   rmq-last-funcom-push)
-    # VC2 P1 — read newest settingsUpdate capture, emit Funcom Intelligence
+    # VC2 P1, read newest settingsUpdate capture, emit Funcom Intelligence
     # summary (last_ts, sha256, push_count_today). No args.
     [ -z "$arg" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     exec /opt/lastsietch-rmq-bridge/rmq-last-funcom-push.py
     ;;
   rmq-bgd-rpc-recent)
-    # VC2 P1 — newest UTC-window dir under captures-admin/rpc/, filtered
+    # VC2 P1, newest UTC-window dir under captures-admin/rpc/, filtered
     # to the BGD inbox routing key. No args.
     [ -z "$arg" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     exec /opt/lastsietch-rmq-bridge/rmq-bgd-rpc-recent.py
     ;;
   rmq-partition-counts)
-    # VC2 P1 — newest UTC-window dir under captures-admin/response/,
+    # VC2 P1, newest UTC-window dir under captures-admin/response/,
     # latest message per partition routing key. Aggregator joins to map
     # names via dune.world_partition. No args.
     [ -z "$arg" ] || { echo "rejected: unexpected args" >&2; exit 1; }
@@ -919,7 +942,7 @@ case "$action" in
     exec /opt/lastsietch-rmq-bridge/rmq-partition-counts.py
     ;;
   rmq-completions-recent)
-    # VC2 P1 — newest UTC-window dir under captures-admin/completions/,
+    # VC2 P1, newest UTC-window dir under captures-admin/completions/,
     # last N events for the Live Action Stream panel. arg = optional
     # limit (1-3 digits, default 50; helper clamps to <=200).
     if [ -n "$arg" ]; then
@@ -932,26 +955,41 @@ case "$action" in
     exec /opt/lastsietch-rmq-bridge/rmq-completions-recent.py "${arg:-50}"
     ;;
   rmq-travel-queue)
-    # VC2 P1 — newest UTC-window dir under captures-admin/travelQueueStatus/,
+    # VC2 P1, newest UTC-window dir under captures-admin/travelQueueStatus/,
     # current queue depth + per-destination breakdown. No args.
     [ -z "$arg" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     exec /opt/lastsietch-rmq-bridge/rmq-travel-queue.py
     ;;
   telemetry-events)
-    # VC2 P1 — direct proxy to localhost telemetry-api /events for the
+    # VC2 P1, direct proxy to localhost telemetry-api /events for the
     # Live Action Stream panel. arg = optional limit (1-4 digits, default 50).
+    # Optional _extra narrows the read for the Amtal ledger's evidence lookup:
+    #   "--type <N>", "--partition <N>" or "--type <N> --partition <N>" (N 1-3 digits).
+    # Anything else is rejected.
     if [ -n "$arg" ]; then
       if [[ ! "$arg" =~ ^[0-9]{1,4}$ ]]; then
         echo "rejected: invalid limit (1-4 digits)" >&2
         exit 2
       fi
     fi
-    [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
-    exec curl -s -m 5 "http://127.0.0.1:8078/events?limit=${arg:-50}"
+    ev_filter=""
+    if [ -n "${_extra:-}" ]; then
+      if [[ "$_extra" =~ ^--type\ ([0-9]{1,3})$ ]]; then
+        ev_filter="&type=${BASH_REMATCH[1]}"
+      elif [[ "$_extra" =~ ^--partition\ ([0-9]{1,3})$ ]]; then
+        ev_filter="&partition=${BASH_REMATCH[1]}"
+      elif [[ "$_extra" =~ ^--type\ ([0-9]{1,3})\ --partition\ ([0-9]{1,3})$ ]]; then
+        ev_filter="&type=${BASH_REMATCH[1]}&partition=${BASH_REMATCH[2]}"
+      else
+        echo "rejected: unexpected args" >&2
+        exit 1
+      fi
+    fi
+    exec curl -s -m 5 "http://127.0.0.1:8078/events?limit=${arg:-50}${ev_filter}"
     ;;
   telemetry-transfers)
-    # VC2 P1 — direct proxy to localhost telemetry-api /transfers (cross-
+    # VC2 P1, direct proxy to localhost telemetry-api /transfers (cross-
     # battlegroup transfer events). arg = optional limit (1-4 digits, default 50).
     if [ -n "$arg" ]; then
       if [[ ! "$arg" =~ ^[0-9]{1,4}$ ]]; then
@@ -963,7 +1001,7 @@ case "$action" in
     exec curl -s -m 5 "http://127.0.0.1:8078/transfers?limit=${arg:-50}"
     ;;
   telemetry-world)
-    # VC2 P1 — direct proxy to localhost telemetry-api /world (world
+    # VC2 P1, direct proxy to localhost telemetry-api /world (world
     # counters series). arg = optional window (e.g. 24h, 7d, 4w; default 24h).
     if [ -n "$arg" ]; then
       if [[ ! "$arg" =~ ^[0-9]{1,3}[hdwHDW]$ ]]; then
@@ -975,7 +1013,7 @@ case "$action" in
     exec curl -s -m 5 "http://127.0.0.1:8078/world?window=${arg:-24h}"
     ;;
   telemetry-leaderboard-pvp|telemetry-leaderboard-deaths|telemetry-leaderboard-pilots)
-    # VC4 — direct proxy to localhost telemetry-api /leaderboard/{board} for the
+    # VC4, direct proxy to localhost telemetry-api /leaderboard/{board} for the
     # Monitor "Leaderboards" card (PvP kills / deaths+K-D / pilot air-distance).
     # board comes from the action suffix; arg = optional ISO week ("current"
     # default, or e.g. 2026-W23). Read-only; top-N slicing happens client-side.
@@ -988,6 +1026,13 @@ case "$action" in
     fi
     [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     exec curl -s -m 5 "http://127.0.0.1:8078/leaderboard/${board}?week=${arg:-current}"
+    ;;
+  telemetry-amtal-pvp)
+    # Amtal PvP board + kill streaks (BOUNTIES-SPEC §3): direct proxy to localhost
+    # telemetry-api /amtal/pvp. No args; read-only.
+    [ -z "$arg" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    exec curl -s -m 5 "http://127.0.0.1:8078/amtal/pvp"
     ;;
   spice-types)
     # W6: read-only listing of dune.spicefield_types (8 rows) for the V2
@@ -1009,6 +1054,14 @@ case "$action" in
     fi
     [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     exec /root/dune-spice-toggle.py --apply-b64 "$arg"
+    ;;
+  report-collect)
+    # Explicit bounded report window, no legacy cursor advancement or posting.
+    [[ "$arg" =~ ^[A-Za-z0-9+/=]+$ && ${#arg} -le 1024 ]] || {
+      echo "rejected: invalid report payload" >&2; exit 2;
+    }
+    [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    exec /opt/lastsietch-stats/dune-stats-collect.py --report-job-b64 "$arg"
     ;;
   stats-collect)
     # Server-stats digest data for the Cielago bot (Last Sietch). arg = period
@@ -1053,6 +1106,24 @@ case "$action" in
     [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     exec /root/dune-landsraad-board.py
     ;;
+  landsraad-claim)
+    # Portal Landsraad CLAIM WRITE path (docs/dune-research/LANDSRAAD-PORTAL-CLAIM-SPEC-
+    # 2026-10-06.md). Base64-encoded JSON job on stdin (same safe alphabet as
+    # storage-withdraw -- no whitespace / ';' / '$' / backtick, so shell injection is
+    # impossible). The writer re-validates {owner_ctrl, mode: preview|apply, operator},
+    # checks its own /etc/lastsietch gates, and runs the single OFFLINE-GATED transaction (mode
+    # preview rolls back). owner_ctrl is resolved server-side by the admin-backend.
+    [ -z "$arg" ] || { echo "rejected: landsraad-claim takes no args" >&2; exit 1; }
+    [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    payload=$(cat)
+    payload="${payload//[[:space:]]/}"
+    if [[ ! "$payload" =~ ^[A-Za-z0-9+/=]+$ ]]; then
+      echo "rejected: invalid landsraad-claim payload" >&2
+      exit 2
+    fi
+    printf '%s' "$payload" | base64 -d | /root/dune-landsraad-claim.py --stdin-json
+    exit $?
+    ;;
   market-status)
     # V2 Server>Market: bot service state + balance + ls_market_log activity.
     # Read-only (SELECTs + systemctl show). No args.
@@ -1089,7 +1160,7 @@ case "$action" in
     fi
     [ -z "${rr_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
     # rare-recent.py reads DB_* from env. Resolve fresh from k3s (same source
-    # run-market-bot.sh uses — the ClusterIP/port can change on svc recreate).
+    # run-market-bot.sh uses, the ClusterIP/port can change on svc recreate).
     # Absolute kubectl + explicit KUBECONFIG: the SSH forced-command env is minimal.
     export KUBECONFIG=${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}
     _rr_ns="${DUNE_NS:-funcom-seabass-sh-<your-hostid>-<random>}"
@@ -1159,8 +1230,11 @@ case "$action" in
     # so shell injection is impossible). Decoded JSON is piped to the writer's
     # --stdin-json mode; the writer re-validates that {seller_ctrl, item_id, count,
     # price, duration_days, max_orders?} are positive integers (duration in
-    # {1,3,7,14}) and the optional expected_template is allowlisted, then runs the
-    # single OFFLINE-GATED funding+add_sell_order transaction. The decoded payload
+    # {1,3,7,14}), the optional expected_template is allowlisted and the optional
+    # expected_src is one of {bank, backpack}, then runs the single OFFLINE-GATED
+    # funding+add_sell_order transaction. That offline gate is ACCOUNT-WIDE as of
+    # 2026-09-03, and each source carries its own flag file on this host:
+    # /etc/lastsietch/market-sell-container-enabled and /etc/lastsietch/market-sell-backpack-enabled. The decoded payload
     # never crosses a shell -- base64 -> stdin -> the python script. seller_ctrl and
     # the owned-inventory check are resolved server-side by the admin-backend before
     # it reaches here; this layer only relays (the writer re-verifies ownership as
@@ -1267,6 +1341,60 @@ case "$action" in
     printf '%s' "$payload" | base64 -d | /root/dune-storage-write.py --stdin-json
     exit $?
     ;;
+  storage-pawn-move)
+    # Narrow offline Bank and Backpack item transfer. The decoded writer payload
+    # carries only server-resolved owner_ctrl, item id, the two fixed storage kinds,
+    # and a UUID. It never carries an arbitrary inventory destination. The writer
+    # resolves the exact pair again and remains dark unless its /etc/lastsietch file gate
+    # exists.
+    [ -z "$arg" ] || { echo "rejected: storage-pawn-move takes no args" >&2; exit 1; }
+    [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    payload=$(cat)
+    payload="${payload//[[:space:]]/}"
+    if [[ ! "$payload" =~ ^[A-Za-z0-9+/=]+$ ]]; then
+      echo "rejected: invalid storage-pawn-move payload" >&2
+      exit 2
+    fi
+    printf '%s' "$payload" | base64 -d | /root/dune-storage-write.py --stdin-json
+    exit $?
+    ;;
+  refinery-op)
+    # Ingot Refinery READ + WRITE path (wave 10). ONE dispatcher token for both writer
+    # ops -- `catalog` (read-only: the rate table beside the writer plus the pawn's
+    # holdings, opens no write session) and `exchange` (the mutation) -- because fewer
+    # forced-command cases is fewer places to get the safe-alphabet guard wrong. The op
+    # travels INSIDE the b64 payload and /root/dune-refinery-write.py re-validates it,
+    # along with every other field, before opening a txn.
+    #
+    # Same safe b64-JSON-on-stdin contract as storage-pawn-move (no whitespace / ';' /
+    # '$' / backtick, so shell injection is impossible). account_id and owner_ctrl are
+    # resolved server-side by the admin-backend from the session before they reach here;
+    # the payload never carries an inventory id or a source selection. The writer
+    # re-resolves the pawn's bank/backpack/toolbar itself, offline-gates on the ACCOUNT,
+    # consumes before it mints, and records every applied trade in
+    # dune.ls_refinery_exchanges for UUID replay safety, audit and the weekly cap
+    # backstop.
+    #
+    # 🔴 dry_run must survive the relay's field whitelist: a whitelist-rebuild transport
+    # fails OPEN toward the destructive default (2026-08-14), so a dropped dry_run turns
+    # a probe into a live trade. The writer defaults it to false, which is why the relay
+    # side has to carry it explicitly.
+    #
+    # Kill-switch: /root/dune-refinery-write.py refuses a live exchange with
+    # refinery_disabled, without opening a DB session, unless /etc/lastsietch/refinery-enabled
+    # exists. NEVER restarts game pods/BGD/k3s (psql into the running DB only).
+    # Source-IP allowlist is unchanged (enforced globally above).
+    [ -z "$arg" ] || { echo "rejected: refinery-op takes no args" >&2; exit 1; }
+    [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    payload=$(cat)
+    payload="${payload//[[:space:]]/}"
+    if [[ ! "$payload" =~ ^[A-Za-z0-9+/=]+$ ]]; then
+      echo "rejected: invalid refinery-op payload" >&2
+      exit 2
+    fi
+    printf '%s' "$payload" | base64 -d | /root/dune-refinery-write.py --stdin-json
+    exit $?
+    ;;
   repair-box|repair-gear|repair-all|repair-vehicle)
     # Portal Item Repair WRITE path. Base64-encoded JSON job on stdin (same safe
     # alphabet as storage-withdraw/market-sell -- no whitespace / ';' / '$' / backtick,
@@ -1346,6 +1474,72 @@ case "$action" in
     fi
     printf '%s' "$payload" | /root/dune-reward-op.sh --op-b64-stdin
     exit $?
+    ;;
+  flag-set)
+    # Admin wave 2: flip ONE game-host kill-switch file under /etc/lastsietch. arg =
+    # <name>:<on|off>. These files are what the WRITERS read (the portal-side env
+    # gate only decides whether the door is offered), so this is the switch that
+    # actually darks or lights a live player feature.
+    #
+    # Three independent allowlists guard it: the relay validates the name and the
+    # state before an SSH argument is built, the hard `case` below refuses anything
+    # else reaching this box, and /root/dune-flag-set.sh re-validates once more
+    # before it touches a path. The arg pattern admits only [[:lower:]-] and on|off, so
+    # nothing that could be a shell metacharacter survives to the exec.
+    #
+    # servercmd-enabled is in the list on purpose: turning it off darks the ADMIN
+    # panel's own live actions, not a player feature. SSH remains the way back in.
+    # NEVER restarts game pods/BGD/k3s; this only creates or removes a file.
+    [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    if [[ ! "$arg" =~ ^[[:lower:]-]+:(on|off)$ ]]; then
+      echo "rejected: flag-set takes <name>:<on|off>" >&2
+      exit 2
+    fi
+    case "${arg%%:*}" in
+      karum-enabled|karum-wtb-enabled|augment-enabled|reward-enabled|servercmd-enabled|market-sell-container-enabled|storage-pawn-move-enabled|market-sell-backpack-enabled|item-transfer-enabled|landsraad-claim-enabled|refinery-enabled) ;;
+      *) echo "rejected: flag not in the allowlist" >&2; exit 2 ;;
+    esac
+    exec /root/dune-flag-set.sh "$arg"
+    ;;
+  flag-list)
+    # Read-only: the on/off state of all eleven allowlisted kill-switch files.
+    # Safe under a change freeze. The admin panel re-reads through this after
+    # every toggle, so what it renders is a fresh file test and never an echo of
+    # the request that was just sent.
+    [ -z "$arg" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    [ -z "${_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    exec /root/dune-flag-set.sh --list
+    ;;
+  event-effect-start|event-effect-end|event-effect-status)
+    # Weekend effects (WEEKEND-EVENTS-PLAN Stage 4): the <web-host> runner
+    # (ops/weekend-events/event-effects.py) starts, ends and polls one event's
+    # effect. Numeric and enum args only, re-validated by the worker:
+    #   event-effect-start  <event_id> <effect> <scope> <end_epoch>
+    #   event-effect-end    <event_id> <effect> <scope>
+    #   event-effect-status <event_id> <start|end|assert>
+    # start/end only record the job and hand it to a transient unit
+    # (lastsietch-event-<id>-<phase>), so an SSH drop cannot kill it. The worker refuses
+    # without /etc/lastsietch/event-effects-enabled, and the restart effects (xp,
+    # crafting) stay dark without /etc/lastsietch/event-effects-restart-enabled.
+    read -r _action ee_id ee_a ee_b ee_c ee_extra <<<"$cmd"
+    [ -z "${ee_extra:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    if [[ ! "$ee_id" =~ ^[0-9]{1,9}$ ]]; then
+      echo "rejected: invalid event_id (positive integer)" >&2
+      exit 2
+    fi
+    if [ "$action" = "event-effect-status" ]; then
+      [ -z "${ee_b:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+      [[ "$ee_a" =~ ^(start|end|assert)$ ]] || { echo "rejected: phase must be start, end or assert" >&2; exit 2; }
+      exec /usr/bin/python3 /opt/lastsietch-event-effects/event-effect-worker.py status "$ee_id" "$ee_a"
+    fi
+    [[ "$ee_a" =~ ^(xp|spec_xp|crafting|harvest)$ ]] || { echo "rejected: unknown effect" >&2; exit 2; }
+    [[ "$ee_b" =~ ^(fleet|amtal)$ ]] || { echo "rejected: unknown scope" >&2; exit 2; }
+    if [ "$action" = "event-effect-start" ]; then
+      [[ "$ee_c" =~ ^[0-9]{10}$ ]] || { echo "rejected: invalid end_epoch" >&2; exit 2; }
+      exec /usr/bin/python3 /opt/lastsietch-event-effects/event-effect-worker.py launch start "$ee_id" "$ee_a" "$ee_b" "$ee_c"
+    fi
+    [ -z "${ee_c:-}" ] || { echo "rejected: unexpected args" >&2; exit 1; }
+    exec /usr/bin/python3 /opt/lastsietch-event-effects/event-effect-worker.py launch end "$ee_id" "$ee_a" "$ee_b"
     ;;
   *)
     echo "rejected: unknown action" >&2

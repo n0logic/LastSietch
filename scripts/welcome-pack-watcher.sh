@@ -20,6 +20,11 @@
 
 set -euo pipefail
 
+# RETIRED 2026-10-20: legacy workstation watcher. The live watcher is /opt/lastsietch-welcome-pack/watcher.sh on the
+# game host (see ops/welcome-pack/), and grant-welcome-pack.sh (stale v1.6) is deleted.
+echo "RETIRED: $(basename "$0") is the legacy workstation watcher; see the header. Nothing done." >&2
+exit 1
+
 MODE="${1:-once}"
 INTERVAL="${2:-60}"
 

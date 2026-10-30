@@ -4,7 +4,7 @@
 # summed quantity. The portal turns this into a cross-container item search
 # ("Granite Stone -> which boxes, how many in each").
 #
-# Deployed to lastsietch-dune:/root/dune-container-search.py — invoked by the relay
+# Deployed to lastsietch-dune:/root/dune-container-search.py, invoked by the relay
 # over SSH via the dispatcher's `container-search <account_id>` token.
 #
 # Friendly-name matching is done in admin-backend (name_lookups), so this only
@@ -21,6 +21,7 @@ SELECT coalesce(json_agg(json_build_object(
   'container_id', sub.cid,
   'container_name', sub.cname,
   'container_type', sub.ctype,
+  'owner_ctrl', sub.owner_ctrl,
   'map', sub.map,
   'template_id', sub.template_id,
   'qty', sub.qty,
@@ -39,6 +40,7 @@ FROM (
            WHEN 'MediumStorageContainer_Placeable' THEN 'Medium Storage Container'
            ELSE p.building_type
          END AS ctype,
+         MAX(par.player_id) AS owner_ctrl,
          COALESCE(a.map, '') AS map,
          i.template_id,
          SUM(COALESCE(i.stack_size, 1)) AS qty,
@@ -71,6 +73,7 @@ FROM (
   SELECT inv.id AS cid,
          '' AS cname,
          'CHOAM Bank Storage' AS ctype,
+         MAX(eps.player_controller_id) AS owner_ctrl,
          '' AS map,
          i.template_id,
          SUM(COALESCE(i.stack_size, 1)) AS qty,
@@ -85,11 +88,34 @@ FROM (
 
   UNION ALL
 
+  -- Backpack (inventory_type 0 on an active pawn). The portal filters these rows
+  -- by owner_ctrl so search follows the selected character on a multi-character
+  -- account.
+  SELECT inv.id AS cid,
+         '' AS cname,
+         'Backpack' AS ctype,
+         MAX(eps.player_controller_id) AS owner_ctrl,
+         '' AS map,
+         i.template_id,
+         SUM(COALESCE(i.stack_size, 1)) AS qty,
+         COUNT(i.id) AS lines
+    FROM dune.inventories inv
+    JOIN dune.encrypted_player_state eps ON eps.player_pawn_id = inv.actor_id
+    JOIN dune.items i ON i.inventory_id = inv.id
+    WHERE inv.inventory_type = 0
+      AND eps.character_state IS DISTINCT FROM 'Deleted'
+      AND eps.account_id = {account_id}::bigint
+      AND i.template_id IS NOT NULL
+    GROUP BY inv.id, i.template_id
+
+  UNION ALL
+
   -- Vehicle cargo (inventory_type 0 on an owned vehicle actor). DD vehicle cargo
   -- is RAM-resident (not in this DB) so only Hagga vehicles contribute rows.
   SELECT inv.id AS cid,
          '' AS cname,
          'Vehicle:' || split_part(a.class, '.', 2) AS ctype,
+         MAX(par.player_id) AS owner_ctrl,
          COALESCE(a.map, '') AS map,
          i.template_id,
          SUM(COALESCE(i.stack_size, 1)) AS qty,
@@ -133,7 +159,7 @@ def main():
                           "error": "account_id must be digits"}))
         sys.exit(2)
 
-    # account_id has passed the isdigit() allowlist — safe to embed directly.
+    # account_id has passed the isdigit() allowlist, safe to embed directly.
     sql = SQL_TEMPLATE.format(account_id=account_id)
 
     try:

@@ -9,7 +9,7 @@ set -e
 bg_json() { curl -fsS --max-time 5 http://127.0.0.1:31282/v0/battlegroup 2>/dev/null || echo '{}'; }
 players_json() { curl -fsS --max-time 5 http://127.0.0.1:31282/v0/players/online 2>/dev/null || echo '[]'; }
 
-# Count game-server pods grouped by always-on (the 7 partition pods, incl. the 2nd Hagga sietch on survival-1 partition 32) vs on-demand.
+# Always-on: three Hagga instances, two Deep Desert instances and three hubs.
 NS="${NS:-funcom-seabass-sh-<your-hostid>-<random>}"
 ALWAYS_ON_RE='sg-(deepdesert-1|overmap|sh-arrakeen|sh-harkovillage|survival-1)-pod-'
 pods_json() {
@@ -77,7 +77,7 @@ host=$(printf '{"cpu_pct":%s,"cpu_count":%s,"load":%s,"uptime_secs":%s,"mem_used
   "$(hostname)")
 
 # Pod counts
-pods=$(printf '{"always_on_running":%s,"on_demand_running":%s,"total_running":%s,"always_on_expected":7}' \
+pods=$(printf '{"always_on_running":%s,"on_demand_running":%s,"total_running":%s,"always_on_expected":8}' \
   "$always_on_running" "$on_demand_running" "$total_running")
 
 printf '{"bg":%s,"players":%s,"host":%s,"pods":%s}' "$bg" "$players" "$host" "$pods"

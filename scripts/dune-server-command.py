@@ -10,8 +10,8 @@ This is the player-targeted sibling of dune-service-broadcast.py: same
 envelope, same AMQP P_basic tuple (user_id="fls"), same publish path -- only
 the inner ServerCommand + args differ. The inner shapes are byte-for-byte the
 shapes Icehunter's dune-admin rmq_commands.go sends to the SAME native
-UDuneServerCommandSubsystem (verified 2026-06-10: subsystem +
-UDuneServerCommandsCheatManager + all 15 verbs present in our shipping binary;
+UDuneServerCommandSubsystem (verified 2026-06-10: the subsystem and its verbs
+are present in our shipping binary;
 ServiceBroadcast already drives live through this exact path).
 
 AuthToken is PER-SERVER (our 352-byte JWT in server-gateway-secret), NOT
@@ -25,7 +25,7 @@ SAFETY SPINE:
   * Kill-switch: --send is refused unless LASTSIETCH_SERVERCMD_ENABLED=1.
   * Player verbs act only on ONLINE players (RMQ has no effect offline); the
     online check runs unless --no-online-check is passed.
-  * Destructive verbs (CleanPlayerInventory, ResetProgression, CheatScript)
+  * Destructive verbs (CleanPlayerInventory, ResetProgression)
     additionally require --i-understand-destructive and a --reason.
   * Every invocation appends a JSON line to the audit log.
 
@@ -62,7 +62,7 @@ DQ = "/root/dq.sh"  # DB query helper (kubectl exec into postgres pod)
 # Override via --token-file / DUNE_COMMAND_AUTH_TOKEN only if a future build rotates it.
 # Command credentials are supplied by the operator at runtime.
 
-DESTRUCTIVE = {"CleanPlayerInventory", "ResetProgression", "CheatScript"}
+DESTRUCTIVE = {"CleanPlayerInventory", "ResetProgression"}
 KILL_SWITCH_ENV = "LASTSIETCH_SERVERCMD_ENABLED"
 
 
@@ -208,8 +208,17 @@ def b_set_module(pid, a):
 
 
 def b_teleport(pid, a):
-    return {"ServerCommand": "TeleportToExact" if a.exact else "TeleportTo",
-            "PlayerId": pid, "X": a.x, "Y": a.y, "Z": a.z}
+    f = {"ServerCommand": "TeleportToExact" if a.exact else "TeleportTo",
+         "PlayerId": pid, "X": a.x, "Y": a.y, "Z": a.z}
+    # Optional TeleportToExact fields (build 2168446); a missing one is read as 0.0. On a dedicated
+    # server only Yaw (pawn) takes effect: CamPitch/CamYaw/CamRoll are dropped and the client's camera is unchanged.
+    if a.exact:
+        for field, value in (("Yaw", a.yaw), ("CamPitch", a.cam_pitch), ("CamYaw", a.cam_yaw), ("CamRoll", a.cam_roll)):
+            if value is not None:
+                f[field] = value
+    elif any(v is not None for v in (a.yaw, a.cam_pitch, a.cam_yaw, a.cam_roll)):
+        fail("--yaw/--cam-* need --exact (TeleportTo has no rotation fields)")
+    return f
 
 
 def b_water(pid, a):
@@ -228,11 +237,6 @@ def b_spawn_vehicle(pid, a):
     if a.faction:
         f["Faction"] = a.faction
     return f
-
-
-def b_cheat_script(pid, a):
-    return {"ServerCommand": "CheatScript", "PlayerId": pid,
-            "ScriptName": a.script_name}
 
 
 def b_clean_inv(pid, a):
@@ -355,6 +359,10 @@ def build_parser():
     s.add_argument("--y", type=float, required=True)
     s.add_argument("--z", type=float, required=True)
     s.add_argument("--exact", action="store_true", help="TeleportToExact (no safe-snap)")
+    s.add_argument("--yaw", type=float, help="pawn yaw (TeleportToExact only)")
+    s.add_argument("--cam-pitch", type=float, help="camera pitch (TeleportToExact only)")
+    s.add_argument("--cam-yaw", type=float, help="camera yaw (TeleportToExact only)")
+    s.add_argument("--cam-roll", type=float, help="camera roll (TeleportToExact only)")
     s.set_defaults(builder=b_teleport)
 
     s = sub.add_parser("refill-water"); add_player_arg(s)
@@ -371,10 +379,6 @@ def build_parser():
     s.add_argument("--persistent", action="store_true")
     s.add_argument("--faction", default="")
     s.set_defaults(builder=b_spawn_vehicle)
-
-    s = sub.add_parser("cheat-script"); add_player_arg(s)
-    s.add_argument("--script-name", required=True)
-    s.set_defaults(builder=b_cheat_script)
 
     s = sub.add_parser("clean-inventory"); add_player_arg(s)
     s.set_defaults(builder=b_clean_inv)

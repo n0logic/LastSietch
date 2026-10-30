@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# P8 — paginated history read of lsadmin.cvar_changes.
+# P8, paginated history read of lsadmin.cvar_changes.
 #
 # Deploys to lastsietch-dune:/opt/lastsietch-relay-helpers/dune-cvars-history.sh and is
 # invoked only via the dispatcher action `cvars-history` (forced-command).
@@ -36,8 +36,14 @@ if [ -z "$DB_NS" ] || [ -z "$DB_POD" ]; then
   exit 3
 fi
 
-PGPASS="$(sudo k3s kubectl exec -n "$DB_NS" "$DB_POD" -- printenv POSTGRES_PASSWORD 2>/dev/null || true)"
-if [ -z "$PGPASS" ]; then
+run_psql() {
+  sudo k3s kubectl exec -i -n "$DB_NS" "$DB_POD" -- \
+    sh -c '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"' _ \
+    -h localhost -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" "$@"
+}
+
+DB_AUTH_READY="$(sudo k3s kubectl exec -n "$DB_NS" "$DB_POD" -- sh -c 'test -n "${POSTGRES_PASSWORD:-}" && printf available' 2>/dev/null || true)"
+if [ -z "$DB_AUTH_READY" ]; then
   echo '{"status":"error","error":"could not read POSTGRES_PASSWORD"}'
   exit 3
 fi
@@ -92,9 +98,7 @@ SQL
 set +e
 OUT="$(
   printf '%s\n' "$SQL" \
-    | sudo k3s kubectl exec -i -n "$DB_NS" "$DB_POD" -- \
-        env PGPASSWORD="$PGPASS" psql -h localhost -p "$DB_PORT" \
-        -U "$DB_USER" -d "$DB_NAME" -tA -v ON_ERROR_STOP=1 \
+    | run_psql -tA -v ON_ERROR_STOP=1 \
         -v "limit=$LIMIT" -v "offset=$OFFSET" 2>/tmp/cvars-history.err
 )"
 PSQL_RC=$?

@@ -36,10 +36,8 @@ def kubectl(args):
 
 
 def psql(sql):
-    pw = kubectl(["exec", "-n", NS, DB_POD, "--", "printenv", "POSTGRES_PASSWORD"]).stdout.strip()
     r = subprocess.run(
-        ["sudo", "kubectl", "exec", "-i", "-n", NS, DB_POD, "--", "env", f"PGPASSWORD={pw}",
-         "psql", "-h", "localhost", "-p", "15432", "-U", "postgres", "-d", "dune",
+        ["sudo", "kubectl", "exec", "-i", "-n", NS, DB_POD, "--", "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_", "-h", "localhost", "-p", "15432", "-U", "postgres", "-d", "dune",
          "-t", "-A", "-F|", "-v", "ON_ERROR_STOP=1"],
         input=sql, capture_output=True, text=True, timeout=60,
     )
@@ -71,14 +69,19 @@ def get_ladders(controllers, run):
         goal_rows = run(
             "SELECT t.house_name, t.goal_amount, "
             "COALESCE((SELECT SUM(pc.amount) FROM dune.landsraad_task_player_contributions pc "
-            f"WHERE pc.task_id = t.id AND pc.player_id IN ({ctrl_csv})), 0) "
+            f"WHERE pc.task_id = t.id AND pc.player_id IN ({ctrl_csv})), 0), "
+            # One landsraad_task_progress row per turn-in; Seven Nights pays per turn-in.
+            "(SELECT COUNT(*) FROM dune.landsraad_task_progress p "
+            "JOIN dune.landsraad_task_progress_player pp ON pp.progress_id = p.id "
+            f"WHERE p.task_id = t.id AND pp.player_id IN ({ctrl_csv})) "
             "FROM dune.landsraad_tasks t "
             "WHERE t.term_id = (SELECT max(term_id) FROM dune.landsraad_tasks);"
         )
-        for house, goal, contrib in goal_rows:
+        for house, goal, contrib, turnins in goal_rows:
             ladders[house] = {
                 "goal": int(goal or 0),
                 "my_contribution": int(float(contrib or 0)),
+                "my_turnins": int(turnins or 0),
                 "rewards": [],
             }
         reward_rows = run(

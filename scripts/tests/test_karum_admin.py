@@ -28,7 +28,8 @@ BACKEND = os.path.join(REPO, "admin-backend")
 
 ROUTER = os.path.join(BACKEND, "routers", "v2_karum.py")
 TEMPLATE = os.path.join(BACKEND, "templates", "v2", "karum.html")
-SUBNAV = os.path.join(BACKEND, "templates", "v2", "_includes", "portal_subnav.html")
+# Karum moved from the Portal sub-nav to Economy in the 2026-09-03 six-tab IA.
+SUBNAV = os.path.join(BACKEND, "templates", "v2", "_includes", "economy_subnav.html")
 BASE_TPL = os.path.join(BACKEND, "templates", "v2", "base.html")
 MAIN = os.path.join(BACKEND, "main.py")
 RELAY = os.path.join(REPO, "relay", "app.py")
@@ -86,7 +87,8 @@ def test_page_lives_on_the_admin_panel_only():
     assert not bare, f"the operator page must not register a player-portal path: {bare}"
     subnav = _read(SUBNAV)
     assert 'href="/admin/v2/portal/karum"' in subnav
-    assert "{% elif current_tab == 'portal' %}" in _read(BASE_TPL)
+    # the tab is derived from the request path since the six-tab IA (no current_tab key)
+    assert "nav_path.startswith('/v2/portal/karum')" in _read(BASE_TPL)
 
 
 # --------------------------------------------------------------------------- #
@@ -155,6 +157,20 @@ def test_listing_mirror_only_on_a_confirmed_write():
     assert 'if status == "deferred":' in src
     dark = src[src.index('if status == "deferred":'):]
     assert "UPDATE portal_karum_listings" not in dark[:400]
+
+
+def test_operator_keeps_a_linked_wanted_order_in_step():
+    src = _read(ROUTER)
+    linked = src[src.index("# A wanted-order fill settles through a normal listing"):
+                 src.index("return {\"ok\": True", src.index(
+                     "# A wanted-order fill settles through a normal listing"))]
+    assert "portal_karum_requests" in linked
+    assert "settlement_listing_id = ?" in linked
+    assert "status = 'filled'" in linked
+    assert "status = 'failed'" in linked
+    force_return = linked[linked.index('if action == "force-deliver":'):]
+    assert 'elif action == "refund":' in force_return
+    assert 'action == "force-return"' not in force_return
 
 
 def test_page_names_idempotency_so_a_retry_is_obviously_safe():
@@ -337,8 +353,10 @@ def test_deploy_refuses_if_the_dark_default_was_edited():
     dep = _read(DEPLOY)
     guards = [
         ('LASTSIETCH_KARUM_ENABLED="${LASTSIETCH_KARUM_ENABLED:-0}"', WRITER),
+        ('LASTSIETCH_KARUM_WTB_ENABLED="${LASTSIETCH_KARUM_WTB_ENABLED:-0}"', WRITER),
         ('LASTSIETCH_KARUM_STATS_SENTINEL="${LASTSIETCH_KARUM_STATS_SENTINEL:-0}"', WRITER),
         ('LASTSIETCH_KARUM_ENABLED", "0"', PORTAL),
+        ('LASTSIETCH_KARUM_WTB_ENABLED", "0"', PORTAL),
     ]
     for pattern, target in guards:
         assert pattern in dep, f"the deploy script no longer guards {pattern!r}"
@@ -349,7 +367,7 @@ def test_deploy_refuses_if_the_dark_default_was_edited():
     # and it must actually abort, not warn
     seg = dep[dep.index("the DARK defaults must be intact"):]
     seg = seg[:seg.index("Preflight 3")]
-    assert seg.count("|| die") >= 3, "the dark-default guards must die, not warn"
+    assert seg.count("|| die") >= 5, "the dark-default guards must die, not warn"
 
 
 def test_deploy_never_touches_pods_bgd_or_k3s():
@@ -402,16 +420,30 @@ def test_deploy_has_a_dry_run_and_a_red_suite_stops_it():
     assert "ALREADY LIVE" in dep
 
 
-def test_deploy_leaves_everything_dark_and_says_so():
+def test_deploy_probes_the_wtb_gate_and_never_flips_it():
+    """WTB went live 2026-08-25, so this no longer asserts DARK: a fixed expectation would
+    fail every correct deploy from that day on. What must hold is that the deploy READS the
+    gate rather than assuming it, refuses when the writer disagrees with the flag, and
+    still never flips it itself."""
     dep = _read(DEPLOY)
-    assert "STILL DARK" in dep or "still DARK" in dep
-    # the un-dark checklist has to name all four gates
-    tail = dep[dep.index("BEFORE UN-DARKING"):]
-    for gate in ("LT-0", "LT-2", "two-account", "lastsietch-karum-audit"):
-        assert gate in tail, f"the un-dark checklist does not mention {gate}"
-    # and the mirror-the-flag warning, which has bitten twice
-    assert "MIRROR BOTH DEFAULTS INTO THE REPO" in tail
-    assert "next deploy silently reverts" in tail
+    probe = dep[dep.index("# (c) The WTB gate"):]
+    probe = probe[:probe.index("# (d) the audit")]
+    assert "karum-fill" in probe
+    assert "Wanted orders are not open yet" in probe
+    # Read the real gate, and branch on it, rather than hardcoding either state.
+    assert "test -f /etc/lastsietch/karum-wtb-enabled" in probe
+    assert 'if [[ "$WTB_ON" == "no" ]]; then' in probe
+    # Both directions of disagreement between the flag and the executed path must die.
+    # `die "` not `die`: the block's own comment mentions the word, and a bare substring
+    # count would pass on two invocations plus prose just as happily as on three.
+    assert probe.count('die "') == 2, "a flag/writer disagreement must fail the deploy"
+    # A deploy still must not be able to open or close the gate as a side effect.
+    body = dep[:dep.index("== KARUM DEPLOYED ==")]
+    assert "touch /etc/lastsietch/karum-wtb-enabled" not in body
+    assert "LASTSIETCH_KARUM_WTB_ENABLED=1" not in body
+    tail = dep[dep.index("== KARUM DEPLOYED =="):]
+    for gate in ("KILL SWITCH", "/etc/lastsietch/karum-wtb-enabled", "two-account"):
+        assert gate in tail, f"the footer does not mention {gate}"
 
 
 def _all_tests():

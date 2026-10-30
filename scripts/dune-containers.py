@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Read-only per-player container list for the Last Sietch admin v2 Player Tools tab
 # (and, eventually, the public portal Account page). Deployed to
-# lastsietch-dune:/root/dune-containers.py — invoked by the relay over SSH via the
+# lastsietch-dune:/root/dune-containers.py, invoked by the relay over SSH via the
 # dispatcher's `containers-list <account_id>` token.
 #
 # Filters: world POIs are excluded by the JOIN on owner_entity_id (NULL =>
@@ -113,6 +113,29 @@ FROM (
 
   UNION ALL
 
+  -- Backpack: inventory_type 0 on the selected character's pawn. The account read
+  -- emits one row per active character; the portal filters this set by owner_ctrl so
+  -- an alternate character's backpack never becomes the active writable backpack.
+  SELECT inv.id AS id,
+         inv.id AS inv_id,
+         MAX(eps.player_controller_id) AS owner_ctrl,
+         '' AS name,
+         'Backpack' AS class,
+         'Backpack' AS label,
+         '' AS map,
+         COUNT(i.id) AS item_count,
+         MAX(inv.max_item_count) AS max_item_count,
+         MAX(inv.max_item_volume) AS max_item_volume
+    FROM dune.inventories inv
+    JOIN dune.encrypted_player_state eps ON eps.player_pawn_id = inv.actor_id
+    LEFT JOIN dune.items i ON i.inventory_id = inv.id
+    WHERE inv.inventory_type = 0
+      AND eps.character_state IS DISTINCT FROM 'Deleted'
+      AND eps.account_id = {account_id}::bigint
+    GROUP BY inv.id
+
+  UNION ALL
+
   -- Vehicle cargo: vehicles are actors owned directly via permission_actor_rank
   -- (actors.id = permission_actor_id, rank 1), NOT placeables. Cargo lives in the
   -- vehicle's inventory_type 0. Container id = that cargo inventory id (keyed by
@@ -216,7 +239,7 @@ def main():
                           "error": "account_id must be digits"}))
         sys.exit(2)
 
-    # account_id has passed the isdigit() allowlist — safe to embed directly.
+    # account_id has passed the isdigit() allowlist, safe to embed directly.
     sql = SQL_TEMPLATE.format(account_id=account_id)
 
     try:

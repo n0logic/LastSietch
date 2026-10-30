@@ -13,8 +13,10 @@ capture hook. The fee-formula is checked against the writer's authoritative form
 Run:  python3 scripts/tests/test_market_v2.py     (also import-safe)
 """
 import importlib.util
+import atexit
 import os
 import re
+import shutil
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -36,10 +38,15 @@ def _read(path):
 
 def _load_market_history():
     """Import market_history against a fresh temp admin.db. LASTSIETCH_DB_PATH must be set
-    BEFORE database.py binds DB_PATH at import, so this seeds env then imports."""
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    os.environ["LASTSIETCH_DB_PATH"] = tmp.name
+    BEFORE database.py binds DB_PATH at import, so this seeds env then imports.
+    The price history lives in its OWN file since 2026-09-02, so that path is
+    seeded too: one temp DIRECTORY per call, or successive tests in one process
+    would share a history DB and the assertions would depend on test order."""
+    tmpdir = tempfile.mkdtemp(prefix="market-v2-")
+    atexit.register(shutil.rmtree, tmpdir, ignore_errors=True)
+    admin_db = os.path.join(tmpdir, "admin.db")
+    os.environ["LASTSIETCH_DB_PATH"] = admin_db
+    os.environ["LASTSIETCH_MARKET_HISTORY_DB_PATH"] = os.path.join(tmpdir, "market_history.db")
     # config.py mandates these at import; seed dummies for the isolated unit test.
     os.environ.setdefault("LASTSIETCH_RELAY_API_KEY", "test-key")
     os.environ.setdefault("LASTSIETCH_SESSION_SECRET", "test-secret")
@@ -54,7 +61,7 @@ def _load_market_history():
     m = importlib.util.module_from_spec(spec)
     sys.modules["market_history"] = m
     spec.loader.exec_module(m)
-    return m, tmp.name
+    return m, admin_db
 
 
 def test_aggregate_listings_downsamples_per_template():
@@ -102,21 +109,28 @@ def test_capture_throttle_and_history_and_low7d():
 
 
 def test_capture_prunes_beyond_retention():
-    m, dbpath = _load_market_history()
+    """Post-relocation (2026-09-02) the raw tier keeps 48 h, not 21 d: a point
+    older than that survives only as its hourly bucket. Tier-by-tier retention is
+    covered in test_market_history_tiers.py; this keeps the end-to-end pin that a
+    capture still prunes."""
+    m, _ = _load_market_history()
     from datetime import datetime, timedelta, timezone
     import sqlite3
-    old = (datetime.now(timezone.utc) - timedelta(days=m._RETENTION_DAYS + 2)).isoformat()
-    conn = sqlite3.connect(dbpath)
-    conn.executescript(m._SCHEMA)
-    conn.execute("INSERT INTO market_price_history(template_id, min_price, "
-                 "median_price, listing_count, total_qty, captured_at) "
-                 "VALUES('Stale', 1, 1, 1, 1, ?)", (old,))
-    conn.commit()
-    conn.close()
-    # a capture of a different template triggers the prune of the stale row
+    old = (datetime.now(timezone.utc)
+           - timedelta(hours=m._RAW_RETENTION_HOURS + 2)).isoformat()
+    assert m.capture([{"template_id": "Stale", "min_price": 1, "median_price": 1,
+                       "listing_count": 1, "total_qty": 1}], captured_at=old) == 1
+    # a capture of a different template in a later hour triggers the prune
     m.capture([{"template_id": "Fresh", "min_price": 5, "median_price": 5,
                 "listing_count": 1, "total_qty": 1}])
-    assert m.history("Stale")["points"] == []
+    conn = sqlite3.connect(m.MARKET_HISTORY_DB_PATH)
+    try:
+        raw = conn.execute(
+            "SELECT t.template_id FROM mph_raw r JOIN templates t ON t.id = r.tpl"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert [r[0] for r in raw] == ["Fresh"], raw
     assert len(m.history("Fresh")["points"]) == 1
 
 
@@ -271,18 +285,25 @@ def test_v2_flips_use_player_only_floor():
 
 
 def test_market_history_prune_index_present():
-    m, dbpath = _load_market_history()
+    m, _ = _load_market_history()
     m.init()
     import sqlite3
-    conn = sqlite3.connect(dbpath)
+    conn = sqlite3.connect(m.MARKET_HISTORY_DB_PATH)
     try:
         idx = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='index' "
-            "AND tbl_name='market_price_history'").fetchall()}
+            "AND tbl_name='mph_raw'").fetchall()}
+        tables = {r[0]: r[1] for r in conn.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='table'").fetchall()}
     finally:
         conn.close()
-    # dedicated captured_at index so the ~30s prune is not a full scan
-    assert "idx_mph_time" in idx
+    # dedicated ts index on the 48 h tier so neither the capture throttle nor the
+    # raw prune is a full scan
+    assert "idx_mph_raw_ts" in idx, idx
+    # the hourly and daily tiers prune through their composite PK instead, which
+    # only works because they are WITHOUT ROWID
+    for table in ("mph_hourly", "mph_daily"):
+        assert "WITHOUT ROWID" in tables[table], table
 
 
 def test_mirror_has_player_floor_accessor():
@@ -340,6 +361,25 @@ def test_mirror_has_price_history_capture_hook():
 def _all_tests():
     return [v for k, v in sorted(globals().items())
             if k.startswith("test_") and callable(v)]
+
+
+def test_completed_orders_carry_the_servers_completion_label_not_sold():
+    # Live QA 2026-09-03: a pulled (canceled) listing showed as SOLD in the
+    # Completed tab. The backend already maps completion_type 3 to "Canceled"
+    # and ships status_label/status_sub; the row must render those.
+    row = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "admin-backend", "portal-nextgen", "src", "lib", "components", "exchange", "OrderRow.svelte"), encoding="utf-8").read()
+    assert '<span class="state done">Sold</span>' not in row, "completed rows must not hardcode Sold"
+    assert "{order?.status_label || 'Closed'}" in row and "title={order?.status_sub || ''}" in row
+    assert "order?.completion_type === 4 || order?.completion_type === 5" in row, "only a sale or purchase is the green state"
+
+
+def test_relist_sits_on_canceled_rows_and_cancel_on_active_rows():
+    # Live QA 2026-09-03: Relist rendered on active rows (the writer answers
+    # not_canceled there) and never on the Canceled rows that can be relisted.
+    row = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "admin-backend", "portal-nextgen", "src", "lib", "components", "exchange", "OrderRow.svelte"), encoding="utf-8").read()
+    assert "let canRelist = $derived(bucket === 'completed' && order?.completion_type === 3);" in row
+    assert "{#if canRelist}<button class=\"op\" type=\"button\" onclick={() => (relisting = true)}" in row
+    assert "{#if bucket === 'active'}<button class=\"op danger\"" in row
 
 
 if __name__ == "__main__":

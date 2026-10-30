@@ -45,36 +45,31 @@ OUTLIER_RADIUS = 450000.0                   # ~1.7 sectors from the cluster medi
 DIMS = {0: ("PvE", 6), 1: ("PvP", 12)}
 
 
-_DB_CREDS: tuple[str, str] | None = None
+_DB_PORT = None
 
 
-def _db_creds() -> tuple[str, str]:
-    """(password, port) read once from the db pod env. The DB service port differs
-    by box (15433 on the old box, 15432 on the EPYC) -> read it from the pod rather
-    than hardcode, so the same script works before AND after the hardware cutover.
-    Falls back to 15433 (the historical default) if the env var is absent."""
-    global _DB_CREDS
-    if _DB_CREDS is None:
+def _db_port():
+    global _DB_PORT
+    if _DB_PORT is None:
         env = subprocess.run(
-            ["kubectl", "exec", "-n", NS, DBPOD, "--", "printenv"],
+            ["kubectl", "exec", "-n", NS, DBPOD, "--", "sh", "-c",
+             "printenv | sed -n '/_DB_DBDEPL_SVC_SERVICE_PORT=[0-9][0-9]*$/p'"],
             capture_output=True, text=True, timeout=20).stdout
-        pw, port = "", "15433"
+        port = "15433"
         for line in env.splitlines():
             k, _, v = line.partition("=")
-            if k == "POSTGRES_PASSWORD":
-                pw = v.strip()
-            elif k.endswith("_DB_DBDEPL_SVC_SERVICE_PORT") and v.strip().isdigit():
+            if k.endswith("_DB_DBDEPL_SVC_SERVICE_PORT") and v.strip().isdigit():
                 port = v.strip()
-        _DB_CREDS = (pw, port)
-    return _DB_CREDS
+        _DB_PORT = port
+    return _DB_PORT
 
 
 def _psql(sql: str) -> str:
     """Run read-only SQL in the live dune DB pod, tuples-only unaligned."""
-    pgpass, pgport = _db_creds()
+    pgport = _db_port()
     out = subprocess.run(
         ["kubectl", "exec", "-n", NS, DBPOD, "--",
-         "env", f"PGPASSWORD={pgpass}", "psql", "-h", "localhost", "-p", pgport,
+         "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_", "-h", "localhost", "-p", pgport,
          "-U", "postgres", "-d", "dune", "-tAc", sql],
         capture_output=True, text=True, timeout=30)
     if out.returncode != 0:
@@ -146,11 +141,14 @@ def cluster(players: list[tuple[float, float]],
 
 def main() -> int:
     # Authoritative liveness: is a Large active per dimension?
+    # 1.5.3 (2026-09-17) dropped dune.spicefield_types and the field_kind_id column of
+    # dune.resourcefield_state. What remains is value_remaining: a Large starts at 2,500,000
+    # and a Medium at 150,000, so "a row above the Medium ceiling" is a Large, and it stays
+    # recognisable until it is mined below 150,000 (nearly exhausted by then).
     live_sql = (
-        "SELECT json_agg(json_build_object("
-        "'dim', dimension_index, 'active', current_globally_active)) "
-        "FROM dune.spicefield_types "
-        "WHERE map_name='DeepDesert' AND field_type='Large';")
+        "SELECT json_agg(json_build_object('dim', dimension_index, 'active', n)) "
+        "FROM (SELECT dimension_index, count(*) AS n FROM dune.resourcefield_state "
+        "WHERE map='DeepDesert' AND value_remaining > 150000 GROUP BY 1) t;")
     live = {int(r["dim"]): int(r["active"]) for r in (json.loads(_psql(live_sql)) or [])}
 
     # Authoritative field identity per dim. The Large is the highest-value Spice
@@ -164,7 +162,7 @@ def main() -> int:
         "SELECT json_agg(json_build_object('dim', dimension_index, "
         "'fid', field_id::text, 'val', value_remaining)) "
         "FROM dune.resourcefield_state "
-        "WHERE map='DeepDesert' AND field_kind_id=1;")
+        "WHERE map='DeepDesert' AND value_remaining > 150000;")
     large_fid: dict[int, tuple[str, int]] = {}
     for r in (json.loads(_psql(fid_sql)) or []):
         d, v = int(r["dim"]), r["val"]

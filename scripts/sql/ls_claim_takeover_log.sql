@@ -42,8 +42,22 @@ CREATE TABLE IF NOT EXISTS dune.ls_claim_takeover_log (
   outcome            text,
   detail             text,
 
-  CONSTRAINT ls_cto_action_chk CHECK (action IN ('takeover', 'revert'))
+  CONSTRAINT ls_cto_action_chk
+    CHECK (action IN ('takeover', 'revert', 'backup_save', 'register'))
 );
+
+-- Restated as an ALTER as well, because the live table predates two of these
+-- values and CREATE TABLE IF NOT EXISTS above will not alter an existing one.
+-- Found 2026-08-18: the live constraint already allowed 'backup_save' (added by
+-- dune-base-backup-op.py) while this file still said only takeover/revert, so
+-- this file had been wrong about production for a while. A --register run then
+-- failed against the real constraint, which is the only reason anyone noticed.
+-- Drop-then-add keeps this idempotent.
+ALTER TABLE dune.ls_claim_takeover_log
+  DROP CONSTRAINT IF EXISTS ls_cto_action_chk;
+ALTER TABLE dune.ls_claim_takeover_log
+  ADD  CONSTRAINT ls_cto_action_chk
+       CHECK (action IN ('takeover', 'revert', 'backup_save', 'register'));
 
 -- Ownership: REQUIRED so Funcom's pre-update pg_dump does not halt. A Funcom
 -- migration that reassigns schema objects leaves correctly-owned tables alone; a

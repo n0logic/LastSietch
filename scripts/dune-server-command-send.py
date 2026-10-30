@@ -122,11 +122,13 @@ def main():
     elif verb == "award-xp":
         cat = args.get("category")
         exp = args.get("experience")
-        if not isinstance(cat, str) or not cat.strip() or len(cat) > MAX_STR \
-                or not cat.replace("_", "").isalnum():
-            respond(False, mode, -1, verb, "invalid category")
-        if not isinstance(exp, int) or isinstance(exp, bool) or not (1 <= exp <= 10_000_000):
-            respond(False, mode, -1, verb, "experience must be int 1..10000000")
+        # Science and Exploration pick their earn area; any other string lands
+        # on Combat, so only the three real names are accepted.
+        if cat not in ("Combat", "Science", "Exploration"):
+            respond(False, mode, -1, verb, "category must be Combat, Science or Exploration")
+        # 344,440 is the cumulative XP for level 200.
+        if not isinstance(exp, int) or isinstance(exp, bool) or not (1 <= exp <= 344_440):
+            respond(False, mode, -1, verb, "experience must be int 1..344440")
         tail = ["--category", cat, "--experience", str(exp)]
     elif verb == "teleport":
         x, y, z = args.get("x"), args.get("y"), args.get("z")

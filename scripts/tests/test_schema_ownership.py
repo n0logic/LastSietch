@@ -48,15 +48,45 @@ CREATE_RE = re.compile(
 # SQLite tool using the same idiom is not dragged in.
 CREATE_TEMPLATED_RE = re.compile(
     r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\{[A-Za-z0-9_]+\})", re.I)
-OWNER_RE = re.compile(r"OWNER\s+TO\s+dune", re.I)
+# The ownership claim must be an actual ALTER TABLE statement, not prose. The
+# old pattern (r"OWNER\s+TO\s+dune") matched anywhere in the file, so a COMMENT
+# saying "the ALTER ... OWNER TO dune below is REQUIRED" kept this linter green
+# with no statement present, verified 2026-08-26 by deleting the real ALTER
+# from a new DDL and watching the linter stay green until the prose was removed
+# too. Prose lives in comment lines and statements do not, so comment lines
+# (`--` in SQL, `#` in sh/py) are stripped before the search; the statement
+# itself may legitimately be embedded in code (cur.execute("ALTER TABLE ..."),
+# an echo'd heredoc line, a %s-templated table name), which is why a line
+# anchor is wrong here.
+OWNER_RE = re.compile(r"ALTER\s+TABLE\b[^;]*?\bOWNER\s+TO\s+dune\b", re.I)
+_COMMENT_LINE_RE = re.compile(r"^\s*(--|#).*$", re.M)
+
+
+def _statement_text(src: str) -> str:
+    """The file with comment-only lines removed, what the OWNER search runs on."""
+    return _COMMENT_LINE_RE.sub("", src)
 
 
 def _walk():
     for root, dirs, files in os.walk(REPO):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for f in files:
-            if f.endswith((".sql", ".sh", ".py")):
-                yield os.path.join(root, f)
+            if not f.endswith((".sql", ".sh", ".py")):
+                continue
+            path = os.path.join(root, f)
+            # Test fixtures are excluded. This rule exists because Funcom's
+            # pre-update pg_dump aborts on any dune-schema object not owned by
+            # `dune`, which is a PRODUCTION failure mode. A *_pg.sh fixture
+            # builds its tables inside a throwaway container that has no `dune`
+            # role at all -- the other fixtures already strip `OWNER TO dune`
+            # from real DDL for exactly that reason. Demanding ownership there
+            # asks for a statement that cannot execute, so the only way to
+            # satisfy this rule in a fixture is to break the test.
+            # Schema dumps loaded by those *_pg.sh tests live in tests/fixtures/.
+            if os.path.basename(path).startswith("test_") or \
+                    os.path.relpath(root, REPO).replace(os.sep, "/") == "scripts/tests/fixtures":
+                continue
+            yield path
 
 
 def _read(path):
@@ -84,7 +114,7 @@ def test_every_ls_table_ddl_claims_ownership():
             created |= set(m.group(1) for m in CREATE_TEMPLATED_RE.finditer(src))
         if not created:
             continue
-        if not OWNER_RE.search(src):
+        if not OWNER_RE.search(_statement_text(src)):
             offenders.append((rel, sorted(created)))
 
     assert not offenders, (
@@ -106,7 +136,7 @@ def test_the_five_known_offenders_are_fixed():
         if not os.path.isfile(path):
             continue          # tool moved or retired; the repo-wide test still covers it
         src = _read(path)
-        assert OWNER_RE.search(src), f"{rel} lost its OWNER TO dune ({', '.join(tables)})"
+        assert OWNER_RE.search(_statement_text(src)), f"{rel} lost its OWNER TO dune ({', '.join(tables)})"
 
 
 def test_the_live_gate_is_documented_not_replaced():

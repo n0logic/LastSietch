@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Regression tests for the Karum backend (Phase 1, L1-L3): the writer
-(scripts/dune-karum-op.sh), its two game-DB ledgers, the dispatcher token and the four
+(scripts/dune-karum-op.sh), its two game-DB ledgers, the dispatcher token and the five
 relay routes.
 
 Prod-safe: NO real DB, NO network. The writer is driven as a subprocess in --dry-run, which
@@ -34,17 +34,41 @@ CORR = "11111111-2222-3333-4444-555555555555"
 CORR2 = "99999999-8888-7777-6666-555555555555"
 
 
+def test_the_karum_labels_a_schematic_as_one_everywhere_it_names_an_item():
+    """Player report 2026-09-04: 419 schematic templates carry the plain item name in
+    the curated names file, so a schematic and its item shared a label in the picker.
+    The Karum labels a *Schematic template as one in its catalogue and in both public
+    projections, through one helper, so no surface shows the bare name for a recipe."""
+    src = _read(os.path.join(os.path.dirname(SCRIPTS), "admin-backend", "routers", "portal.py"))
+    assert "def _karum_display_name(template_id, name) -> str:" in src
+    assert 'if tid.endswith("schematic") and "schematic" not in label.lower():' in src, \
+        "the suffix rule keys on the template id, never on the curated name"
+    assert '"name": _karum_display_name(template_id, row.get("name")),' in src, \
+        "the picker catalogue must go through the helper"
+    assert src.count('"display_name": _karum_display_name(row["template_id"], row["display_name"]),') == 2, \
+        "both the listing and the wanted-order projections must go through the helper"
+    assert '"bare_name": str(row.get("name") or template_id)[:120],' in src and \
+        'catalog_item.get("bare_name") or catalog_item["name"], catalog_item["category"]' in src, \
+        "a wanted order stores the BARE name so both boards search alike; the label is projection"
+    assert 'if w.lower() != "schematic"]' in src and "lower(template_id) LIKE '%schematic'" in src, \
+        "a query carrying the word schematic must narrow to schematic templates, not miss every row"
+
+
 def _read(path):
     with open(path, "r", encoding="utf-8") as fh:
         return fh.read()
 
 
-def _run(payload, enabled="1"):
+def _run(payload, enabled="1", wtb_enabled="0"):
     env = dict(os.environ)
     if enabled is None:
         env.pop("LASTSIETCH_KARUM_ENABLED", None)
     else:
         env["LASTSIETCH_KARUM_ENABLED"] = enabled
+    if wtb_enabled is None:
+        env.pop("LASTSIETCH_KARUM_WTB_ENABLED", None)
+    else:
+        env["LASTSIETCH_KARUM_WTB_ENABLED"] = wtb_enabled
     b64 = base64.b64encode(json.dumps(payload).encode()).decode()
     proc = subprocess.run(["bash", KARUM, "--op-b64-stdin"], input=b64,
                           capture_output=True, text=True, env=env, timeout=30)
@@ -54,7 +78,7 @@ def _run(payload, enabled="1"):
 def _sql(action, **kw):
     payload = {"action": action, "correlation_id": CORR, "mode": "dry-run"}
     payload.update(kw)
-    proc, out = _run(payload)
+    proc, out = _run(payload, wtb_enabled="1" if action == "karum-fill" else "0")
     assert out.get("status") == "dry-run", out
     return out["sql"]
 
@@ -67,6 +91,14 @@ def _list_sql():
 def _buy_sql():
     return _sql("karum-buy", listing_id=4711, buyer_account_id=2002,
                 seller_account_id=1001, amount=12500)
+
+
+def _fill_sql():
+    return _sql("karum-fill", request_id=8811, listing_id=8812,
+                buyer_account_id=2002, buyer_ctrl=8002,
+                seller_account_id=1001, seller_ctrl=7001,
+                item_id=42, template_id="IronBar", stack_size=500,
+                amount=12500, take_correlation_id=CORR2)
 
 
 def _cancel_sql():
@@ -113,6 +145,24 @@ def test_dark_gate_precedes_the_take_library():
     assert "require_take_lib" not in code, "do_op must not load the library itself"
     # and the runtime proof: dark defers even with the library made unreadable is covered by
     # test_dark_by_default_and_never_a_fake_success, which runs the real script.
+
+
+def test_wanted_orders_have_a_separate_dark_gate():
+    payload = {
+        "action": "karum-fill", "correlation_id": CORR,
+        "take_correlation_id": CORR2, "request_id": 8811, "listing_id": 8812,
+        "buyer_account_id": 2002, "buyer_ctrl": 8002,
+        "seller_account_id": 1001, "seller_ctrl": 7001,
+        "item_id": 42, "template_id": "IronBar", "stack_size": 500,
+        "amount": 12500,
+    }
+    _, out = _run(payload, enabled="1", wtb_enabled=None)
+    assert out.get("status") == "deferred", out
+    assert out.get("paid") is False, out
+    assert out.get("delivered") is False, out
+
+    _, out = _run(payload, enabled="0", wtb_enabled="1")
+    assert out.get("status") == "deferred", out
 
 
 # --------------------------------------------------------------------------- #
@@ -317,8 +367,52 @@ def test_buy_never_refunds_on_a_failed_delivery():
     only the response was lost, a refund double-satisfies the trade."""
     src = _read(KARUM)
     dlv = src[src.index("TRANSACTION B: delivery"):]
-    body = dlv[:dlv.index("op_cancel")] if "op_cancel" in dlv else dlv
+    body = dlv[:dlv.index("# --- karum-fill")]
     assert "adjust_player_virtual_currency_balance" not in body
+
+
+# --------------------------------------------------------------------------- #
+# WANTED ORDER FILL: exact take and payment in one transaction
+# --------------------------------------------------------------------------- #
+
+def test_fill_takes_and_pays_in_one_atomic_transaction():
+    sql = _fill_sql()
+    first_commit = sql.index("COMMIT;")
+    first_txn = sql[:first_commit]
+    assert "karum-fill transaction A (take + payment)" in sql
+    assert "shared gated take" in first_txn
+    assert "INSERT INTO dune.ls_karum_escrow" in first_txn
+    assert "INSERT INTO dune.ls_karum_payments" in first_txn
+    assert "adjust_player_virtual_currency_balance" in first_txn
+    assert sql.index("karum-fill transaction B (delivery)") > first_commit
+
+
+def test_fill_pins_the_shared_take_to_the_fillers_exact_character():
+    sql = _fill_sql()
+    first_txn = sql[:sql.index("COMMIT;")]
+    assert "AND eps.player_controller_id = 7001" in first_txn
+    assert "WHERE it.id = v_item" in first_txn
+    assert "r.template_id" in first_txn
+    assert "quantity_mismatch" in first_txn
+
+
+def test_fill_has_independent_take_and_settlement_replay_gates():
+    sql = _fill_sql()
+    first_txn = sql[:sql.index("COMMIT;")]
+    assert ":'corr'::uuid" in first_txn
+    assert ":'take_corr'" in first_txn
+    assert CORR2 in first_txn
+    assert first_txn.count("ON CONFLICT (correlation_id) DO NOTHING") >= 2
+    assert "wanted-order gates are split" in first_txn
+
+
+def test_fill_reports_paid_and_delivered_separately():
+    src = _read(KARUM)
+    body = src[src.index("op_fill() {"):src.index("# --- karum-cancel")]
+    assert '"paid":true,"delivered":false' in body
+    assert '"paid":true,"delivered":true' in body
+    assert '"status":"paid_undelivered"' in body
+    assert '"paid":false,"delivered":false' in body
 
 
 # --------------------------------------------------------------------------- #
@@ -364,6 +458,7 @@ def test_no_psql_vars_inside_dollar_quoted_blocks():
     because that is where the mistake shows up."""
     import re
     for name, sql in (("list", _list_sql()), ("buy", _buy_sql()),
+                      ("fill", _fill_sql()),
                       ("cancel", _sql("karum-cancel", listing_id=1, seller_account_id=1)),
                       ("refund", _sql("karum-admin", admin_action="refund", listing_id=1,
                                       buyer_account_id=2, seller_account_id=1, amount=5,
@@ -431,9 +526,9 @@ def test_dispatcher_has_one_karum_token_with_the_alphabet_guard():
         assert extra not in src, extra
 
 
-def test_relay_has_all_four_routes_behind_verify_key():
+def test_relay_has_all_five_routes_behind_verify_key():
     src = _read(RELAY)
-    for r in ("list", "buy", "cancel", "admin"):
+    for r in ("list", "buy", "fill", "cancel", "admin"):
         assert f'@app.post("/dune/karum/{r}", dependencies=[Depends(verify_key)])' in src, r
     assert '_dune_ssh_stdin("karum-op"' in src
     assert "sort_keys=True" in src
@@ -445,8 +540,17 @@ def test_relay_never_accepts_a_client_identity():
     as the actor."""
     src = _read(RELAY)
     karum = src[src.index("_KARUM_ACTIONS = {"):src.index('@app.post("/dune/reward-op"')]
-    for forbidden in ("char_name", "player_controller_id", "seller_ctrl", "buyer_ctrl"):
+    for forbidden in ("char_name", "player_controller_id"):
         assert forbidden not in karum, forbidden
+    legacy = karum[:karum.index('@app.post("/dune/karum/fill"')]
+    for forbidden in ("seller_ctrl", "buyer_ctrl"):
+        assert forbidden not in legacy, forbidden
+    fill = karum[karum.index('@app.post("/dune/karum/fill"'):
+                 karum.index('@app.post("/dune/karum/cancel"')]
+    assert 'buyer_ctrl = _karum_pos_int(body, "buyer_ctrl")' in fill
+    assert 'seller_ctrl = _karum_pos_int(body, "seller_ctrl")' in fill
+    assert '"buyer_ctrl": buyer_ctrl' in fill
+    assert '"seller_ctrl": seller_ctrl' in fill
 
 
 def test_relay_reports_no_usable_response_as_its_own_outcome():

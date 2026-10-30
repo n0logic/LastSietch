@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dune server-stats collector — emits a structured JSON stats blob.
+"""Dune server-stats collector, emits a structured JSON stats blob.
 
 This is the DATA half of the daily/weekly server digest. It runs on lastsietch-dune
 (where the data physically lives) and emits pure structured data on stdout.
@@ -11,7 +11,7 @@ History: this replaces the data layer of /opt/lastsietch-stats/digest.py, which 
 collected stats AND posted a House-0f-Fedaykin-branded embed to the Last Sietch Discord.
 The posting half is retired; Cielago now owns scheduling, branding, and posting.
 
-Deploy home: <game box>:/opt/lastsietch-stats/dune-stats-collect.py — the lastsietch-stats
+Deploy home: <game box>:/opt/lastsietch-stats/dune-stats-collect.py, the lastsietch-stats
 subsystem dir, alongside sampler.py and the retired digest.py. This is the copy
 the relay forced-command dispatcher actually executes (dune-relay-dispatch.sh
 `stats-collect` action -> /dune/stats/digest). DO NOT deploy to /root: nothing
@@ -26,11 +26,12 @@ Usage:
 Data sources (all read-only):
   - /var/lib/lastsietch-telemetry/telemetry.db  (presence, combat, flight, connections)
   - postgres dune.*                       (accounts, building, spice, partitions)
-  - postgres lsadmin.*                   (bans, player_actions — moderation)
+  - postgres lsadmin.*                   (bans, player_actions, moderation)
   - /var/lib/lastsietch-pod-watcher/state.json   (pod restart state)
   - /var/lib/lastsietch-stats/improvements.jsonl (server-improvement log)
 """
 import argparse
+import base64
 import json
 import os
 import re
@@ -38,7 +39,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 NS = "funcom-seabass-sh-<your-hostid>-<random>"
 DB_POD = "sh-<your-hostid>-<random>-db-dbdepl-sts-0"
@@ -66,10 +67,8 @@ def kubectl(args, input_data=None):
 
 
 def psql(sql):
-    pw = kubectl(["exec", "-n", NS, DB_POD, "--", "printenv", "POSTGRES_PASSWORD"]).stdout.strip()
     r = kubectl(
-        ["exec", "-i", "-n", NS, DB_POD, "--", "env", f"PGPASSWORD={pw}",
-         "psql", "-h", "localhost", "-p", "15432", "-U", "postgres", "-d", "dune",
+        ["exec", "-i", "-n", NS, DB_POD, "--", "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_", "-h", "localhost", "-p", "15432", "-U", "postgres", "-d", "dune",
          "-t", "-A", "-F|", "-v", "ON_ERROR_STOP=1"],
         input_data=sql,
     )
@@ -566,12 +565,14 @@ STATION_NAMES = {
     "DA_Dgn_Pit":           "The Old Quarry",
 }
 
-# 🔴 Seeded test data, NOT play. completion_id 329-334: six consecutive rows, one per
-# station, every one solo at difficulty 100 and exactly 600.000s. Audited 2026-07-28.
-# Excluded by explicit id rather than a "difficulty >= 100" rule, because a rule would
-# silently swallow a real record if anyone ever gets there. The number dropped is
-# reported in the payload so the exclusion is never invisible.
-SEED_COMPLETION_IDS = (329, 330, 331, 332, 333, 334)
+# 🔴 Seeded test data, NOT play: rows with a duration of exactly 600.000s. Audited
+# 2026-07-28 as completion_id 329-334 (one per station, solo, difficulty 100); ticket #132
+# (2026-10-29) found 327 from the same seeded player at difficulty 40, which the old id
+# list missed. No real clear lands on exactly 10:00.000, so the rule is narrower than a
+# difficulty cut-off and does not need a new id every time one turns up. The number
+# dropped is reported in the payload so the exclusion is never invisible.
+SEED_DURATION_MS = 600000
+NOT_SEED = f"duration_ms <> {SEED_DURATION_MS}"
 
 WATERMARK_PATH = "/var/lib/lastsietch-stats/dungeon-watermark.json"
 
@@ -612,23 +613,26 @@ def section_testing_stations(period):
     window. completion_id is monotonic and is used as the cursor instead, with a
     watermark persisted per period.
 
-    ⚠️ Deliberately NOT a per-player leaderboard. dungeon_completion_players holds ~1 row
-    per completion regardless of players_num (measured 1.01 rows on 4-player runs), so
-    crediting "who holds the record" would name one runner and silently drop up to three.
-    The recorded runner is returned WITH party_size so the renderer can say "and party"
-    instead of implying a solo clear.
+    ⚠️ Deliberately NOT a per-player leaderboard. Funcom's proc writes one
+    dungeon_completion_players row per member, but party rows are later lost (character
+    deletes cascade) and some point at controllers with no player_state, so the one row
+    left on a group clear cannot be trusted (ticket #132). A runner is named only for a
+    verified solo: players_num = 1 with exactly one player row whose name resolves.
+    The record row is picked the way dune.get_best_dungeon_completion picks it.
     """
-    seed_list = ",".join(str(i) for i in SEED_COMPLETION_IDS)
     since = _read_watermark(period)
+    # Only the repeatable stations: event dungeons (e.g. DA_Dng_HalloweenEvent_2026) also
+    # write dungeon_completion and would otherwise show up under their raw asset id
+    stations_in = ",".join(f"'{k}'" for k in STATION_NAMES)
 
     rows = psql(
         "SELECT dungeon_id, max(difficulty), max(completion_id), count(*) "
-        f"FROM dune.dungeon_completion WHERE completion_id NOT IN ({seed_list}) "
+        f"FROM dune.dungeon_completion WHERE {NOT_SEED} AND dungeon_id IN ({stations_in}) "
         "GROUP BY 1 ORDER BY 2 DESC;"
     )
     period_rows = psql(
         "SELECT dungeon_id, max(difficulty) "
-        f"FROM dune.dungeon_completion WHERE completion_id NOT IN ({seed_list}) "
+        f"FROM dune.dungeon_completion WHERE {NOT_SEED} AND dungeon_id IN ({stations_in}) "
         f"AND completion_id > {int(since)} GROUP BY 1;"
     )
     best_this_period = {r[0]: int(r[1] or 0) for r in period_rows if len(r) >= 2}
@@ -640,18 +644,21 @@ def section_testing_stations(period):
         dungeon_id, top, max_id, runs = row[0], int(row[1] or 0), int(row[2] or 0), int(row[3] or 0)
         high_water = max(high_water, max_id)
         detail = psql(
-            "SELECT dc.players_num, coalesce(ps.character_name, '') "
+            "SELECT dc.players_num, "
+            "(SELECT count(*) FROM dune.dungeon_completion_players p "
+            "WHERE p.completion_id = dc.completion_id), "
+            "(SELECT coalesce(min(ps.character_name), '') FROM dune.dungeon_completion_players p "
+            "JOIN dune.player_state ps ON ps.player_controller_id = p.player_id "
+            "WHERE p.completion_id = dc.completion_id) "
             "FROM dune.dungeon_completion dc "
-            "LEFT JOIN dune.dungeon_completion_players dcp ON dcp.completion_id = dc.completion_id "
-            "LEFT JOIN dune.player_state ps ON ps.player_controller_id = dcp.player_id "
-            f"WHERE dc.dungeon_id = '{dungeon_id}' AND dc.difficulty = {top} "
-            f"AND dc.completion_id NOT IN ({seed_list}) "
-            "ORDER BY dc.completion_id DESC LIMIT 1;"
+            f"WHERE dc.dungeon_id = '{dungeon_id}' AND dc.difficulty = {top} AND dc.{NOT_SEED} "
+            "ORDER BY dc.players_num, dc.duration_ms, dc.completion_id LIMIT 1;"
         )
         party, runner = 0, ""
-        if detail and len(detail[0]) >= 2:
+        if detail and len(detail[0]) >= 3:
             party = int(detail[0][0] or 0)
-            runner = (detail[0][1] or "").strip()
+            if party == 1 and int(detail[0][1] or 0) == 1:
+                runner = (detail[0][2] or "").strip()
         stations.append({
             "dungeon_id": dungeon_id,
             "name": STATION_NAMES.get(dungeon_id, dungeon_id),
@@ -665,13 +672,15 @@ def section_testing_stations(period):
     if high_water > since:
         _write_watermark(period, high_water)
 
+    seeded = psql(
+        f"SELECT count(*) FROM dune.dungeon_completion WHERE duration_ms = {SEED_DURATION_MS};")
     return {
         "stations": stations,
         "station_count": len(stations),
         "cursor_from": since,
         "cursor_to": high_water,
         "first_run": since == 0,     # no baseline yet, so "this period" is meaningless
-        "excluded_seed_rows": len(SEED_COMPLETION_IDS),
+        "excluded_seed_rows": int(seeded[0][0]) if seeded and seeded[0] else 0,
     }
 
 
@@ -730,11 +739,237 @@ def collect(period):
     return out
 
 
+# Report collection is a separate, read-only path. It never advances the legacy
+# testing-station watermark; published editions supply the comparison baseline.
+REPORT_SCOPE_PATH = '/etc/lastsietch/report-scope.json'
+
+
+def report_query(sql):
+    rows = psql("BEGIN READ ONLY; SET LOCAL statement_timeout='8s'; SET LOCAL lock_timeout='500ms'; SET LOCAL TIME ZONE 'UTC';\n" + sql + '\nROLLBACK;')
+    return [row for row in rows if row not in (['BEGIN'], ['SET'], ['ROLLBACK'])]
+
+
+def report_read(con, sql, args=()):
+    deadline = time.monotonic() + 3
+    con.set_progress_handler(lambda: int(time.monotonic() >= deadline), 10000)
+    try:
+        return con.execute(sql, args).fetchall()
+    finally:
+        con.set_progress_handler(None, 0)
+
+
+def report_scope():
+    import stat
+    try:
+        descriptor = os.open(REPORT_SCOPE_PATH, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return set(), {}
+    with os.fdopen(descriptor) as source:
+        info = os.fstat(source.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.geteuid())
+                or info.st_mode & 0o022 or info.st_size > 65536):
+            raise ValueError('unsafe_report_scope')
+        value = json.loads(source.read(65537))
+    if not isinstance(value, dict) or set(value) - {'excluded_account_ids', 'public_aliases'}:
+        raise ValueError('invalid_report_scope')
+    excluded = value.get('excluded_account_ids', [])
+    aliases = value.get('public_aliases', {})
+    if (not isinstance(excluded, list) or any(type(i) is not int or i <= 0 for i in excluded)
+            or not isinstance(aliases, dict)
+            or any(not str(k).isdigit() or not isinstance(v, str) or not v.strip() or len(v) > 80
+                   for k, v in aliases.items())):
+        raise ValueError('invalid_report_scope')
+    return {str(i) for i in excluded}, aliases
+
+
+def report_names(con, account_ids, aliases):
+    ids = sorted({str(a) for a in account_ids if str(a).isdigit()})
+    names = {key: aliases[key] for key in ids if key in aliases}
+    if con is not None and ids:
+        marks = ','.join('?' for _ in ids)
+        try:
+            rows = report_read(con, 'SELECT account_id,character_name FROM roster_snapshot WHERE account_id IN ('
+                               + marks + ') AND character_name IS NOT NULL ORDER BY ts', ids)
+            for aid, name in rows:
+                if name and str(aid) not in aliases:
+                    names[str(aid)] = name
+        except sqlite3.Error:
+            pass
+    return {key: names.get(key, 'A fellow Sleeper') for key in ids}
+
+
+def report_activity(con, start, end, excluded, aliases, period):
+    from collections import defaultdict
+    from zoneinfo import ZoneInfo
+    if con is None:
+        raise ValueError('activity_unavailable')
+    rows = report_read(con, 'SELECT DISTINCT ts,account_id FROM presence WHERE ts>=? AND ts<? ORDER BY ts LIMIT 500001',
+                       (start, end))
+    if not rows or len(rows) > 500000:
+        raise ValueError('activity_coverage_unverified')
+    by_tick, by_account = defaultdict(set), defaultdict(int)
+    zone = ZoneInfo('America/New_York')
+    bins = {}
+    cursor = datetime.fromtimestamp(start, zone)
+    stop = datetime.fromtimestamp(end, zone)
+    while cursor < stop:
+        next_at = min(cursor + timedelta(days=1 if period == 'weekly' else 0,
+                                                               hours=0 if period == 'weekly' else 4), stop)
+        bins[int(cursor.timestamp())] = {'start': int(cursor.timestamp()), 'end': int(next_at.timestamp()),
+                                        'label': cursor.strftime('%a %m/%d') if period == 'weekly' else cursor.strftime('%-I %p'),
+                                        'hours': None}
+        cursor = next_at
+    for stamp, aid in rows:
+        if str(aid) in excluded:
+            continue
+        by_tick[stamp].add(str(aid)); by_account[str(aid)] += 1
+        for point in bins.values():
+            if point['start'] <= stamp < point['end']:
+                point['hours'] = (point['hours'] or 0) + SAMPLE_MINUTES / 60.0
+                break
+    leaders = sorted(by_account.items(), key=lambda item: (-item[1], item[0]))[:5]
+    names = report_names(con, [aid for aid, _ in leaders], aliases)
+    return {'active_accounts': len(by_account), 'peak': max((len(v) for v in by_tick.values()), default=0),
+            'player_hours': round(sum(by_account.values()) * SAMPLE_MINUTES / 60.0, 1), 'coverage': None,
+            'leaders': [{'name': names.get(aid, 'A fellow Sleeper'), 'hours': hours(count)} for aid, count in leaders],
+            'series': [{'start': point['start'], 'label': point['label'],
+                        'hours': round(point['hours'], 1) if point['hours'] is not None else None}
+                       for point in bins.values()]}
+
+
+def report_arrivals(start, end, excluded, aliases):
+    rows = report_query('SELECT g.account_id,coalesce(max(ps.character_name),\'\') '
+        'FROM dune.ls_welcome_pack_grants g LEFT JOIN dune.player_state ps ON ps.account_id=g.account_id '
+        f"WHERE g.granted_at>=to_timestamp({start}) AND g.granted_at<to_timestamp({end}) "
+        "AND g.notes NOT LIKE 'operator-skip%' GROUP BY g.account_id ORDER BY g.account_id;")
+    chosen = [(str(row[0]), row[1]) for row in rows if str(row[0]) not in excluded]
+    return {'count': len(chosen), 'names': [aliases.get(aid, name or 'A fellow Sleeper') for aid, name in chosen[:5]]}
+
+
+def report_economy(start, end):
+    rows = report_query('SELECT count(*) FILTER(WHERE completion_type=4), '
+        'coalesce(sum(item_price*stack_size) FILTER(WHERE completion_type=4),0), '
+        'count(*) FILTER(WHERE completion_type=5) FROM dune.ls_market_log '
+        f'WHERE logged_at>=to_timestamp({start}) AND logged_at<to_timestamp({end}) '
+        'AND completion_type IN (4,5);')
+    if len(rows) != 1 or len(rows[0]) != 3:
+        raise ValueError('market_result_unverified')
+    sales, value, purchases = rows[0]
+    return {'sales_count': int(sales), 'sale_value': int(value), 'purchase_count': int(purchases)}
+
+
+def report_stations(excluded, aliases):
+    stations = ','.join("'" + key + "'" for key in STATION_NAMES)
+    # Record row picked like dune.get_best_dungeon_completion; credited only for a verified solo
+    rows = report_query('WITH records AS (SELECT DISTINCT ON (dungeon_id) '
+        'dungeon_id,difficulty,completion_id,players_num FROM dune.dungeon_completion '
+        f'WHERE {NOT_SEED} AND dungeon_id IN ({stations}) '
+        'ORDER BY dungeon_id,difficulty DESC,players_num,duration_ms,completion_id) '
+        'SELECT r.dungeon_id,r.difficulty,r.players_num,coalesce(p.character_name,\'\'),p.account_id,'
+        '(SELECT count(*) FROM dune.dungeon_completion_players c WHERE c.completion_id=r.completion_id) '
+        'FROM records r LEFT JOIN LATERAL (SELECT ps.character_name,ps.account_id '
+        'FROM dune.dungeon_completion_players dcp JOIN dune.player_state ps '
+        'ON ps.player_controller_id=dcp.player_id WHERE dcp.completion_id=r.completion_id '
+        'ORDER BY ps.account_id,ps.player_controller_id LIMIT 1) p ON true ORDER BY r.difficulty DESC;')
+
+    def credit(row):
+        solo = int(row[2] or 0) == 1 and int(row[5] or 0) == 1
+        if not solo or str(row[4]) in excluded:
+            return ''
+        return aliases.get(str(row[4]), row[3])
+
+    return [{'id': row[0], 'name': STATION_NAMES[row[0]], 'tier': int(row[1]),
+             'party_size': int(row[2] or 0), 'runner': credit(row)} for row in rows]
+
+
+def report_losses(con, start, end, excluded):
+    if con is None:
+        raise ValueError('losses_unavailable')
+    rows = report_read(con, 'SELECT raw,victim_account_id FROM combat_events WHERE event_type=0 AND victim_account_id IS NOT NULL '
+                       'AND occurred_epoch>=? AND occurred_epoch<? LIMIT 500001', (start, end))
+    if len(rows) > 500000:
+        raise ValueError('losses_window_too_large')
+    rows = [row for row in rows if str(row[1]) not in excluded]
+    worm = 0
+    for row in rows:
+        try:
+            value = json.loads(row[0])
+            worm += value.get('m_KillerType') == 'ShaiHulud'
+        except (ValueError, TypeError, AttributeError):
+            pass
+    return {'total': len(rows), 'worm': worm}
+
+
+def report_spice():
+    rows = report_query('SELECT current_globally_active,is_spawning_active FROM dune.spicefield_types;')
+    if not rows:
+        raise ValueError('spice_unavailable')
+    return {'active': sum(int(row[0] or 0) for row in rows),
+            'enabled': sum(row[1] in ('t', 'true') for row in rows), 'types': len(rows)}
+
+
+def report_changes(start, end):
+    try:
+        with open(IMPROVEMENTS_PATH, encoding='utf-8') as source:
+            rows = [json.loads(line) for line in source if line.strip()]
+    except FileNotFoundError:
+        return []
+    return [{'text': row['text']} for row in rows if start <= row.get('ts', 0) < end][-6:]
+
+
+def collect_report(period, start, end):
+    if (period not in ('daily', 'weekly') or type(start) is not int or type(end) is not int
+            or start < 1 or end > time.time() + 1 or end <= start
+            or not (23*3600 <= end-start <= 25*3600 if period == 'daily' else 167*3600 <= end-start <= 169*3600)
+            or time.time() - end > 31*86400):
+        raise ValueError('invalid_report_window')
+    excluded, aliases = report_scope()
+    con = sqlite3.connect(f'file:{DB_PATH}?mode=ro', uri=True) if os.path.exists(DB_PATH) else None
+    def part(fn, *args):
+        try:
+            return {'status': 'ok', 'data': fn(*args)}
+        except Exception:
+            return {'status': 'unavailable', 'data': None}
+    try:
+        result = {'schema': 2, 'period': period, 'window_start': start, 'window_end': end,
+                  'activity': part(report_activity, con, start, end, excluded, aliases, period),
+                  'arrivals': part(report_arrivals, start, end, excluded, aliases),
+                  'economy': part(report_economy, start, end), 'stations': part(report_stations, excluded, aliases),
+                  'losses': part(report_losses, con, start, end, excluded), 'spice': part(report_spice),
+                  'changes': part(report_changes, start, end)}
+        result['captured_at'] = int(time.time())
+        return result
+    finally:
+        if con is not None:
+            con.close()
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--period", choices=["daily", "weekly"], required=True)
+    ap.add_argument("--period", choices=["daily", "weekly"])
+    ap.add_argument('--report-job-b64')
+    ap.add_argument('--report', action='store_true')
+    ap.add_argument('--window-start', type=int)
+    ap.add_argument('--window-end', type=int)
     args = ap.parse_args()
-    print(json.dumps(collect(args.period)))
+    if args.report_job_b64 is not None:
+        if args.period is not None or args.report or args.window_start is not None or args.window_end is not None:
+            ap.error('report payload cannot be combined with other arguments')
+        if len(args.report_job_b64) > 1024:
+            ap.error('report payload too large')
+        job = json.loads(base64.b64decode(args.report_job_b64, validate=True))
+        if not isinstance(job, dict) or set(job) != {'period', 'window_start', 'window_end'}:
+            ap.error('invalid report payload')
+        result = collect_report(job['period'], job['window_start'], job['window_end'])
+    elif args.period is None:
+        ap.error('--period is required')
+    elif args.report:
+        result = collect_report(args.period, args.window_start, args.window_end)
+    elif args.window_start is not None or args.window_end is not None:
+        ap.error('explicit windows require --report')
+    else:
+        result = collect(args.period)
+    print(json.dumps(result, allow_nan=False))
     return 0
 
 

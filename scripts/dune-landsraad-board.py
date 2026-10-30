@@ -6,21 +6,21 @@ the term header, the 25 minor-house tiles (claimed/winning state + goal +
 sysselraad), per-tile per-faction progress, the great-house score, the top
 guild contributors per great house, and each house's reward ladder.
 
-This is TERM-GLOBAL — one row per board, NOT per account. Collect once, cache,
+This is TERM-GLOBAL, one row per board, NOT per account. Collect once, cache,
 serve to everyone (the admin-backend wraps this in a 30s ttl_cache). The only
 per-player layer (a player's voting power + per-tile contribution) is served
 separately by the existing per-account landsraad-rewards path, NOT here.
 
-Data model (verified live, term 4 —
+Data model (verified live, term 4 -
 LANDSRAAD-BOARD-SPEC-2026-06-12.md):
-  dune.landsraad_decree_term  — term header (term_id, factions, start/end, test)
-  dune.landsraad_tasks        — the 25 tiles (board_index 0..24, house_name,
+  dune.landsraad_decree_term , term header (term_id, factions, start/end, test)
+  dune.landsraad_tasks       , the 25 tiles (board_index 0..24, house_name,
                                 completed, winning_faction_id, sysselraad, goal)
-  dune.landsraad_task_faction_contributions  — per-tile per-faction progress
-  dune.landsraad_task_guild_contributions     — top-guild contributors
-  dune.landsraad_task_rewards                  — reward ladders (threshold->item)
-  dune.factions  — 1 Atreides, 2 Harkonnen, 3 None, 4 Smuggler
-  dune.guilds    — guild_id -> guild_name
+  dune.landsraad_task_faction_contributions , per-tile per-faction progress
+  dune.landsraad_task_guild_contributions    , top-guild contributors
+  dune.landsraad_task_rewards                 , reward ladders (threshold->item)
+  dune.factions , 1 Atreides, 2 Harkonnen, 3 None, 4 Smuggler
+  dune.guilds   , guild_id -> guild_name
 
 The portal resolves friendly house + item names (name_lookups / house_crests);
 this script emits data only (raw house_name, template_id), matching the
@@ -42,14 +42,93 @@ DB_PORT = "15432"
 TOP_GUILDS_PER_FACTION = 5
 
 
+# Player-facing label and description per decree.
+#
+# The KEY is the game's internal decree_name. Anything not listed here still
+# renders -- it falls back to the internal name with no description -- so an
+# unrecognised decree from a future build is visibly unknown rather than absent.
+#
+# MAGNITUDES ARE DELIBERATELY OMITTED until confirmed from a source. A wrong
+# number here is worse than no number: this renders on a player-facing page and
+# people plan crafting and combat around it.
+# confidence values:
+#   "confirmed"   - stated in official Funcom material (patch notes / dev post)
+#   "community"   - consistent across community sources but NOT in any official
+#                   Funcom source. The sources agree verbatim, which suggests one
+#                   tooltip transcription and copies rather than independent
+#                   confirmation. Treat the number as probable, not verified.
+#   "unknown"     - no documented effect
+#
+# Upgrade path to "confirmed": screenshot the decree tooltip in game while it is
+# on the ballot, and replace the confidence value here.
+DECREE_INFO = {
+    "ExperienceRateIncrease": (
+        "Scholarly Collaboration",
+        "+50% XP gain faction-wide. Specialization XP is excluded.",
+        "community"),
+    "RangedDamageIncreased": (
+        "In Honor of the Fallen (Ranged)",
+        "+33% ranged weapon damage.",
+        "community"),
+    "MeleeDamageIncreased": (
+        "In Honor of the Fallen (Melee)",
+        "+33% melee weapon damage.",
+        "community"),
+    "CraftingCostReduced": (
+        "CHOAM Production Contract",
+        "-25% crafting and refining material costs, water included. No effect on recipes costing under 4.",
+        "community"),
+    "DropInventoryOnDefeatActive": (
+        "The Right of Salvage",
+        "Full-loot PvP: defeated players drop their inventory. Scoped to PvP areas, not the whole Deep Desert.",
+        "confirmed"),
+    "RepairAndRefiningTimes": (
+        "CHOAM Refining Contract",
+        "-75% refining duration and repair cost.",
+        "community"),
+    "SpecialVendorActive": (
+        None,
+        "Legacy combined vendor decree. Disabled on this server and unreachable in game.",
+        "unknown"),
+    "SpecialVendorActive_Vehicles": (
+        "Exclusive Vehicle Import Rights",
+        "Unlocks the Landsraad Vehicle Vendor. One purchase per player per week from an Mk6 pool.",
+        "community"),
+    "SpecialVendorActive_Weapons": (
+        "Exclusive Weapon Import Rights",
+        "Unlocks the Landsraad Weapons Vendor. One purchase per player per week.",
+        "community"),
+    "SpecialVendorActive_Armor": (
+        "Exclusive Armor Import Rights",
+        "Unlocks the Landsraad Armor Vendor. One purchase per player per week.",
+        "community"),
+    "SpecialVendorActive_Utilities": (
+        "Exclusive Tool Import Rights",
+        "Unlocks the Landsraad Tool Vendor. One purchase per player per week from an Mk6 pool.",
+        "community"),
+}
+
+
+def _decree(did, decrees):
+    """Resolve a decree id to a display object, or None."""
+    i = _i(did) if did else None
+    if not i:
+        return None
+    internal = decrees.get(i)
+    label, desc, conf = DECREE_INFO.get(internal, (None, None, "unknown"))
+    return {
+        "id": i,
+        "internal_name": internal,
+        "label": label or internal,
+        "description": desc,
+        "confidence": conf,
+    }
+
+
+
 def psql(sql):
-    pw = subprocess.run(
-        ["sudo", "kubectl", "exec", "-n", NS, DB_POD, "--", "printenv", "POSTGRES_PASSWORD"],
-        capture_output=True, text=True, timeout=60,
-    ).stdout.strip()
     r = subprocess.run(
-        ["sudo", "kubectl", "exec", "-i", "-n", NS, DB_POD, "--", "env", f"PGPASSWORD={pw}",
-         "psql", "-h", "localhost", "-p", DB_PORT, "-U", "postgres", "-d", "dune",
+        ["sudo", "kubectl", "exec", "-i", "-n", NS, DB_POD, "--", "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_", "-h", "localhost", "-p", DB_PORT, "-U", "postgres", "-d", "dune",
          "-t", "-A", "-F|", "-v", "ON_ERROR_STOP=1"],
         input=sql, capture_output=True, text=True, timeout=60,
     )
@@ -74,13 +153,19 @@ def build(run):
     for fid, name in run("SELECT id, name FROM dune.factions ORDER BY id;"):
         factions[str(_i(fid))] = name
 
+    # Decree id -> internal name, straight from the game's own table so a new
+    # decree in a future build shows up rather than silently rendering blank.
+    decrees = {}
+    for did, dname in run("SELECT id, decree_name FROM dune.landsraad_decrees ORDER BY id;"):
+        decrees[_i(did)] = dname
+
     # Current term: the one live now, else the most recent. Epochs are emitted so
     # the portal can render a client-side ticking countdown without re-fetching.
     term_rows = run(
         "SELECT term_id, reigning_faction_id, winning_faction_id, "
         "extract(epoch from start_time)::bigint, extract(epoch from end_time)::bigint, "
         "start_time AT TIME ZONE 'UTC', end_time AT TIME ZONE 'UTC', "
-        "COALESCE(test_term, false) "
+        "COALESCE(test_term, false), active_decree_id, elected_decree_id "
         "FROM dune.landsraad_decree_term "
         "ORDER BY (now() BETWEEN start_time AND end_time) DESC, term_id DESC LIMIT 1;"
     )
@@ -88,7 +173,8 @@ def build(run):
         return {"available": True, "term": None, "factions": factions,
                 "tiles": [], "score": {}, "top_guilds": {}, "winner_history": [],
                 "generated_utc": datetime.now(timezone.utc).isoformat()}
-    (tid, reign_fid, win_fid, start_ep, end_ep, start_iso, end_iso, test_term) = term_rows[0]
+    (tid, reign_fid, win_fid, start_ep, end_ep, start_iso, end_iso, test_term,
+     active_did, elected_did) = term_rows[0]
     term_id = _i(tid)
     term = {
         "term_id": term_id,
@@ -96,11 +182,13 @@ def build(run):
         "winning_faction_id": _i(win_fid) if win_fid else None,
         "start_epoch": _i(start_ep),
         "end_epoch": _i(end_ep),
-        # ISO without zone designator — the portal's time-local.js treats bare
+        # ISO without zone designator, the portal's time-local.js treats bare
         # timestamps as UTC, which is what these are.
         "start_utc": (start_iso or "").replace(" ", "T"),
         "end_utc": (end_iso or "").replace(" ", "T"),
         "test_term": str(test_term).lower() in ("t", "true"),
+        "active_decree": _decree(active_did, decrees),
+        "elected_decree": _decree(elected_did, decrees),
     }
 
     # The 25 tiles. board_index 0..24 -> row = idx//5, col = idx%5.
@@ -181,7 +269,7 @@ def build(run):
             {"guild": gname, "amount": _i(total)})
     top_guilds = {k: v[:TOP_GUILDS_PER_FACTION] for k, v in by_faction.items()}
 
-    # Recent term winners (newest first) — a small "great houses past terms" strip.
+    # Recent term winners (newest first), a small "great houses past terms" strip.
     winner_history = []
     for (fid,) in run(
         "SELECT winning_faction_id FROM dune.landsraad_decree_term "

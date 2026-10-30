@@ -16,11 +16,8 @@ set -u
 
 BRIDGE=/opt/lastsietch-rmq-bridge
 OUT=/var/lib/lastsietch-rmq-bridge/captures
+# mq-game svc ClusterIP. Empty = let capture.py resolve it from k3s at each start.
 MQGIP=${MQGIP:-}
-if [ -z "$MQGIP" ]; then
-  printf 'configure MQGIP from your mq-game service before starting a capture\n' >&2
-  exit 2
-fi
 RK=${RK:-#}
 WINDOW=${WINDOW:-1800}
 CAP_MB=${CAP_MB:-500}             # hard ceiling for the mq-game captures tree
@@ -36,9 +33,11 @@ prune_to_cap() {
   done
 }
 
-echo "[events-loop] start $(date -u +%FT%TZ); mq-game=$MQGIP rk=$RK window=${WINDOW}s cap=${CAP_MB}MB"
+echo "[events-loop] start $(date -u +%FT%TZ); mq-game=${MQGIP:-resolved-per-run} rk=$RK window=${WINDOW}s cap=${CAP_MB}MB"
+HOST_ARGS=()
+[ -n "$MQGIP" ] && HOST_ARGS=(--host "$MQGIP")
 while true; do
-  python3 "$BRIDGE/capture.py" --host "$MQGIP" --routing-key "$RK" \
+  python3 "$BRIDGE/capture.py" "${HOST_ARGS[@]}" --routing-key "$RK" \
       --duration-seconds "$WINDOW" 2>&1
   run=$(ls -1dt "$OUT"/*/ 2>/dev/null | head -1)
   if [ -n "$run" ]; then

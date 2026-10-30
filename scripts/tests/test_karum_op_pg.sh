@@ -145,7 +145,7 @@ EOF
 build() {
   local payload="{$1}"
   printf '%s' "$(printf '%s' "$payload" | base64 -w0)" \
-    | LASTSIETCH_KARUM_ENABLED=1 "$WRITER" --op-b64-stdin \
+    | LASTSIETCH_KARUM_ENABLED=1 LASTSIETCH_KARUM_WTB_ENABLED=1 "$WRITER" --op-b64-stdin \
     | python3 -c 'import json,sys
 d = json.load(sys.stdin)
 if d.get("status") != "dry-run":
@@ -426,6 +426,104 @@ else
     ok "missing escrow COMMITS reconciled_missing instead of raising"
   else
     bad "escrow_missing handling" "state=$mstate $(printf '%s' "$miss" | tr '\n' ' ' | tail -c 200)"
+  fi
+fi
+
+# --- WANTED-ORDER FILL -------------------------------------------------------
+head_ "karum-fill: take and payment commit together, delivery stays last"
+REQUEST=8811
+FILL_LISTING=8812
+CORR_F=eeeeeeee-0000-0000-0000-000000000001
+CORR_FT=eeeeeeee-0000-0000-0000-000000000002
+FILL_SQL=$(build "\"action\":\"karum-fill\",\"request_id\":$REQUEST,\"listing_id\":$FILL_LISTING,\"buyer_account_id\":$BUYER,\"buyer_ctrl\":7002,\"seller_account_id\":$SELLER,\"seller_ctrl\":7001,\"item_id\":$ITEM,\"template_id\":\"$TEMPLATE\",\"stack_size\":500,\"amount\":$PRICE,\"take_correlation_id\":\"$CORR_FT\",\"correlation_id\":\"$CORR_F\",\"mode\":\"dry-run\"")
+FILL_A=$(printf '%s' "$FILL_SQL" | awk '/^-- karum-fill transaction B/{exit} {print}')
+FILL_B=$(printf '%s' "$FILL_SQL" | awk '/^-- karum-fill transaction B/{f=1} f{print}')
+fill_vars=(-v "take_corr=$CORR_FT" -v "request_id=$REQUEST" -v "listing_id=$FILL_LISTING"
+           -v "buyer_account_id=$BUYER" -v "buyer_ctrl=7002"
+           -v "seller_account_id=$SELLER" -v "seller_ctrl=7001"
+           -v "item_id=$ITEM" -v "template_id=$TEMPLATE" -v "stack_size=500"
+           -v "amount=$PRICE" -v 'detail={"kind":"karum_fill"}')
+
+if [[ -z "$FILL_A" || -z "$FILL_B" ]]; then
+  bad "could not split wanted-order fill SQL"
+else
+  psqlq -c "$(reset_sql)" >/dev/null
+  fa=$(run_chunk "$FILL_A" "$CORR_F" "${fill_vars[@]}"); farc=$?
+  finv=$(scalar "SELECT inventory_id FROM dune.items WHERE id=$ITEM;")
+  fbuyer=$(scalar "SELECT balance FROM dune.player_virtual_currency_balances WHERE player_controller_id=7002 AND currency_id=0;")
+  fseller=$(scalar "SELECT balance FROM dune.player_virtual_currency_balances WHERE player_controller_id=7001 AND currency_id=0;")
+  fesc=$(scalar "SELECT count(*) FROM dune.ls_karum_escrow WHERE correlation_id='$CORR_FT';")
+  fpay=$(scalar "SELECT count(*) FROM dune.ls_karum_payments WHERE correlation_id='$CORR_F'::uuid;")
+  if [[ $farc -eq 0 && "$finv" == "$EXCHANGE_INV" && "$fbuyer" == "37500" \
+        && "$fseller" == "13500" && "$fesc" == "1" && "$fpay" == "1" ]] \
+        && printf '%s' "$fa" | grep -q 'FILLED|.*|applied'; then
+    ok "wanted fill transaction A escrowed one real stack and paid exactly once"
+  else
+    bad "wanted fill transaction A wrong" "rc=$farc inv=$finv buyer=$fbuyer seller=$fseller escrow=$fesc pay=$fpay $(printf '%s' "$fa" | tr '\n' ' ' | tail -c 240)"
+  fi
+
+  fb=$(run_chunk "$FILL_B" "$CORR_F" "${fill_vars[@]}"); fbrc=$?
+  fowner=$(scalar "SELECT owner_id FROM dune.dune_exchange_orders WHERE item_id=$ITEM;")
+  fstate=$(scalar "SELECT state FROM dune.ls_karum_escrow WHERE correlation_id='$CORR_FT';")
+  if [[ $fbrc -eq 0 && "$fowner" == "7002" && "$fstate" == "delivered" ]] \
+     && printf '%s' "$fb" | grep -q 'DLV|applied'; then
+    ok "wanted fill delivered to the pinned requester character after payment"
+  else
+    bad "wanted fill delivery wrong" "rc=$fbrc owner=$fowner state=$fstate $(printf '%s' "$fb" | tr '\n' ' ' | tail -c 240)"
+  fi
+
+  fa2=$(run_chunk "$FILL_A" "$CORR_F" "${fill_vars[@]}")
+  fb2=$(run_chunk "$FILL_B" "$CORR_F" "${fill_vars[@]}")
+  fbuyer2=$(scalar "SELECT balance FROM dune.player_virtual_currency_balances WHERE player_controller_id=7002 AND currency_id=0;")
+  fseller2=$(scalar "SELECT balance FROM dune.player_virtual_currency_balances WHERE player_controller_id=7001 AND currency_id=0;")
+  forders=$(scalar "SELECT count(*) FROM dune.dune_exchange_orders WHERE item_id=$ITEM;")
+  if printf '%s' "$fa2" | grep -q 'FILLED|.*|replay' \
+     && printf '%s' "$fb2" | grep -q 'DLV|replay' \
+     && [[ "$fbuyer2" == "37500" && "$fseller2" == "13500" && "$forders" == "1" ]]; then
+    ok "wanted fill replay takes nothing, pays nothing, and creates no second claim"
+  else
+    bad "wanted fill replay changed state" "buyer=$fbuyer2 seller=$fseller2 orders=$forders"
+  fi
+
+  psqlq -c "$(reset_sql)" >/dev/null
+  psqlq -c "UPDATE dune.player_virtual_currency_balances SET balance=5 WHERE player_controller_id=7002;" >/dev/null
+  CORR_POOR=eeeeeeee-0000-0000-0000-000000000011
+  CORR_POOR_T=eeeeeeee-0000-0000-0000-000000000012
+  poor_vars=(-v "take_corr=$CORR_POOR_T" -v "request_id=$REQUEST" -v "listing_id=$FILL_LISTING"
+             -v "buyer_account_id=$BUYER" -v "buyer_ctrl=7002"
+             -v "seller_account_id=$SELLER" -v "seller_ctrl=7001"
+             -v "item_id=$ITEM" -v "template_id=$TEMPLATE" -v "stack_size=500"
+             -v "amount=$PRICE" -v 'detail={"kind":"karum_fill"}')
+  poor=$(run_chunk "$FILL_A" "$CORR_POOR" "${poor_vars[@]}")
+  pinv=$(scalar "SELECT inventory_id FROM dune.items WHERE id=$ITEM;")
+  pbuyer=$(scalar "SELECT balance FROM dune.player_virtual_currency_balances WHERE player_controller_id=7002 AND currency_id=0;")
+  pseller=$(scalar "SELECT balance FROM dune.player_virtual_currency_balances WHERE player_controller_id=7001 AND currency_id=0;")
+  pesc=$(scalar "SELECT count(*) FROM dune.ls_karum_escrow;")
+  ppay=$(scalar "SELECT count(*) FROM dune.ls_karum_payments;")
+  if printf '%s' "$poor" | grep -q insufficient_funds \
+     && [[ "$pinv" == "$SELLER_BANK" && "$pbuyer" == "5" && "$pseller" == "1000" \
+           && "$pesc" == "0" && "$ppay" == "0" ]]; then
+    ok "underfunded wanted order rolls back the filler take and every money effect"
+  else
+    bad "underfunded wanted fill left a partial effect" "inv=$pinv buyer=$pbuyer seller=$pseller escrow=$pesc pay=$ppay $(printf '%s' "$poor" | tr '\n' ' ' | tail -c 240)"
+  fi
+
+  psqlq -c "$(reset_sql)" >/dev/null
+  psqlq -c "UPDATE dune.items SET stack_size=499 WHERE id=$ITEM;" >/dev/null
+  mismatch_vars=(-v "take_corr=$CORR_POOR_T" -v "request_id=$REQUEST" -v "listing_id=$FILL_LISTING"
+                 -v "buyer_account_id=$BUYER" -v "buyer_ctrl=7002"
+                 -v "seller_account_id=$SELLER" -v "seller_ctrl=7001"
+                 -v "item_id=$ITEM" -v "template_id=$TEMPLATE" -v "stack_size=500"
+                 -v "amount=$PRICE" -v 'detail={"kind":"karum_fill"}')
+  mismatch=$(run_chunk "$FILL_A" "$CORR_POOR" "${mismatch_vars[@]}")
+  minv=$(scalar "SELECT inventory_id FROM dune.items WHERE id=$ITEM;")
+  mesc=$(scalar "SELECT count(*) FROM dune.ls_karum_escrow;")
+  mpay=$(scalar "SELECT count(*) FROM dune.ls_karum_payments;")
+  if printf '%s' "$mismatch" | grep -q quantity_mismatch \
+     && [[ "$minv" == "$SELLER_BANK" && "$mesc" == "0" && "$mpay" == "0" ]]; then
+    ok "wrong stack quantity rolls back before goods or Solari can move"
+  else
+    bad "quantity mismatch left a partial effect" "inv=$minv escrow=$mesc pay=$mpay $(printf '%s' "$mismatch" | tr '\n' ' ' | tail -c 240)"
   fi
 fi
 

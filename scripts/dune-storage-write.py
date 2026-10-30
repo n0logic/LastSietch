@@ -45,13 +45,16 @@ Correctness rules (non-negotiable):
     inventory id from the caller is a PREFERENCE only: it is intersected against the
     owned set, so a forged id resolves to nothing rather than to someone else's bag.
     🔴 delivery_dst_sql is deliberately NOT owned_inv_sql: that one is shared VERBATIM
-    with dune-market-sell, and adding the backpack to it would hand the market-sell
-    path access to players' backpacks.
+    with dune-market-sell, so the two files must be changed together, never separately.
+    As of 2026-08-25 owned_inv_sql reaches the backpack too, and since 2026-09-03 the
+    market-sell path may LIST from it, behind /etc/lastsietch/market-sell-backpack-enabled.
+    Membership in that set has never been permission on its own: market-sell classifies
+    the resolved inventory and gates each source on its own flag.
   * CURRENCY CONSERVATION: WITHDRAW = bank -= N and exactly one SolarisCoin stack +N
     (merge or new). DEPOSIT = coin stacks reduced/deleted by total and bank += total.
     Both in one txn; any RAISE rolls the whole thing back.
   * The bank side uses dune.adjust_player_virtual_currency_balance(ctrl,
-    dune.get_solaris_id(), delta) for engine parity. We pre-lock + verify balance>=N on
+    'Solaris'::dune.virtualwallettype, delta) for engine parity. We pre-lock + verify balance>=N on
     WITHDRAW so the proc's negative-clamp / log_cheating branch is unreachable.
   * Coins are destroyed/created with the blessed procs where possible: SWEEP uses
     dune.delete_items(id[]), DEPOSIT(N) uses dune.delete_inventory_item(id, count). A new
@@ -65,18 +68,25 @@ HARD CONSTRAINTS (mirror dune-market-sell.py / dune-market-buy.py):
     the ALREADY-RUNNING DB pod.
   * Re-validate every field here (defence in depth on top of the dispatcher gate).
 
-  * DRAG-DROP MOVE (Tier 3, Coin/item relocation): relocate a WHOLE item stack from one
-        OWNED inventory to another (first-empty slot, slot + volume gate). Offline-gated
-        like withdraw/deposit. Single-row re-home UPDATE pinned to the source inventory
-        (atomic, dupe/loss-proof; same mechanism as the Tier 5 transfer). Ships behind the
-        LASTSIETCH_STORAGE_MOVE_ENABLED kill-switch (default OFF -> `move_disabled`, no DB touch).
-        Own-account only; DD inventories are excluded as source AND destination.
+  * DRAG-DROP MOVE: the legacy SQL-only relocation has no supported native
+        synchronization backend. Live and dry-run MOVE requests return
+        native_move_unavailable before database discovery, regardless of the
+        old LASTSIETCH_STORAGE_MOVE_ENABLED setting. SQL generation remains diagnostic.
+
+  * PAWN MOVE: relocate a whole stack only between the selected character's CHOAM bank
+        and Backpack. This is a separate lane because placed containers and vehicles can
+        be overwritten by partition RAM. It is gated by
+        /etc/lastsietch/storage-pawn-move-enabled and records every applied request in
+        dune.ls_storage_pawn_moves for UUID replay safety and audit.
 
 Modes:
   --action withdraw --owner-ctrl N --amount N [--dry-run]
   --action deposit  --owner-ctrl N --mode sweep [--dry-run]
   --action deposit  --owner-ctrl N --mode amount --amount N [--dry-run]
   --action move     --owner-ctrl N --item-id N --dst-inventory-id N [--expected-template T] [--dry-run]
+  --action pawn_move --owner-ctrl N --item-id N --src-storage bank|backpack
+                     --dst-storage bank|backpack --idempotency-key UUID
+                     [--expected-template T] [--dry-run]
   --stdin-json   read the same fields as one JSON object on stdin (dispatcher path);
                  fields {action, owner_ctrl, amount?, mode?, item_id?, dst_inventory_id?,
                  expected_template?, dry_run?}
@@ -89,16 +99,23 @@ import re
 import subprocess
 import sys
 
-BANK_CURRENCY_ID = 0           # player_virtual_currency_balances Solari = currency_id 0
+BANK_CURRENCY_ID = "'Solaris'::dune.virtualwallettype"  # 1.5.3: currency_id is the enum dune.virtualwallettype (was integer 0 = Solaris)
 SOLARIS_TEMPLATE = "SolarisCoin"
 SOLARIS_STACK_MAX = 100000     # observed live max SolarisCoin stack (addendum Q1)
 WITHDRAW_CAP = 100000          # per-transfer WITHDRAW cap (== one full stack)
 VALID_MODES = ("sweep", "amount")
 
 # ---- drag-drop MOVE (Tier 3) --------------------------------------------------
-# Kill-switch (game-host env, default 0 = OFF). While off, a live MOVE refuses with
-# `move_disabled` WITHOUT opening a DB session; dry-run is always allowed for QA.
-MOVE_ENABLED = os.environ.get("LASTSIETCH_STORAGE_MOVE_ENABLED", "0") == "1"
+# The legacy flag cannot enable SQL-only MOVE. A native executor is still absent.
+# MOVE is therefore always off; the public default check reads this constant.
+MOVE_ENABLED = False
+# The game-host authority for the narrow pawn-side lane is a file gate. Portal
+# environment state is advisory only and can never open this writer.
+PAWN_MOVE_FLAG = "/etc/lastsietch/storage-pawn-move-enabled"
+VALID_PAWN_KINDS = ("bank", "backpack")
+UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-"
+    r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
 # Optional swapped-item guard: an expected_template must be this safe charset.
 TEMPLATE_RE = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 # Templates with ZERO effective volume (never volume-gated). SolarisCoin is currency.
@@ -107,6 +124,10 @@ ZERO_VOL_TEMPLATES = {SOLARIS_TEMPLATE}
 # Refresh on each Funcom content update. Absent file -> empty map (all UNKNOWN ->
 # volume_unverified audit, never a hard block).
 _VMAP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "template_volume.json")
+
+
+def pawn_move_enabled():
+    return os.path.isfile(PAWN_MOVE_FLAG)
 
 
 def load_vmap():
@@ -157,7 +178,11 @@ ERROR_TOKENS = (
     "item_not_found",
     "not_owner",
     "move_failed",
+    "pawn_move_disabled",
     "move_disabled",
+    "native_move_unavailable",
+    "idempotency_conflict",
+    "no_backpack",
     "no_bank",
     "insufficient_bank",
     "bank_full",
@@ -236,20 +261,18 @@ def resolve_db_pod():
 
 
 def run_psql(ns, pod, sql, timeout=20):
-    """The ONLY place a write DB connection is opened. Reads POSTGRES_PASSWORD from the
-    pod env then execs psql inside the already-running pod. SQL arrives on stdin."""
+    """The ONLY place a write DB connection is opened. Uses POSTGRES_PASSWORD inside the pod shell, which execs psql inside the already-running pod. SQL arrives on stdin."""
     try:
-        pw_out = subprocess.run(
+        auth_out = subprocess.run(
             ["sudo", "kubectl", "exec", "-n", ns, pod, "--",
-             "printenv", "POSTGRES_PASSWORD"],
+             "sh", "-c", 'test -n "${POSTGRES_PASSWORD:-}"'],
             capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
         fail("timeout reading POSTGRES_PASSWORD", 3)
-    pgpass = (pw_out.stdout or "").strip()
-    if not pgpass:
+    if auth_out.returncode != 0:
         fail("no_pgpass", 3)
     cmd = ["sudo", "kubectl", "exec", "-i", "-n", ns, pod, "--",
-           "env", f"PGPASSWORD={pgpass}", "psql",
+           "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_",
            "-h", "localhost", "-p", DB_PORT, "-U", DB_USER, "-d", DB_NAME,
            "-tA", "-v", "ON_ERROR_STOP=1"]
     try:
@@ -294,6 +317,23 @@ def owned_inv_sql(owner):
       AND (a.class ILIKE '%ornithopter%' OR a.class ILIKE '%buggy%'
            OR a.class ILIKE '%sandbike%' OR a.class ILIKE '%crawler%'
            OR a.class ILIKE '%containervehicle%')
+"""
+
+
+def pawn_storage_inv_sql(owner):
+    """Exactly the active selected pawn's Backpack and CHOAM bank inventories.
+
+    This must remain separate from owned_inv_sql(), which is shared with market sell.
+    Adding Backpack there would expand a different write surface.
+    """
+    return f"""
+  SELECT inv.id AS inv_id,
+         CASE inv.inventory_type WHEN 0 THEN 'backpack' WHEN 30 THEN 'bank' END AS kind
+    FROM dune.inventories inv
+    JOIN dune.encrypted_player_state eps ON eps.player_pawn_id = inv.actor_id
+    WHERE eps.player_controller_id = {owner}
+      AND eps.character_state IS DISTINCT FROM 'Deleted'
+      AND inv.inventory_type IN (0, 30)
 """
 
 
@@ -647,7 +687,7 @@ BEGIN
     RETURNING id INTO v_coin_id;
   END IF;
   -- 6. DEBIT the bank (engine currency proc; pre-checked so the clamp is unreachable)
-  PERFORM dune.adjust_player_virtual_currency_balance({owner}, dune.get_solaris_id(), -{amount});
+  PERFORM dune.adjust_player_virtual_currency_balance({owner}, 'Solaris'::dune.virtualwallettype, -{amount});
   SELECT balance INTO v_after FROM dune.player_virtual_currency_balances
     WHERE player_controller_id = {owner} AND currency_id = {BANK_CURRENCY_ID};
   INSERT INTO _wd_result VALUES (v_coin_id, v_bank_inv, {amount}, v_merged, v_bank, v_after,
@@ -743,7 +783,7 @@ BEGIN
       AND template_id = '{SOLARIS_TEMPLATE}';
   -- 4. consume the coins
 {consume}  -- 5. CREDIT the bank with the destroyed coin value (engine currency proc)
-  PERFORM dune.adjust_player_virtual_currency_balance({owner}, dune.get_solaris_id(), v_total);
+  PERFORM dune.adjust_player_virtual_currency_balance({owner}, 'Solaris'::dune.virtualwallettype, v_total);
   SELECT balance INTO v_after FROM dune.player_virtual_currency_balances
     WHERE player_controller_id = {owner} AND currency_id = {BANK_CURRENCY_ID};
   -- Where the coins came from, so the portal can name it back to the player instead of
@@ -943,6 +983,207 @@ SELECT json_build_object(
 """
 
 
+def read_pawn_move_plan(owner, item_id, dst_kind):
+    """Advisory read for the exact Bank and Backpack lane."""
+    sql = (
+        "SET search_path TO dune, public;\n"
+        "WITH pawn_storage AS (\n"
+        f"{pawn_storage_inv_sql(owner)}"
+        ")\n"
+        "SELECT json_build_object(\n"
+        f"  'online_status', (SELECT online_status FROM dune.encrypted_player_state\n"
+        f"      WHERE player_controller_id = {owner}\n"
+        "        AND character_state IS DISTINCT FROM 'Deleted' LIMIT 1),\n"
+        f"  'in_grace', (SELECT (reconnect_grace_period_end IS NOT NULL\n"
+        f"      AND reconnect_grace_period_end > NOW()) FROM dune.encrypted_player_state\n"
+        f"      WHERE player_controller_id = {owner}\n"
+        "        AND character_state IS DISTINCT FROM 'Deleted' LIMIT 1),\n"
+        "  'backpack_count', (SELECT COUNT(*) FROM pawn_storage WHERE kind = 'backpack'),\n"
+        "  'bank_count', (SELECT COUNT(*) FROM pawn_storage WHERE kind = 'bank'),\n"
+        f"  'src_inv', (SELECT inventory_id FROM dune.items WHERE id = {item_id}),\n"
+        f"  'src_kind', (SELECT kind FROM pawn_storage WHERE inv_id =\n"
+        f"      (SELECT inventory_id FROM dune.items WHERE id = {item_id})),\n"
+        f"  'dst_inv', (SELECT inv_id FROM pawn_storage WHERE kind = '{dst_kind}' LIMIT 1),\n"
+        f"  'dst_mic', (SELECT max_item_count FROM dune.inventories WHERE id =\n"
+        f"      (SELECT inv_id FROM pawn_storage WHERE kind = '{dst_kind}' LIMIT 1)),\n"
+        f"  'dst_miv', (SELECT max_item_volume FROM dune.inventories WHERE id =\n"
+        f"      (SELECT inv_id FROM pawn_storage WHERE kind = '{dst_kind}' LIMIT 1)),\n"
+        f"  'dst_used_slots', (SELECT COUNT(*) FROM dune.items WHERE inventory_id =\n"
+        f"      (SELECT inv_id FROM pawn_storage WHERE kind = '{dst_kind}' LIMIT 1))\n"
+        ")"
+    )
+    return _read_json(sql)
+
+
+def build_pawn_move_sql(owner, item_id, src_kind, dst_kind, idempotency_key,
+                        expected_template, unit_vol):
+    """One idempotent transaction for the selected pawn's Bank and Backpack only."""
+    tmpl_lit = "NULL" if expected_template is None else f"'{expected_template}'"
+    tmpl_guard = ""
+    if expected_template:
+        tmpl_guard = (
+            f"  IF v_src_template IS DISTINCT FROM '{expected_template}' THEN\n"
+            "    RAISE EXCEPTION 'item_not_found (template mismatch)';\n"
+            "  END IF;\n")
+    unit_vol_lit = "NULL" if unit_vol is None else repr(float(unit_vol))
+    return f"""\\set ON_ERROR_STOP on
+SET search_path TO dune, public;
+BEGIN;
+DROP TABLE IF EXISTS _pm_result;
+CREATE TEMP TABLE _pm_result(
+  item_id bigint, src_inv bigint, dst_inv bigint, src_kind text, dst_kind text,
+  first_empty bigint, stack_size bigint, volume_unverified bool, replay bool
+) ON COMMIT PRESERVE ROWS;
+DO $pawn_move$
+DECLARE
+  v_existing_owner bigint; v_existing_item bigint; v_existing_expected text;
+  v_existing_template text; v_existing_src_kind text; v_existing_dst_kind text;
+  v_existing_src_inv bigint; v_existing_dst_inv bigint; v_existing_dst_pos bigint;
+  v_existing_stack bigint; v_existing_vol bool;
+  v_status text; v_grace bool;
+  v_backpack_count bigint; v_bank_count bigint;
+  v_backpack_inv bigint; v_bank_inv bigint; v_dst_inv bigint;
+  v_src_inv bigint; v_src_template text; v_src_stack bigint; v_src_pos bigint;
+  v_actual_src_kind text;
+  v_dst_mic bigint; v_dst_miv bigint;
+  v_used_slots bigint; v_used_vol double precision;
+  v_first_empty bigint; v_unit_vol double precision := {unit_vol_lit};
+  v_move_vol double precision; v_vol_unverified bool := false;
+  v_moved bigint;
+BEGIN
+  -- Serialize identical UUIDs, then return the original result without touching
+  -- live inventory state. This makes a lost-response retry safe even after login.
+  PERFORM pg_advisory_xact_lock(hashtextextended('{idempotency_key}', 0));
+  SELECT owner_ctrl, item_id, expected_template, template_id,
+         requested_src_kind, requested_dst_kind, src_inventory_id,
+         dst_inventory_id, dst_position_index, stack_size, volume_unverified
+    INTO v_existing_owner, v_existing_item, v_existing_expected, v_existing_template,
+         v_existing_src_kind, v_existing_dst_kind, v_existing_src_inv,
+         v_existing_dst_inv, v_existing_dst_pos, v_existing_stack, v_existing_vol
+    FROM dune.ls_storage_pawn_moves
+   WHERE idempotency_key = '{idempotency_key}'::uuid
+   FOR UPDATE;
+  IF FOUND THEN
+    IF v_existing_owner <> {owner}
+       OR v_existing_item <> {item_id}
+       OR v_existing_expected IS DISTINCT FROM {tmpl_lit}
+       OR v_existing_src_kind <> '{src_kind}'
+       OR v_existing_dst_kind <> '{dst_kind}' THEN
+      RAISE EXCEPTION 'idempotency_conflict';
+    END IF;
+    INSERT INTO _pm_result VALUES (
+      v_existing_item, v_existing_src_inv, v_existing_dst_inv,
+      v_existing_src_kind, v_existing_dst_kind, v_existing_dst_pos,
+      v_existing_stack, v_existing_vol, true);
+    RETURN;
+  END IF;
+
+  -- Lock the selected active character row so a login cannot race the offline gate.
+  SELECT online_status,
+         (reconnect_grace_period_end IS NOT NULL AND reconnect_grace_period_end > NOW())
+    INTO v_status, v_grace
+    FROM dune.encrypted_player_state
+   WHERE player_controller_id = {owner}
+     AND character_state IS DISTINCT FROM 'Deleted'
+   FOR SHARE;
+  IF v_status IS DISTINCT FROM 'Offline' OR COALESCE(v_grace, true) THEN
+    RAISE EXCEPTION 'player_online';
+  END IF;
+
+  -- Resolve exactly one Backpack and one CHOAM bank for this pawn.
+  SELECT COUNT(*) FILTER (WHERE inv.inventory_type = 0),
+         COUNT(*) FILTER (WHERE inv.inventory_type = 30),
+         MIN(inv.id) FILTER (WHERE inv.inventory_type = 0),
+         MIN(inv.id) FILTER (WHERE inv.inventory_type = 30)
+    INTO v_backpack_count, v_bank_count, v_backpack_inv, v_bank_inv
+    FROM dune.inventories inv
+    JOIN dune.encrypted_player_state eps ON eps.player_pawn_id = inv.actor_id
+   WHERE eps.player_controller_id = {owner}
+     AND eps.character_state IS DISTINCT FROM 'Deleted'
+     AND inv.inventory_type IN (0, 30);
+  IF v_backpack_count <> 1 THEN RAISE EXCEPTION 'no_backpack'; END IF;
+  IF v_bank_count <> 1 THEN RAISE EXCEPTION 'no_bank'; END IF;
+  v_dst_inv := CASE WHEN '{dst_kind}' = 'bank' THEN v_bank_inv ELSE v_backpack_inv END;
+
+  -- Lock both inventories in stable id order, then the item row.
+  PERFORM 1 FROM dune.inventories
+   WHERE id IN (v_backpack_inv, v_bank_inv)
+   ORDER BY id FOR UPDATE;
+  SELECT inventory_id, template_id, stack_size, position_index
+    INTO v_src_inv, v_src_template, v_src_stack, v_src_pos
+    FROM dune.items WHERE id = {item_id} FOR UPDATE;
+  IF v_src_inv IS NULL THEN RAISE EXCEPTION 'item_not_found'; END IF;
+{tmpl_guard}  IF v_src_inv = v_bank_inv THEN
+    v_actual_src_kind := 'bank';
+  ELSIF v_src_inv = v_backpack_inv THEN
+    v_actual_src_kind := 'backpack';
+  ELSE
+    RAISE EXCEPTION 'not_owner';
+  END IF;
+  IF v_actual_src_kind <> '{src_kind}' THEN
+    RAISE EXCEPTION 'item_not_found (source changed)';
+  END IF;
+  IF v_actual_src_kind = '{dst_kind}' OR v_src_inv = v_dst_inv THEN
+    RAISE EXCEPTION 'move_failed (same inventory)';
+  END IF;
+
+  SELECT max_item_count, max_item_volume INTO v_dst_mic, v_dst_miv
+    FROM dune.inventories WHERE id = v_dst_inv;
+  SELECT COUNT(*), COALESCE(SUM(COALESCE(volume_override, 0) * stack_size), 0)
+    INTO v_used_slots, v_used_vol
+    FROM dune.items WHERE inventory_id = v_dst_inv;
+  IF v_dst_mic = 0 THEN
+    RAISE EXCEPTION 'dst_no_slots';
+  ELSIF v_dst_mic = -1 THEN
+    SELECT COALESCE(MAX(position_index) + 1, 0) INTO v_first_empty
+      FROM dune.items WHERE inventory_id = v_dst_inv;
+  ELSE
+    SELECT MIN(s.idx) INTO v_first_empty
+      FROM generate_series(0, v_dst_mic - 1) AS s(idx)
+      WHERE NOT EXISTS (SELECT 1 FROM dune.items
+                        WHERE inventory_id = v_dst_inv AND position_index = s.idx);
+    IF v_first_empty IS NULL THEN RAISE EXCEPTION 'dst_full_slots'; END IF;
+  END IF;
+  IF v_dst_miv > 0 THEN
+    IF v_unit_vol IS NULL THEN
+      v_vol_unverified := true;
+    ELSE
+      v_move_vol := v_unit_vol * v_src_stack;
+      IF v_used_vol + v_move_vol > v_dst_miv THEN
+        RAISE EXCEPTION 'dst_full_volume';
+      END IF;
+    END IF;
+  END IF;
+
+  UPDATE dune.items
+     SET inventory_id = v_dst_inv, position_index = v_first_empty, is_new = true
+   WHERE id = {item_id} AND inventory_id = v_src_inv;
+  GET DIAGNOSTICS v_moved = ROW_COUNT;
+  IF v_moved <> 1 THEN RAISE EXCEPTION 'move_failed'; END IF;
+
+  INSERT INTO dune.ls_storage_pawn_moves (
+    idempotency_key, owner_ctrl, item_id, expected_template, template_id,
+    requested_src_kind, requested_dst_kind, src_inventory_id, dst_inventory_id,
+    src_position_index, dst_position_index, stack_size, volume_unverified, status
+  ) VALUES (
+    '{idempotency_key}'::uuid, {owner}, {item_id}, {tmpl_lit}, v_src_template,
+    '{src_kind}', '{dst_kind}', v_src_inv, v_dst_inv,
+    v_src_pos, v_first_empty, v_src_stack, v_vol_unverified, 'applied'
+  );
+  INSERT INTO _pm_result VALUES (
+    {item_id}, v_src_inv, v_dst_inv, v_actual_src_kind, '{dst_kind}',
+    v_first_empty, v_src_stack, v_vol_unverified, false);
+END $pawn_move$;
+COMMIT;
+SELECT json_build_object(
+  'ok', true, 'action', 'pawn_move', 'item_id', item_id,
+  'src_inv', src_inv, 'dst_inv', dst_inv, 'src_kind', src_kind,
+  'dst_kind', dst_kind, 'first_empty', first_empty, 'stack_size', stack_size,
+  'volume_unverified', volume_unverified, 'replay', replay
+) FROM _pm_result;
+"""
+
+
 def parse_psql_error(stderr):
     blob = (stderr or "").lower()
     for tok in ERROR_TOKENS:
@@ -970,39 +1211,49 @@ def last_json_line(stdout):
 # ---------------------------------------------------------------------------
 
 def do_dry_run(action, owner, mode, amount, item_id=None, dst_inv=None,
-               expected_template=None):
+               expected_template=None, src_storage=None, dst_storage=None,
+               idempotency_key=None):
     if action == "move":
+        return emit({"ok": False, "error": "native_move_unavailable",
+                     "dry_run": True, "move_enabled": False}, 0)
+    if action == "pawn_move":
         vmap = load_vmap()
         item = read_move_item(item_id)
         uv = unit_volume(item.get("template_id"), item.get("volume_override"), vmap)
-        plan = read_move_plan(owner, item_id, dst_inv)
+        plan = read_pawn_move_plan(owner, item_id, dst_storage)
         errs = []
         if not _is_offline(plan):
             errs.append("player_online")
+        if plan.get("backpack_count") != 1:
+            errs.append("no_backpack")
+        if plan.get("bank_count") != 1:
+            errs.append("no_bank")
         if plan.get("src_inv") is None:
             errs.append("item_not_found")
-        elif not plan.get("src_owned") or plan.get("src_map") == "DeepDesert":
+        elif plan.get("src_kind") not in VALID_PAWN_KINDS:
             errs.append("not_owner")
-        if not plan.get("dst_owned"):
+        elif plan.get("src_kind") != src_storage:
+            errs.append("item_not_found")
+        if plan.get("dst_inv") is None:
             errs.append("not_owner")
-        if plan.get("dst_map") == "DeepDesert":
-            errs.append("dst_on_deep_desert")
-        mic = plan.get("dst_mic")
-        if mic == 0:
+        if plan.get("src_kind") == dst_storage:
+            errs.append("move_failed")
+        if plan.get("dst_mic") == 0:
             errs.append("dst_no_slots")
         emit({
-            "dry_run": True, "action": "move", "owner_ctrl": owner,
-            "item_id": item_id, "dst_inventory_id": dst_inv,
+            "dry_run": True, "action": "pawn_move", "owner_ctrl": owner,
+            "item_id": item_id, "src_storage": src_storage,
+            "dst_storage": dst_storage, "idempotency_key": idempotency_key,
             "expected_template": expected_template,
-            "move_enabled": MOVE_ENABLED,
+            "pawn_move_enabled": pawn_move_enabled(),
             "online_status": plan.get("online_status"), "in_grace": plan.get("in_grace"),
-            "src_inv": plan.get("src_inv"), "src_owned": plan.get("src_owned"),
-            "dst_owned": plan.get("dst_owned"), "dst_map": plan.get("dst_map"),
-            "dst_mic": mic, "dst_miv": plan.get("dst_miv"),
-            "dst_used_slots": plan.get("dst_used_slots"),
+            "backpack_count": plan.get("backpack_count"), "bank_count": plan.get("bank_count"),
+            "src_inv": plan.get("src_inv"), "src_kind": plan.get("src_kind"),
+            "dst_inv": plan.get("dst_inv"), "dst_mic": plan.get("dst_mic"),
+            "dst_miv": plan.get("dst_miv"), "dst_used_slots": plan.get("dst_used_slots"),
             "moved_template": item.get("template_id"),
-            "moved_stack_size": item.get("stack_size"),
-            "unit_volume": uv, "volume_unverified": uv is None and (plan.get("dst_miv") or 0) > 0,
+            "moved_stack_size": item.get("stack_size"), "unit_volume": uv,
+            "volume_unverified": uv is None and (plan.get("dst_miv") or 0) > 0,
             "preflight_errors": errs,
         }, 0)
     elif action == "withdraw":
@@ -1061,11 +1312,13 @@ def do_dry_run(action, owner, mode, amount, item_id=None, dst_inv=None,
 
 
 def do_live(action, owner, mode, amount, item_id=None, dst_inv=None,
-            expected_template=None):
-    if action == "move" and not MOVE_ENABLED:
-        # Kill-switch off: refuse WITHOUT opening a DB session (defense in depth; the
-        # admin-backend also short-circuits). Honest, never a fake success.
-        emit({"ok": False, "error": "move_disabled"}, 0)
+            expected_template=None, src_storage=None, dst_storage=None,
+            idempotency_key=None):
+    if action == "move":
+        # A flag cannot supply native inventory synchronization or a durable receipt.
+        return emit({"ok": False, "error": "native_move_unavailable"}, 0)
+    if action == "pawn_move" and not pawn_move_enabled():
+        emit({"ok": False, "error": "pawn_move_disabled"}, 0)
     ns, pod = resolve_db_pod()
     if action == "withdraw":
         sql = build_withdraw_sql(owner, amount, dst_inv)
@@ -1073,11 +1326,12 @@ def do_live(action, owner, mode, amount, item_id=None, dst_inv=None,
         # dst_inv carries the portal's selected container for every action; for deposit
         # that means "consume the coins from THIS inventory only" (see deposit_src_sql).
         sql = build_deposit_sql(owner, mode, amount, dst_inv)
-    else:  # move
+    else:  # pawn_move
         vmap = load_vmap()
         item = read_move_item(item_id)
         uv = unit_volume(item.get("template_id"), item.get("volume_override"), vmap)
-        sql = build_move_sql(owner, item_id, dst_inv, expected_template, uv)
+        sql = build_pawn_move_sql(owner, item_id, src_storage, dst_storage,
+                                  idempotency_key, expected_template, uv)
     out = run_psql(ns, pod, sql, timeout=20)
     if out.returncode != 0:
         fail(parse_psql_error(out.stderr or out.stdout), 1)
@@ -1097,6 +1351,7 @@ def gather_args():
     required only for mode=amount (any positive int; capped by available coins at write
     time)."""
     item_id = dst_inv = expected_template = None
+    src_storage = dst_storage = idempotency_key = None
     if "--stdin-json" in sys.argv[1:]:
         try:
             payload = json.loads(sys.stdin.read())
@@ -1112,9 +1367,13 @@ def gather_args():
         item_id = payload.get("item_id")
         dst_inv = payload.get("dst_inventory_id") or payload.get("src_inventory_id")
         expected_template = payload.get("expected_template")
+        src_storage = payload.get("src_storage")
+        dst_storage = payload.get("dst_storage")
+        idempotency_key = payload.get("idempotency_key")
     else:
         ap = argparse.ArgumentParser(description="Portal Storage WITHDRAW/DEPOSIT/MOVE writer")
-        ap.add_argument("--action", required=True, choices=["withdraw", "deposit", "move"])
+        ap.add_argument("--action", required=True,
+                        choices=["withdraw", "deposit", "move", "pawn_move"])
         ap.add_argument("--owner-ctrl", required=True)
         ap.add_argument("--mode", default=None, choices=["sweep", "amount"])
         ap.add_argument("--amount", default=None)
@@ -1126,6 +1385,9 @@ def gather_args():
         # deposit, and the required destination for move.
         ap.add_argument("--src-inventory-id", default=None)
         ap.add_argument("--expected-template", default=None)
+        ap.add_argument("--src-storage", default=None, choices=VALID_PAWN_KINDS)
+        ap.add_argument("--dst-storage", default=None, choices=VALID_PAWN_KINDS)
+        ap.add_argument("--idempotency-key", default=None)
         ap.add_argument("--dry-run", action="store_true")
         a = ap.parse_args()
         action = a.action
@@ -1136,8 +1398,11 @@ def gather_args():
         item_id = a.item_id
         dst_inv = a.dst_inventory_id or a.src_inventory_id
         expected_template = a.expected_template
+        src_storage = a.src_storage
+        dst_storage = a.dst_storage
+        idempotency_key = a.idempotency_key
 
-    if action not in ("withdraw", "deposit", "move"):
+    if action not in ("withdraw", "deposit", "move", "pawn_move"):
         fail("bad_action", 2)
 
     if action == "withdraw":
@@ -1167,7 +1432,7 @@ def gather_args():
             dst_inv = pos_int("src_inventory_id", dst_inv)
         else:
             dst_inv = None
-    else:  # move
+    elif action == "move":
         item_id = pos_int("item_id", item_id)
         dst_inv = pos_int("dst_inventory_id", dst_inv)
         mode = None
@@ -1176,16 +1441,37 @@ def gather_args():
             expected_template = str(expected_template).strip() or None
         if expected_template is not None and not TEMPLATE_RE.match(expected_template):
             fail("bad_template", 2)
-    return action, owner, mode, amount, dry_run, item_id, dst_inv, expected_template
+    else:  # pawn_move
+        item_id = pos_int("item_id", item_id)
+        mode = None
+        amount = 0
+        dst_inv = None
+        src_storage = str(src_storage or "").strip().lower()
+        dst_storage = str(dst_storage or "").strip().lower()
+        if src_storage not in VALID_PAWN_KINDS or dst_storage not in VALID_PAWN_KINDS:
+            fail("bad_storage_kind", 2)
+        if src_storage == dst_storage:
+            fail("bad_storage_pair", 2)
+        idempotency_key = str(idempotency_key or "").strip().lower()
+        if not UUID_RE.fullmatch(idempotency_key):
+            fail("bad_idempotency_key", 2)
+        if expected_template is not None:
+            expected_template = str(expected_template).strip() or None
+        if expected_template is not None and not TEMPLATE_RE.fullmatch(expected_template):
+            fail("bad_template", 2)
+    return (action, owner, mode, amount, dry_run, item_id, dst_inv, expected_template,
+            src_storage, dst_storage, idempotency_key)
 
 
 def main():
-    (action, owner, mode, amount, dry_run,
-     item_id, dst_inv, expected_template) = gather_args()
+    (action, owner, mode, amount, dry_run, item_id, dst_inv, expected_template,
+     src_storage, dst_storage, idempotency_key) = gather_args()
     if dry_run:
-        do_dry_run(action, owner, mode, amount, item_id, dst_inv, expected_template)
+        do_dry_run(action, owner, mode, amount, item_id, dst_inv, expected_template,
+                   src_storage, dst_storage, idempotency_key)
     else:
-        do_live(action, owner, mode, amount, item_id, dst_inv, expected_template)
+        do_live(action, owner, mode, amount, item_id, dst_inv, expected_template,
+                src_storage, dst_storage, idempotency_key)
 
 
 if __name__ == "__main__":

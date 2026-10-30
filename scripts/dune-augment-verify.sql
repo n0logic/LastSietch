@@ -1,4 +1,4 @@
--- dune-augment-verify.sql — READ-ONLY verification of the augment write surface
+-- dune-augment-verify.sql, READ-ONLY verification of the augment write surface
 -- on OUR live build (2036754) before building the augment perfect-roll/swap tooling.
 --
 -- Confirms the augment jsonb shape RedBlink's repo relies on
@@ -13,7 +13,7 @@
 --   1. augmented GEAR stores augments under stats->'FAugmentedItemStats'
 --      with parallel AppliedAugments / AppliedAugmentQualities / AppliedAugmentRollData.
 --   2. standalone AUGMENT consumables store their rolled shape under
---      stats->'FAugmentItemStats' (singular) — the roll-shape source.
+--      stats->'FAugmentItemStats' (singular), the roll-shape source.
 --   3. the augment-slot keystones 42-49 exist in the game keystone map.
 --   4. StatRolls value range on real items (so "perfect = 1.0" is confirmed, not assumed).
 
@@ -78,7 +78,10 @@ SELECT to_regclass('dune.specialization_keystones_map')      AS keystone_map_tab
 
 \echo '== 3b. rows for ids 42-49 in the keystone map (if the table exists) =='
 -- If keystone_map_table above is NULL, skip this query (will error; that is a finding).
-SELECT id, keystone_name, track_type
+-- The table is (id smallint, name text). It has NO keystone_name / track_type columns:
+-- an earlier version of this script asked for those and errored out, which also swallowed
+-- query 4 below because psql aborts the rest of the line-buffered batch on error.
+SELECT id, name
   FROM dune.specialization_keystones_map
  WHERE id BETWEEN 42 AND 49
  ORDER BY id;

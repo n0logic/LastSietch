@@ -1,0 +1,74 @@
+{
+  "rate_version": "2026-09-07a",
+  "max_batches_per_request": 50,
+  "weekly_dust_cap": 250,
+  "window_days": 7,
+  "recipes": [
+    {
+      "tier": 1,
+      "input_template": "CopperBar",
+      "spice_template": "MelangeSpice",
+      "output_template": "T1UniqueComponent",
+      "input_per_batch": 25,
+      "spice_per_batch": 1,
+      "output_per_batch": 10,
+      "max_stack": 500,
+      "enabled": true
+    },
+    {
+      "tier": 2,
+      "input_template": "IronBar",
+      "spice_template": "MelangeSpice",
+      "output_template": "T2UniqueComponent",
+      "input_per_batch": 25,
+      "spice_per_batch": 2,
+      "output_per_batch": 10,
+      "max_stack": 500,
+      "enabled": true
+    },
+    {
+      "tier": 3,
+      "input_template": "SteelBar",
+      "spice_template": "MelangeSpice",
+      "output_template": "T3UniqueComponent",
+      "input_per_batch": 25,
+      "spice_per_batch": 3,
+      "output_per_batch": 10,
+      "max_stack": 500,
+      "enabled": true
+    },
+    {
+      "tier": 4,
+      "input_template": "AluminiumBar",
+      "spice_template": "MelangeSpice",
+      "output_template": "T4UniqueComponent",
+      "input_per_batch": 25,
+      "spice_per_batch": 4,
+      "output_per_batch": 10,
+      "max_stack": 500,
+      "enabled": true
+    },
+    {
+      "tier": 5,
+      "input_template": "DuraluminumRod",
+      "spice_template": "MelangeSpice",
+      "output_template": "T5UniqueComponent",
+      "input_per_batch": 25,
+      "spice_per_batch": 5,
+      "output_per_batch": 10,
+      "max_stack": 500,
+      "enabled": true
+    },
+    {
+      "tier": 6,
+      "input_template": "T6RefinedResourceA",
+      "spice_template": "MelangeSpice",
+      "output_template": "T6UniqueComponent",
+      "input_per_batch": 25,
+      "spice_per_batch": 6,
+      "output_per_batch": 10,
+      "max_stack": 500,
+      "enabled": true
+    }
+  ]
+}

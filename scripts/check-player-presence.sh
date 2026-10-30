@@ -22,8 +22,7 @@ ssh "${GAME_HOST:-<game-host>}" "
 
   echo ''
   echo '=== DB encrypted_player_state (Online + grace-period stragglers) ==='
-  PGPASS=\$(sudo kubectl exec -n $NS $POD -- printenv POSTGRES_PASSWORD)
-  sudo kubectl exec -n $NS $POD -- env PGPASSWORD=\$PGPASS psql -h localhost -p 15432 -U postgres -d dune -c \"
+  sudo kubectl exec -n $NS $POD -- sh -c '[ -n \"\${POSTGRES_PASSWORD:-}\" ] || { echo \"FATAL: POSTGRES_PASSWORD unavailable in DB pod\" >&2; exit 3; }; PGPASSWORD=\$POSTGRES_PASSWORD exec psql \"\$@\"' _ -h localhost -p 15432 -U postgres -d dune -c \"
     SELECT account_id, online_status, last_login_time, reconnect_grace_period_end
     FROM dune.encrypted_player_state
     WHERE (online_status = 'Online'

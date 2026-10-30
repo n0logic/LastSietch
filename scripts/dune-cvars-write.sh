@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# P8 — single-target write to UserOverrides.ini on the pinned game pod plus a
+# P8, single-target write to UserOverrides.ini on the pinned game pod plus a
 # transactional row INSERT into lsadmin.cvar_changes on the dune DB pod.
 #
 # Deploys to lastsietch-dune:/opt/lastsietch-relay-helpers/dune-cvars-write.sh and is invoked
@@ -17,7 +17,7 @@
 #     failure (per B.5 status enum). CHECK constraint forbids 'pending' transient.
 #
 # Portions inspired by github.com/Icehunter/dune-admin (handlers_server_settings.go,
-# control_kubectl.go: patchINI) — MIT License, Copyright (c) 2026 Ryan Wilson.
+# control_kubectl.go: patchINI), MIT License, Copyright (c) 2026 Ryan Wilson.
 set -euo pipefail
 
 NS="funcom-seabass-sh-<your-hostid>-<random>"
@@ -58,7 +58,7 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# Snapshot current UserOverrides.ini (or empty if missing — lazy-create case).
+# Snapshot current UserOverrides.ini (or empty if missing, lazy-create case).
 HAD_PRIOR=0
 if sudo k3s kubectl -n "$NS" exec "$GAME_POD" -- test -f "$TARGET" 2>/dev/null; then
   sudo k3s kubectl -n "$NS" exec "$GAME_POD" -- cat "$TARGET" > "$TMP/before.ini" 2>/dev/null
@@ -92,7 +92,7 @@ section = (payload.get("section") or "").strip()
 key = (payload.get("key") or "").strip()
 value = payload.get("value", "")
 operator = (payload.get("operator") or "").strip()
-operator_user_id = payload.get("operator_user_id")     # int|None — passed by admin-backend
+operator_user_id = payload.get("operator_user_id")     # int|None, passed by admin-backend
 reason = (payload.get("reason") or "").strip()
 # admin-backend supplies the layer that was effective before this write (from
 # the read-walk that populated the confirm modal). Fallback: "userOverrides" iff
@@ -226,8 +226,14 @@ PY
 # 4) INSERT the audit row. cvar_key stored as "<section>|<key>" per agreed
 #    convention (recoverable client-side; relay history endpoint splits on
 #    '|' for the per-row response).
-PGPASS="$(sudo k3s kubectl exec -n "$DB_NS" "$DB_POD" -- printenv POSTGRES_PASSWORD 2>/dev/null || true)"
-if [ -z "$PGPASS" ]; then
+run_psql() {
+  sudo k3s kubectl exec -i -n "$DB_NS" "$DB_POD" -- \
+    sh -c '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"' _ \
+    -h localhost -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" "$@"
+}
+
+DB_AUTH_READY="$(sudo k3s kubectl exec -n "$DB_NS" "$DB_POD" -- sh -c 'test -n "${POSTGRES_PASSWORD:-}" && printf available' 2>/dev/null || true)"
+if [ -z "$DB_AUTH_READY" ]; then
   CHANGE_ID=""
   INSERT_OK=false
 else
@@ -239,7 +245,7 @@ else
   # the INSERT (no RETURNING) and a follow-up SELECT currval() that emits a
   # single integer line on stdout. currval() is session-local so concurrent
   # writes from other sessions don't pollute it.
-  RAW_OUT="$(python3 - "$TMP/env.json" <<'PY' | sudo k3s kubectl exec -i -n "$DB_NS" "$DB_POD" -- env PGPASSWORD="$PGPASS" psql -h localhost -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tA -v ON_ERROR_STOP=1 2>/tmp/cvars-insert.err
+  RAW_OUT="$(python3 - "$TMP/env.json" <<'PY' | run_psql -tA -v ON_ERROR_STOP=1 2>/tmp/cvars-insert.err
 import json, sys
 env = json.load(open(sys.argv[1]))
 section = env["section"]; key = env["key"]

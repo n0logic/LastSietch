@@ -8,7 +8,9 @@ idempotency / rate / expiry behaviours.
 
 Run:  python3 scripts/tests/test_social_admin_db.py     (also pytest-compatible)
 """
+import atexit
 import os
+import shutil
 import sys
 import tempfile
 
@@ -18,7 +20,9 @@ ADMIN = os.path.join(REPO, "admin-backend")
 sys.path.insert(0, ADMIN)
 
 # admin.db in a temp dir + the two env vars config.py requires at import.
-os.environ.setdefault("LASTSIETCH_DB_PATH", os.path.join(tempfile.mkdtemp(), "admin.db"))
+_TMP = tempfile.mkdtemp()
+atexit.register(shutil.rmtree, _TMP, ignore_errors=True)
+os.environ.setdefault("LASTSIETCH_DB_PATH", os.path.join(_TMP, "admin.db"))
 os.environ.setdefault("LASTSIETCH_RELAY_API_KEY", "test")
 os.environ.setdefault("LASTSIETCH_SESSION_SECRET", "test")
 

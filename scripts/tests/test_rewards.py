@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for the login-rewards V2 backend (Phase 1): the pure reward logic
-(admin-backend/rewards.py — streak math, daily Solari ramp, weekly rotation index,
+(admin-backend/rewards.py, streak math, daily Solari ramp, weekly rotation index,
 deterministic idempotency, period keys) + the local admin.db claim mirror, plus
 source-scan guards over the transport/endpoint layers (relay/app.py,
 admin-backend/routers/dune.py + portal.py) so a regression that (a) trusts a client
@@ -12,10 +12,15 @@ NO game DB, NO network.
 
 Run:  python3 scripts/tests/test_rewards.py     (also pytest-compatible)
 """
+import atexit
+import base64
+import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -23,7 +28,9 @@ ADMIN = os.path.join(REPO, "admin-backend")
 sys.path.insert(0, ADMIN)
 
 # admin.db in a temp dir + the env vars config.py requires at import.
-os.environ.setdefault("LASTSIETCH_DB_PATH", os.path.join(tempfile.mkdtemp(), "admin.db"))
+_TMP = tempfile.mkdtemp()
+atexit.register(shutil.rmtree, _TMP, ignore_errors=True)
+os.environ.setdefault("LASTSIETCH_DB_PATH", os.path.join(_TMP, "admin.db"))
 os.environ.setdefault("LASTSIETCH_RELAY_API_KEY", "test")
 os.environ.setdefault("LASTSIETCH_SESSION_SECRET", "test")
 
@@ -129,7 +136,7 @@ def test_run_ending():
 
 def test_weekly_rotation_index_and_pool():
     assert len(rewards.WEEKLY_ROTATION_POOL) == 12
-    # No augments in the WEEKLY weapon pool (those feed the Phase-2 monthly draw).
+    # No augments in the WEEKLY weapon pool (those feed the Monthly Reward, Phase 2).
     assert not any(t.startswith("T6_Augment_") for t in rewards.WEEKLY_ROTATION_POOL)
     d = date(2026, 7, 15)
     wi = rewards.week_index(d)
@@ -156,6 +163,513 @@ def test_period_keys():
     assert rewards.iso_week_key(date(2026, 7, 15)) == "2026-W29"
     nm = rewards.next_utc_midnight(datetime(2026, 7, 15, 18, 30, tzinfo=timezone.utc))
     assert nm == datetime(2026, 7, 16, 0, 0, tzinfo=timezone.utc)
+
+
+# --------------------------------------------------------------------------- #
+# Monthly Reward (Phase 2): period key, unlock gate, determinism, idempotency, pool
+# --------------------------------------------------------------------------- #
+
+def test_monthly_period_anchor_is_a_monday():
+    # load-bearing: every period boundary being a Monday is what keeps the
+    # rewards grid's 4 rows real weeks AND lined up with the weekly weapon's
+    # own Monday 00:00 UTC rotation.
+    assert rewards.MONTHLY_PERIOD_ANCHOR == date(2026, 7, 13)
+    assert rewards.MONTHLY_PERIOD_ANCHOR.weekday() == 0   # Monday
+    assert rewards.MONTHLY_PERIOD_LENGTH_DAYS == 28
+
+
+def test_monthly_period_boundaries_match_owner_example():
+    # owner-supplied example (2026-08-01 is day 20 of period 1):
+    #   period 1: 2026-07-13 .. 2026-08-09
+    #   period 2: 2026-08-10 .. 2026-09-06
+    #   period 3: 2026-09-07 .. 2026-10-04
+    assert rewards.monthly_period_start(date(2026, 8, 1)) == date(2026, 7, 13)
+    assert rewards.monthly_period_end(date(2026, 8, 1)) == date(2026, 8, 9)
+    assert (date(2026, 8, 1) - rewards.monthly_period_start(date(2026, 8, 1))).days + 1 == 20
+
+    assert rewards.monthly_period_start(date(2026, 8, 10)) == date(2026, 8, 10)
+    assert rewards.monthly_period_end(date(2026, 8, 10)) == date(2026, 9, 6)
+
+    assert rewards.monthly_period_start(date(2026, 9, 7)) == date(2026, 9, 7)
+    assert rewards.monthly_period_end(date(2026, 9, 7)) == date(2026, 10, 4)
+
+
+def test_monthly_period_is_always_exactly_28_days():
+    for probe in (date(2026, 7, 13), date(2026, 8, 1), date(2027, 2, 15), date(2030, 1, 1)):
+        start = rewards.monthly_period_start(probe)
+        end = rewards.monthly_period_end(probe)
+        assert (end - start).days == rewards.MONTHLY_PERIOD_LENGTH_DAYS - 1
+        assert start.weekday() == 0 and end.weekday() == 6   # Monday .. Sunday
+
+
+def test_monthly_period_key_equals_start_date():
+    for probe in (date(2026, 7, 13), date(2026, 8, 1), date(2027, 3, 3)):
+        assert rewards.monthly_period_key(probe) == rewards.monthly_period_start(probe).strftime("%Y-%m-%d")
+
+
+def test_monthly_period_day1_and_day28_same_period():
+    start = rewards.monthly_period_start(date(2026, 8, 1))   # 2026-07-13
+    day1 = start
+    day28 = start + timedelta(days=27)
+    assert rewards.monthly_period_key(day1) == rewards.monthly_period_key(day28) == "2026-07-13"
+
+
+def test_monthly_period_rollover_day28_to_next_day1():
+    # the day AFTER day 28 must fall in the NEXT period, not the same one.
+    last_day_p1 = date(2026, 8, 9)
+    first_day_p2 = date(2026, 8, 10)
+    assert rewards.monthly_period_key(last_day_p1) == "2026-07-13"
+    assert rewards.monthly_period_key(first_day_p2) == "2026-08-10"
+
+
+def test_next_monthly_period_start_matches_rollover():
+    nxt = rewards.next_monthly_period_start(datetime(2026, 8, 1, 18, 30, tzinfo=timezone.utc))
+    assert nxt == datetime(2026, 8, 10, 0, 0, tzinfo=timezone.utc)
+    # on the last day of a period, the next reset is still the following Monday
+    nxt2 = rewards.next_monthly_period_start(datetime(2026, 8, 9, 23, 59, tzinfo=timezone.utc))
+    assert nxt2 == datetime(2026, 8, 10, 0, 0, tzinfo=timezone.utc)
+
+
+def test_monthly_login_days_count_and_unlocked_threshold():
+    # owner-locked 2026-08-01: 14 distinct days -> NOT unlocked, 15 -> unlocked.
+    assert rewards.MONTHLY_LOGIN_DAYS_REQUIRED == 15
+    period_key = rewards.monthly_period_key(date(2026, 8, 1))   # "2026-07-13"
+    days_14 = [(date(2026, 7, 13) + timedelta(days=n)).isoformat() for n in range(14)]
+    days_15 = [(date(2026, 7, 13) + timedelta(days=n)).isoformat() for n in range(15)]
+    assert rewards.monthly_login_days_count(days_14, period_key) == 14
+    assert rewards.monthly_unlocked(days_14, period_key) is False
+    assert rewards.monthly_login_days_count(days_15, period_key) == 15
+    assert rewards.monthly_unlocked(days_15, period_key) is True
+
+
+def test_monthly_login_days_count_spans_a_calendar_month_boundary():
+    # period 1 (2026-07-13 .. 2026-08-09) straddles July/August -- prove the
+    # count is a real date-range comparison, not a string-prefix match (which
+    # would silently miss the August days, since it no longer aligns with any
+    # single 'yyyy-mm' prefix).
+    period_key = rewards.monthly_period_key(date(2026, 8, 1))
+    mixed = (["2026-07-13", "2026-07-31"]      # inside, July side
+             + ["2026-08-01", "2026-08-09"]    # inside, August side
+             + ["2026-08-10", "2026-07-12"])   # outside the period on both edges
+    assert rewards.monthly_login_days_count(mixed, period_key) == 4
+
+
+def test_monthly_login_days_count_ignores_other_periods():
+    period1 = rewards.monthly_period_key(date(2026, 8, 1))     # 2026-07-13
+    period2 = rewards.monthly_period_key(date(2026, 8, 10))    # 2026-08-10
+    days = [(date(2026, 7, 13) + timedelta(days=n)).isoformat() for n in range(15)]  # all in period 1
+    assert rewards.monthly_login_days_count(days, period1) == 15
+    assert rewards.monthly_login_days_count(days, period2) == 0
+
+
+def test_monthly_login_days_count_dedupes():
+    # duplicate rows for the same date (should not occur given the recorder's
+    # PRIMARY KEY, but the count must not be foolable by a dirty read either).
+    period_key = rewards.monthly_period_key(date(2026, 8, 1))
+    assert rewards.monthly_login_days_count(
+        ["2026-07-13", "2026-07-13", "2026-07-14"], period_key) == 2
+
+
+def test_monthly_login_days_not_a_streak():
+    # a gap must NOT reset progress -- unlike the daily ramp, the monthly
+    # reward counts total distinct days in the period, not a consecutive run.
+    period_key = rewards.monthly_period_key(date(2026, 8, 1))   # 2026-07-13 .. 2026-08-09
+    gappy = ["2026-07-13", "2026-07-20", "2026-08-01", "2026-08-09"]   # 4 days, big gaps
+    assert rewards.monthly_login_days_count(gappy, period_key) == 4
+
+
+def test_monthly_reward_deterministic_same_account_same_period():
+    # the preview shown before claiming and the item actually minted on claim
+    # must always be the same PICK -- a re-read (page reload, retry) can never
+    # show a different item for the same account + period. (Roll VALUES are a
+    # separate concern, randomised by the writer at grant time -- see
+    # test_monthly_writer_rolls_random_values_fixed_count.)
+    key = rewards.monthly_period_key(date(2026, 8, 1))
+    assert (rewards.monthly_pool_entry_for(4242, key)
+            == rewards.monthly_pool_entry_for(4242, key))
+
+
+def test_monthly_reward_identical_for_every_account():
+    # NOT account-sensitive. Everyone earning the same period earns the same
+    # weapon -- so a player can be told what this period's reward IS, and two
+    # players comparing cards never see different items. This assertion is the
+    # exact inverse of the one it replaced (which required the pick to VARY by
+    # account, the pre-2026-08-10 design); if a per-account scheme is ever
+    # wanted again, this test is the thing that has to be consciously deleted.
+    key = rewards.monthly_period_key(date(2026, 8, 1))
+    picks = {rewards.monthly_pool_entry_for(a, key)["template_id"]
+             for a in range(1, 500)}
+    assert len(picks) == 1, picks
+
+
+def test_monthly_reward_pinned_to_its_earning_period():
+    # 🔴 THE POINT OF THE PIN (owner decision 2026-08-24). The weapon is a
+    # property of the PERIOD, so every day inside one period resolves to the
+    # same pick. Before the pin the picker read utc_today() and ignored the
+    # period_key it was handed, so the reward changed under players every
+    # Monday -- and a grace claimant (whose period_key is the PRIOR period)
+    # was minted whatever weapon happened to be showing the day they clicked
+    # rather than the one they actually earned.
+    start = date(2026, 8, 10)
+    keys = {rewards.monthly_period_key(start + timedelta(days=n)) for n in range(28)}
+    assert len(keys) == 1, "fixture bug: those 28 days are not one period"
+    picks = {rewards.monthly_pool_entry_for(4242, k)["template_id"] for k in keys}
+    assert len(picks) == 1, picks
+    # and a prior-period key resolves to the PRIOR period's weapon, not today's
+    prior = rewards.monthly_period_key(start - timedelta(days=1))
+    assert (rewards.monthly_pool_entry_for(4242, prior)["template_id"]
+            != rewards.monthly_pool_entry_for(4242, list(keys)[0])["template_id"])
+
+
+def test_monthly_reward_reaches_every_weapon_in_the_pool():
+    # 🔴 REGRESSION GUARD FOR A REJECTED IMPLEMENTATION, not a style preference.
+    # "Pin to the earning period" reads as though it means
+    # weekly_template_for(period_start). It must NOT be implemented that way:
+    # a period is exactly 4 weeks and WEEKLY_ROTATION_POOL has 12 entries, so
+    # gcd(4, 12) = 4 and the period start lands on only 12/4 = 3 distinct pool
+    # positions -- permanently stranding 9 of the 12 weapons. Indexing by
+    # PERIOD NUMBER walks the whole pool instead. This asserts the whole pool
+    # is reachable, which the rejected version fails 3 != 12.
+    n = len(rewards.MONTHLY_POOL)
+    picks = {rewards.monthly_pool_entry_for(4242, rewards.monthly_period_key(
+        date(2026, 7, 13) + timedelta(days=28 * i)))["template_id"]
+        for i in range(n)}
+    assert len(picks) == n, f"only {len(picks)} of {n} weapons reachable: {picks}"
+
+
+def test_monthly_reward_rejects_a_malformed_period_key():
+    # a bad period_key is an upstream bug (every caller sources it from
+    # monthly_period_key). Fail loudly rather than silently minting pool[0] --
+    # a wrong weapon that looks deliberate is worse than a 500.
+    for bad in ("not-a-date", "", "2026-13-01", "08-10-2026"):
+        try:
+            rewards.monthly_pool_entry_for(4242, bad)
+        except (ValueError, TypeError):
+            continue
+        raise AssertionError(f"accepted malformed period_key {bad!r}")
+
+
+def test_monthly_idempotency_key_stable_and_scoped():
+    key = rewards.monthly_period_key(date(2026, 8, 1))                 # "2026-07-13"
+    key2 = rewards.monthly_period_key(date(2026, 8, 10))               # "2026-08-10", next period
+    a = rewards.deterministic_idem(4242, "monthly_augment", key)
+    assert a == rewards.deterministic_idem(4242, "monthly_augment", key)   # stable
+    assert a != rewards.deterministic_idem(4242, "monthly_augment", key2)  # per period
+    assert a != rewards.deterministic_idem(4243, "monthly_augment", key)   # per account
+    assert a != rewards.deterministic_idem(4242, "weekly_item", key)       # per kind
+
+
+# --------------------------------------------------------------------------- #
+# period_cells: the real dated 28-cell period calendar (alongside cycle_cells)
+# --------------------------------------------------------------------------- #
+
+def test_period_cells_count_and_start_is_a_monday():
+    today = date(2026, 8, 1)
+    cells = rewards.period_cells([], set(), today)
+    assert len(cells) == 28
+    assert cells[0]["date"] == rewards.monthly_period_key(today) == "2026-07-13"
+    assert datetime.strptime(cells[0]["date"], "%Y-%m-%d").date().weekday() == 0
+    assert cells[-1]["date"] == rewards.monthly_period_end(today).strftime("%Y-%m-%d")
+
+
+def test_period_cells_gap_resets_ramp_not_continues():
+    # owner's explicit regression case: a post-gap day must pay the RESET
+    # ramp rung (10000), not a continued rung as if the gap never happened.
+    today = date(2026, 7, 20)
+    login_dates = ["2026-07-13", "2026-07-14", "2026-07-15",   # 3-day run
+                   "2026-07-18", "2026-07-19", "2026-07-20"]   # gap on 16/17, new run
+    cells = rewards.period_cells(login_dates, set(), today)
+    by_date = {c["date"]: c for c in cells}
+    assert by_date["2026-07-15"]["amount"] == 15000 and by_date["2026-07-15"]["ramp_day"] == 3
+    assert by_date["2026-07-18"]["amount"] == 10000 and by_date["2026-07-18"]["ramp_day"] == 1
+    assert by_date["2026-07-19"]["amount"] == 12000
+    assert by_date["2026-07-20"]["amount"] == 15000 and by_date["2026-07-20"]["is_today"] is True
+    # the two gap days themselves: not logged, no amount
+    assert by_date["2026-07-16"]["logged"] is False
+    assert by_date["2026-07-16"]["amount"] is None
+
+
+def test_period_cells_future_days_never_carry_an_amount():
+    today = date(2026, 7, 20)
+    login_dates = ["2026-07-13"]
+    cells = rewards.period_cells(login_dates, set(), today)
+    future = [c for c in cells if c["is_future"]]
+    assert future   # sanity: period 1 runs past 07-20, so future cells exist
+    assert all(c["amount"] is None and c["ramp_day"] is None for c in future)
+    assert all(c["date"] > rewards.date_key(today) for c in future)
+
+
+def test_period_cells_milestone_follows_ramp_day_not_column():
+    # log in 10 CONSECUTIVE days from the period start: raw streak lengths
+    # 1..10. Ramp day 3 (07-15) and day 7 (07-19) are milestones; day 10
+    # (07-22) wraps to cycle position 3 -- ALSO a milestone, even though its
+    # RAW length (10) is not itself in DAILY_MILESTONE_DAYS. This is the
+    # exact case a naive raw-day check would get wrong.
+    today = date(2026, 7, 22)
+    login_dates = [(date(2026, 7, 13) + timedelta(days=n)).isoformat() for n in range(10)]
+    cells = rewards.period_cells(login_dates, set(), today)
+    by_date = {c["date"]: c for c in cells}
+    assert by_date["2026-07-15"]["milestone"] is True    # ramp day 3
+    assert by_date["2026-07-19"]["milestone"] is True    # ramp day 7
+    assert by_date["2026-07-22"]["milestone"] is True    # raw 10 -> wrapped ramp day 3
+    assert by_date["2026-07-13"]["milestone"] is False   # ramp day 1
+    # 2026-07-27 sits in the same weekday COLUMN as 07-13/07-20 but was never
+    # logged in -- if milestone were ever keyed off column instead of ramp
+    # day, this would wrongly flag.
+    assert by_date["2026-07-27"]["milestone"] is False
+
+
+def test_period_cells_logged_count_matches_progress():
+    today = date(2026, 8, 1)
+    login_dates = [(date(2026, 7, 13) + timedelta(days=n)).isoformat()
+                   for n in (0, 2, 5, 10, 15, 19)]   # 6 non-consecutive days
+    period_key = rewards.monthly_period_key(today)
+    cells = rewards.period_cells(login_dates, set(), today)
+    logged_count = sum(1 for c in cells if c["logged"])
+    assert logged_count == rewards.monthly_login_days_count(login_dates, period_key) == 6
+
+
+def test_period_cells_claimed_flag_independent_of_logged():
+    today = date(2026, 7, 20)
+    login_dates = ["2026-07-13", "2026-07-14"]
+    cells = rewards.period_cells(login_dates, {"2026-07-13"}, today)
+    by_date = {c["date"]: c for c in cells}
+    assert by_date["2026-07-13"]["claimed"] is True
+    assert by_date["2026-07-14"]["claimed"] is False   # logged but not claimed
+
+
+def test_portal_overview_daily_exposes_calendar_alongside_cycle():
+    src = _read(PORTAL)
+    ov = src.split("async def portal_rewards_overview", 1)[1].split("async def ", 1)[0]
+    assert '"cycle": grid_cells' in ov          # old key untouched
+    assert '"calendar": calendar_cells' in ov   # new key, additive
+    assert "rewards.period_cells(login_days, daily_claimed, today)" in ov
+
+
+def test_monthly_progress_count_equals_the_calendar_grid():
+    # THE INVARIANT the gauge/grid agreement actually rests on: the number the
+    # card shows and the number a player can count off the 28-cell grid must be
+    # the same, or the UI contradicts itself.
+    #
+    # This replaced a source-scan for the literal string
+    #   monthly_progress = sum(1 for c in calendar_cells if c["logged"])
+    # which went stale the moment that line was refactored to read
+    # mstate["current_progress"]. Both period_cells() and
+    # monthly_login_days_count() DOCUMENT that they agree; two docstrings
+    # asserting the same equivalence is not a proof of it, so this asserts the
+    # counts themselves. Behaviour cannot be refactored out from under it.
+    import random
+    rnd = random.Random(20260824)
+    today = date(2026, 8, 24)
+    start = rewards.monthly_period_start(today)
+    key = rewards.monthly_period_key(today)
+    span = rewards.MONTHLY_PERIOD_LENGTH_DAYS
+
+    scenarios = [
+        [],                                                                # never logged in
+        [rewards.date_key(start + timedelta(days=i)) for i in range(span)],  # every day
+        [rewards.date_key(start - timedelta(days=1))],                     # only OUTSIDE (prior period)
+        [rewards.date_key(start + timedelta(days=span))],                  # only OUTSIDE (next period)
+        [rewards.date_key(start)] * 5,                                     # duplicates of one day
+        [rewards.date_key(start), "", None],                               # falsy entries
+    ]
+    for _ in range(40):                                                    # seeded, deterministic
+        scenarios.append([rewards.date_key(start + timedelta(days=rnd.randrange(-7, span + 7)))
+                          for _ in range(rnd.randrange(0, 40))])
+
+    for logins in scenarios:
+        cells = rewards.period_cells(logins, [], today)
+        assert len(cells) == span, f"grid is not {span} cells"
+        grid_count = sum(1 for c in cells if c["logged"])
+        gauge_count = rewards.monthly_login_days_count(logins, key)
+        assert grid_count == gauge_count, (
+            f"grid shows {grid_count} but gauge says {gauge_count} for {logins!r}")
+
+
+def test_portal_overview_progress_and_grid_share_one_source():
+    # Pairs with test_monthly_progress_count_equals_the_calendar_grid. That one
+    # proves the two rewards.py counters agree; this proves the overview endpoint
+    # actually USES those two and not some third count of its own. Neither is
+    # sufficient alone: agreeing counters do not help if the endpoint ignores
+    # them, and using them does not help if they disagree.
+    src = _read(PORTAL)
+    ov = src.split("async def portal_rewards_overview", 1)[1].split("async def ", 1)[0]
+    assert "calendar_cells = rewards.period_cells(login_days, daily_claimed, today)" in ov
+    assert 'monthly_progress = mstate["current_progress"]' in ov
+    assert '"calendar": calendar_cells' in ov
+
+
+def test_monthly_pool_every_entry_resolves_reward_desc():
+    for entry in rewards.MONTHLY_POOL:
+        r = rewards.reward_desc(entry["template_id"], entry["quality_level"])
+        assert r["name"] and r["name"] != entry["template_id"], \
+            f"{entry['template_id']} has no catalog name"
+        assert r["type"] == "weapon"
+        assert r["rarity"] in ("common", "uncommon", "rare", "epic", "legendary")
+
+
+def test_monthly_pool_augment_shape():
+    # every augment carries a positive roll count and a grade in 1..5, in the
+    # T<digit>_Augment_* family the writer re-validates against, and the pool
+    # entry never exceeds the game's weapon augment slot cap (3).
+    import re
+    for entry in rewards.MONTHLY_POOL:
+        assert 1 <= len(entry["augments"]) <= 3
+        for a in entry["augments"]:
+            assert re.match(r"^T\d+_Augment_", a["name"])
+            assert 1 <= a["grade"] <= 5
+            assert 1 <= a["rolls"] <= 10
+
+
+def test_monthly_pool_augments_are_catalogue_compatible():
+    """Every (template_id, augment) pair in MONTHLY_POOL must pass
+    scripts/data/augment-compatibility.json's matchRule (compatible when any
+    ITEM tag startswith any AUGMENT tag). A pool entry that fails this can
+    never ship -- this IS the ship gate, not documentation of one."""
+    import json as _json
+    catalog_path = os.path.join(REPO, "scripts", "data", "augment-compatibility.json")
+    with open(catalog_path, encoding="utf-8") as fh:
+        catalog = _json.load(fh)
+    augments_catalog = catalog["augments"]
+    aliases = catalog["itemAliases"]
+
+    def compatible(template_id, augment_id):
+        it_tags = aliases.get(template_id) or []
+        aug_tags = (augments_catalog.get(augment_id) or {}).get("tags") or []
+        assert it_tags, f"{template_id} has no itemAliases entry -- cannot verify"
+        assert aug_tags, f"{augment_id} has no augments entry -- cannot verify"
+        return any(i.startswith(a) for i in it_tags for a in aug_tags)
+
+    for entry in rewards.MONTHLY_POOL:
+        for a in entry["augments"]:
+            assert compatible(entry["template_id"], a["name"]), (
+                f"{a['name']} is not compatible with {entry['template_id']} "
+                "per the catalogue's matchRule")
+
+
+def test_monthly_pool_roll_counts_match_verified_file():
+    """Roll counts in MONTHLY_POOL are literals for readability, but they must
+    never drift from scripts/data/augment-roll-counts.json (measured live
+    2026-08-01 against real standalone augment rows) -- the COUNT is
+    load-bearing (a wrong count renders an empty augment slot in game), so
+    this is the ship gate that keeps a literal from silently going stale. An
+    augment absent from the file has no verified count and must be impossible
+    to ship, caught by the same assertion (dict lookup would KeyError, but we
+    check explicitly for a clear failure message)."""
+    counts_path = os.path.join(REPO, "scripts", "data", "augment-roll-counts.json")
+    with open(counts_path, encoding="utf-8") as fh:
+        verified = json.load(fh)["roll_counts"]
+    for entry in rewards.MONTHLY_POOL:
+        for a in entry["augments"]:
+            assert a["name"] in verified, (
+                f"{a['name']} has no verified roll count on file -- "
+                "cannot ship an unmeasured augment")
+            assert a["rolls"] == verified[a["name"]], (
+                f"{a['name']}: pool says {a['rolls']} rolls, verified file "
+                f"says {verified[a['name']]} -- literal has drifted, fix the pool")
+
+
+def test_monthly_pool_includes_melee_variety():
+    # owner's ask: the pool must not be weapon-class-monotonous. At least one
+    # entry uses a melee-tagged augment (Melee*/Ch5_Melee* family).
+    melee_entries = [e for e in rewards.MONTHLY_POOL
+                     if any(a["name"].startswith(("T6_Augment_Melee", "T6_Augment_Ch5_Melee"))
+                            for a in e["augments"])]
+    assert len(melee_entries) >= 1
+
+
+def test_monthly_pool_is_not_thin():
+    # six weapons with no melee was the thin first-month pool the owner asked
+    # to widen; this pins that the widening actually happened and stays put.
+    assert len(rewards.MONTHLY_POOL) >= 10
+
+
+def test_portal_claim_accepts_monthly_augment():
+    src = _read(PORTAL)
+    assert '"daily_solari", "weekly_item", "monthly_augment"' in src
+
+
+def test_portal_claim_monthly_derives_entry_server_side():
+    claim = _read(PORTAL).split("async def portal_rewards_claim", 1)[1].split("\nasync def ", 1)[0]
+    # the monthly entry (template/quality/augments) is derived from
+    # rewards.monthly_pool_entry_for(account, period_key), never from the client.
+    assert "rewards.monthly_pool_entry_for(active_account_id, period_key)" in claim
+    assert 'body.get("template_id")' not in claim
+    assert 'body.get("augments")' not in claim
+
+
+def test_portal_claim_monthly_reeligibility_is_server_side():
+    claim = _read(PORTAL).split("async def portal_rewards_claim", 1)[1].split("\nasync def ", 1)[0]
+    # the 15-day gate is re-derived from the account's OWN login history on
+    # every claim -- a client can never assert the gate is already met.
+    #
+    # Previously asserted rewards.monthly_unlocked(...) / monthly_login_days_count(...)
+    # by name. Those call sites were folded into monthly_claim_state(), which
+    # derives the gate from login_days internally (cur_progress ->
+    # cur_unlocked), so the PROPERTY still holds and only the names moved. The
+    # teeth are the two negative assertions below, which are what actually stop
+    # a client asserting its own eligibility -- those are unchanged.
+    assert "rewards.monthly_claim_state(login_days, monthly_claimed, today)" in claim
+    assert "login_days" in claim
+    # the gate inputs come from the session/DB, never the request body
+    assert 'body.get("login_days")' not in claim
+    assert 'body.get("progress")' not in claim
+    assert 'body.get("period_key")' not in claim
+    # the refusal reports the player's actual progress, not a static string
+    assert "progress" in claim
+
+
+def test_portal_overview_monthly_exposes_requirement_and_progress():
+    src = _read(PORTAL)
+    ov = src.split("async def portal_rewards_overview", 1)[1].split("async def ", 1)[0]
+    assert '"requirement": rewards.MONTHLY_LOGIN_DAYS_REQUIRED' in ov
+    assert '"progress": monthly_progress' in ov
+
+
+def _run_reward_op_dry(payload):
+    """Invoke dune-reward-op.sh --dry-run (SQL built, never executed, no DB/SSH
+    touched -- returns before resolve_db_pod()). Mirrors the existing
+    dune-gift-op.sh subprocess-probe pattern (test_guild_op.py)."""
+    reward_op = os.path.join(REPO, "scripts", "dune-reward-op.sh")
+    b64 = base64.b64encode(json.dumps(payload).encode()).decode()
+    env = dict(os.environ)
+    env["LASTSIETCH_REWARD_ENABLED"] = "1"   # so dry-run reaches the writer, not the dark gate
+    proc = subprocess.run(
+        ["bash", reward_op, "--op-b64", b64, "--dry-run"],
+        capture_output=True, text=True, env=env, timeout=30)
+    return json.loads(proc.stdout)
+
+
+def test_monthly_writer_rolls_random_values_fixed_count():
+    """Owner-locked 2026-08-01: rolls are no longer a guaranteed perfect 1.0.
+    The writer must draw a FRESH random value per roll slot, but the roll
+    COUNT must stay exactly what the caller (rewards.py's pool entry)
+    specifies -- a wrong count renders an empty augment slot in game."""
+    payload = {
+        "account_id": 2036, "reward_kind": "monthly_augment",
+        "idempotency_key": "11111111-1111-4111-8111-111111111111",
+        "template_id": "LMG_Unique_Power_06", "quality_level": 5,
+        "augments": [
+            {"name": "T6_Augment_Lmg1", "grade": 5, "rolls": 6},
+            {"name": "T6_Augment_Damage1", "grade": 5, "rolls": 1},
+            {"name": "T6_Augment_Acuracy1", "grade": 5, "rolls": 1},
+        ],
+        "period_key": "2026-08-10", "operator": "test", "mode": "dry-run",
+    }
+    out1 = _run_reward_op_dry(payload)
+    out2 = _run_reward_op_dry(payload)
+    assert out1["status"] == "dry-run", out1
+    assert out2["status"] == "dry-run", out2
+    rd1 = out1["stats"]["FAugmentedItemStats"][1]["AppliedAugmentRollData"]
+    rd2 = out2["stats"]["FAugmentedItemStats"][1]["AppliedAugmentRollData"]
+    # roll COUNT stays fixed to the requested augments (6, 1, 1)
+    assert [len(r["StatRolls"]) for r in rd1] == [6, 1, 1]
+    assert [len(r["StatRolls"]) for r in rd2] == [6, 1, 1]
+    # roll VALUES are no longer a guaranteed perfect 1.0, and vary run to run
+    all_values = [v for r in rd1 for v in r["StatRolls"]]
+    assert not all(v == 1.0 for v in all_values), "rolls must not be perfect anymore"
+    assert all(0.0 <= v <= 1.0 for v in all_values)
+    assert rd1 != rd2, "roll values must be freshly randomised, not deterministic"
 
 
 # --------------------------------------------------------------------------- #
@@ -298,9 +812,18 @@ def test_portal_claim_uses_session_account_never_client():
     src = _read(PORTAL)
     # account is the session aid, forwarded to the writer; the body is never a source
     # of account_id in the claim path.
-    assert '"account_id": active_account_id' in src
-    assert 'reward_body.get("account_id")' not in src
-    assert 'body.get("account_id")' not in src
+    #
+    # Scoped to the CLAIM HANDLER, not the whole file. A file-wide scan for
+    # body.get("account_id") is a false positive: /portal/select-account (the
+    # multi-account switcher) legitimately reads a client-supplied account_id and
+    # THEN proves Discord ownership of it before trusting it. Scanning the whole
+    # file made this test fail on an untouched tree, which is worse than useless
+    # because a permanently-red test hides the regression it exists to catch.
+    # Same top-level-async-def isolation the sibling tests use.
+    claim = src.split("async def portal_rewards_claim", 1)[1].split("\nasync def ", 1)[0]
+    assert '"account_id": active_account_id' in claim
+    assert 'reward_body.get("account_id")' not in claim
+    assert 'body.get("account_id")' not in claim
 
 
 def test_portal_claim_csrf_and_deferred_honesty():
@@ -330,7 +853,11 @@ def test_portal_overview_shape_keys():
                 '"ramp"', '"milestones"', '"cycle"', '"claimable_total"',
                 '"cycle_len"', '"weeks"'):
         assert key in ov, f"overview missing {key}"
-    assert '"status": "coming_soon"' in ov   # monthly Phase-2 teaser
+    # Phase 2: the Monthly Reward is a real payload now, not a "coming soon" teaser.
+    for key in ('"period_start"', '"period_end"', '"augments"', '"resets_utc"',
+                '"resets_label"', '"unlocked"', '"claimable"', '"requirement"', '"progress"'):
+        assert key in ov, f"monthly overview missing {key}"
+    assert '"status": "coming_soon"' not in ov
 
 
 def test_cycle_grid_and_accumulate_pool():

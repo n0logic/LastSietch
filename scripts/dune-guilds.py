@@ -41,13 +41,8 @@ DB_PORT = "15432"
 
 
 def psql(sql):
-    pw = subprocess.run(
-        ["sudo", "kubectl", "exec", "-n", NS, DB_POD, "--", "printenv", "POSTGRES_PASSWORD"],
-        capture_output=True, text=True, timeout=60,
-    ).stdout.strip()
     r = subprocess.run(
-        ["sudo", "kubectl", "exec", "-i", "-n", NS, DB_POD, "--", "env", f"PGPASSWORD={pw}",
-         "psql", "-h", "localhost", "-p", DB_PORT, "-U", "postgres", "-d", "dune",
+        ["sudo", "kubectl", "exec", "-i", "-n", NS, DB_POD, "--", "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_", "-h", "localhost", "-p", DB_PORT, "-U", "postgres", "-d", "dune",
          "-t", "-A", "-F|", "-v", "ON_ERROR_STOP=1"],
         input=sql, capture_output=True, text=True, timeout=60,
     )
@@ -160,7 +155,7 @@ def emit_directory():
     sys.stdout.write("\n")
 
 
-# Tombstone-safe controller resolver: mirrors the grant/market read path — the
+# Tombstone-safe controller resolver: mirrors the grant/market read path, the
 # most-recent NON-Deleted character for the account, deterministic tie-break.
 def resolve_controller(account_id):
     rows = psql(
@@ -191,7 +186,15 @@ def emit_pending_invites(account_id):
         "SELECT coalesce(json_agg(json_build_object("
         "'invite_id', invite_id, 'guild_id', guild_id, 'guild_name', guild_name, "
         "'guild_description', guild_description, 'sender_player_id', sender_player_id, "
-        "'invite_sent_timespan', invite_sent_timespan, 'character_name', character_name, "
+        "'invite_sent_timespan', invite_sent_timespan, "
+        # invite_sent_timespan is seconds on the game's universe-time basis
+        # (farm_variables.universe_time_timestamp), not epoch, so it means nothing
+        # to a player as printed. Subtract it from the same basis read NOW and the
+        # portal gets plain "seconds ago"; clamped so a clock skew never reads as
+        # a hail from the future.
+        "'sent_ago_s', GREATEST(0, (SELECT FLOOR(EXTRACT(EPOCH FROM now() - fv.universe_time_timestamp))::bigint "
+        "FROM dune.farm_variables fv LIMIT 1) - invite_sent_timespan), "
+        "'character_name', character_name, "
         "'sender_character_name', sender_character_name)), '[]'::json) "
         f"FROM dune.get_player_guild_invites({ctrl}::bigint);",
         fallback="[]")

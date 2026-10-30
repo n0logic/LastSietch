@@ -18,11 +18,7 @@ SECTOR = (MAP_MAX - MAP_MIN) / 9.0
 
 
 def _psql(sql: str) -> str:
-    pw = subprocess.run(["kubectl", "exec", "-n", NS, DBPOD, "--",
-                         "printenv", "POSTGRES_PASSWORD"],
-                        capture_output=True, text=True, timeout=20).stdout.strip()
-    out = subprocess.run(["kubectl", "exec", "-n", NS, DBPOD, "--", "env",
-                          f"PGPASSWORD={pw}", "psql", "-h", "localhost", "-p",
+    out = subprocess.run(["kubectl", "exec", "-n", NS, DBPOD, "--", "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_", "-h", "localhost", "-p",
                           "15432", "-U", "postgres", "-d", "dune", "-tAc", sql],
                          capture_output=True, text=True, timeout=30)
     if out.returncode != 0:

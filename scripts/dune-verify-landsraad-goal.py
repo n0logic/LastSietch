@@ -37,10 +37,8 @@ def kubectl(args):
 
 
 def psql(sql):
-    pw = kubectl(["exec", "-n", NS, DB_POD, "--", "printenv", "POSTGRES_PASSWORD"]).stdout.strip()
     r = subprocess.run(
-        ["sudo", "kubectl", "exec", "-i", "-n", NS, DB_POD, "--", "env", f"PGPASSWORD={pw}",
-         "psql", "-h", "localhost", "-p", "15432", "-U", "postgres", "-d", "dune",
+        ["sudo", "kubectl", "exec", "-i", "-n", NS, DB_POD, "--", "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_", "-h", "localhost", "-p", "15432", "-U", "postgres", "-d", "dune",
          "-t", "-A", "-F|", "-v", "ON_ERROR_STOP=1"],
         input=sql, capture_output=True, text=True, timeout=60,
     )
@@ -93,7 +91,7 @@ def main():
     else:
         verdict = "FAIL"
         msg = (f"Term {term_id} (started {start_raw}) rolled but goals are {goals}, "
-               f"NOT all {EXPECT}. The cvar did NOT take effect as expected — the "
+               f"NOT all {EXPECT}. The cvar did NOT take effect as expected, the "
                f"goal may be pak-baked or read from another source. INVESTIGATE.")
         code = 1
 

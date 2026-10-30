@@ -53,11 +53,63 @@ SAFETY
     unqualified table names in their bodies and error out without it.
 
 Usage:
-  dune-claim-takeover.py --check   <totem_id>
-  dune-claim-takeover.py --take    <totem_id> --account <account_id> [--operator name]
-  dune-claim-takeover.py --revert  <totem_id> --account <account_id> [--operator name]
+  dune-claim-takeover.py --check    <totem_id>
+  dune-claim-takeover.py --take     <totem_id> --account <account_id> [--operator name]
+  dune-claim-takeover.py --register <totem_id> --account <account_id> [--operator name]
+  dune-claim-takeover.py --revert   <totem_id> --account <account_id> [--operator name]
 
---check is always allowed and never writes. --take and --revert require the flag.
+--check is always allowed and never writes. The rest require the flag.
+
+--register: A SECOND, DIFFERENT ORPHAN SHAPE (added 2026-08-18)
+--------------------------------------------------------------
+--take handles a claim that IS in the permission system but has lost its rank-1
+owner. There is a second, MORE COMMON shape this tool used to refuse outright: a
+totem with NO dune.permission_actor row at all, so it was never registered in the
+permission system. Counted 2026-08-18 on live: 39 totems in this state against 6
+of the --take kind. Every one of the 137 working, owned totems HAS that row, so
+its absence is a real fault and not a variant.
+
+Reported by Drew: base built, standing, full of his storage, and the game told
+him he had no permission to build in his own base. Client reboot changed nothing,
+because nothing on the client could.
+
+WHY --take CANNOT DO THIS. permission_actor_takeover reads:
+
+    SELECT actor_id FROM permission_actor WHERE actor_id = in_entry.actor_id
+      INTO found_actor_id;
+    IF NOT FOUND THEN
+        PERFORM permission_actor_register(in_entry, in_owner_rank);
+        RETURN;                     <-- returns BEFORE its pg_notify
+    END IF;
+
+So pointing --take at one of these writes correct rows and then silently skips
+telling the running server. The refusal that used to block it was right.
+
+WHAT --register DOES INSTEAD, and why it is two procs:
+
+  1. permission_actor_register(entry, rank) creates the permission_actor row and,
+     because is_child is false, the rank-1 row with it. It does NOT notify: its
+     own body says so ("there is no pg_notify here as the use cases where it may
+     be needed are very low"). Data correct, server unaware.
+  2. permission_set_player_rank(totem, player, 1, map_id) then notifies. It is
+     safe to call second because it keys on (actor, player): it finds the row
+     step 1 just wrote and UPDATEs it rather than inserting a duplicate. It also
+     calls permission_actor_create_or_update_base_marker itself, so the base
+     appears on the owner's map exactly as a normally-placed one does.
+
+     🔴 The warning elsewhere in this file about permission_set_player_rank
+     inserting a SECOND rank-1 row applies to pointing it at a totem owned by a
+     DIFFERENT player. For the same player it is an upsert. Do not "fix" that
+     warning away, and do not use this proc alone on someone else's claim.
+
+The entry's actor_name / actor_type / access_level are NOT invented: they are
+read from whatever registered, owned totems of the SAME actor class use, so a
+repaired totem is shaped like its healthy siblings. Falls back loudly rather
+than guessing when the class has no registered example.
+
+SAFETY: --register refuses whenever a permission_actor row EXISTS, which is the
+exact inverse of --take. It therefore cannot be pointed at a healthy base at all,
+and the two modes can never both apply to the same totem.
 """
 import json
 import os
@@ -145,7 +197,7 @@ SELECT json_build_object(
   'dimension_index', a.dimension_index,
   'x', round((((a.transform).location).x)::numeric, 0),
   'y', round((((a.transform).location).y)::numeric, 0),
-  'actor_state', (SELECT ast.state::text FROM dune.actor_state ast WHERE ast.actor_id = t.id),
+  'actor_state', a.state::text,
   'rank_rows', (SELECT count(*) FROM dune.permission_actor_rank r
                  WHERE r.permission_actor_id = t.id),
   'owner_player_id', (SELECT r.player_id FROM dune.permission_actor_rank r
@@ -208,6 +260,61 @@ def sq(s):
     return "'" + str(s).replace("'", "''") + "'"
 
 
+# The permission_actor entry for a repaired totem is COPIED from healthy
+# siblings of the same actor class rather than invented. Live shapes 2026-08-18:
+# BP_Totem_C -> ('##Totem_Placeable', type 3, access 3) on 99 of 112; the small
+# variant -> ('##Totem_Small_Placeable', type 4). Guessing type would be the one
+# field with teeth: permission_actor_create_or_update_base_marker only emits a
+# HomeBase marker for actor_type 3 or 4, so a wrong type yields a silently
+# marker-less base.
+SHAPE_SQL = """
+SELECT json_build_object('actor_name', pa.actor_name, 'actor_type', pa.actor_type,
+                         'access_level', pa.access_level, 'examples', count(*))
+  FROM dune.actors a
+  JOIN dune.permission_actor pa ON pa.actor_id = a.id
+  JOIN dune.permission_actor_rank r ON r.permission_actor_id = a.id AND r.rank = 1
+ WHERE a.class = (SELECT class FROM dune.actors WHERE id = %(totem)s)
+ GROUP BY pa.actor_name, pa.actor_type, pa.access_level
+ ORDER BY count(*) DESC
+ LIMIT 1;
+"""
+
+# Resolved from the ACTOR's own map, keyed on the numeric totem id, rather than
+# by passing the map NAME as a parameter. query_json() substitutes with a bare
+# str(v) and no quoting, so a string parameter lands unquoted and Postgres reads
+# it as a column reference. Every other caller passes numbers, which is why that
+# had never bitten; this was the first string one and it cost a failed run.
+# Joining also means the map can never disagree with the actor row.
+MAP_ID_SQL = """
+SELECT json_build_object('map_name_id', mn.map_name_id)
+  FROM dune.actors a
+  JOIN dune.map_names mn ON mn.map_name = a.map
+ WHERE a.id = %(totem)s;
+"""
+
+
+def register_eligibility(claim):
+    """Refusal string, or None when this claim may be REGISTERED.
+
+    Deliberately the inverse of eligibility(): --register requires the
+    permission_actor row to be ABSENT, --take requires it PRESENT. The two can
+    never both apply, so there is no case where an operator has to choose.
+    """
+    if claim.get("actor_state") == "BaseBackup":
+        return ("this is a STORED BACKUP, not a claim on the ground.")
+    if not claim.get("is_totem"):
+        return ("not a totem. Registering arbitrary actors is a wider operation "
+                "than this was reasoned about.")
+    if claim.get("has_permission_actor"):
+        return ("a permission_actor row already EXISTS. This claim is in the "
+                "permission system; if it has no owner use --take, and if it has "
+                "one it is healthy and needs nothing.")
+    if claim.get("owner_player_id") is not None:
+        return ("this claim already has a rank-1 owner (player_id %s)."
+                % claim["owner_player_id"])
+    return None
+
+
 def eligibility(claim):
     """Returns a refusal string, or None when the claim may be adopted."""
     if claim.get("actor_state") == "BaseBackup":
@@ -247,12 +354,13 @@ def main():
         return emit({"ok": True, "operators": rows})
 
     mode = None
-    for m in ("--check", "--take", "--revert"):
+    for m in ("--check", "--take", "--register", "--revert"):
         if m in args:
             mode = m
             break
     if mode is None:
-        return emit({"ok": False, "error": "one of --check / --take / --revert is required"}, 2)
+        return emit({"ok": False, "error":
+                     "one of --check / --take / --register / --revert is required"}, 2)
 
     try:
         totem = int(val(mode))
@@ -265,12 +373,20 @@ def main():
     if err:
         return emit({"ok": False, "error": "claim lookup failed: " + err}, 1)
 
-    refusal = eligibility(claim)
+    refusal = (register_eligibility(claim) if mode == "--register"
+               else eligibility(claim))
 
     if mode == "--check":
+        # Report BOTH paths. The two are mutually exclusive by construction, so
+        # this tells an operator which one applies instead of making them infer
+        # it from a refusal string.
+        take_refusal = eligibility(claim)
+        reg_refusal = register_eligibility(claim)
         return emit({"ok": True, "mode": "check", "claim": claim,
-                     "eligible": refusal is None,
-                     "refusal": refusal,
+                     "eligible": take_refusal is None,
+                     "refusal": take_refusal,
+                     "register_eligible": reg_refusal is None,
+                     "register_refusal": reg_refusal,
                      "armed": os.environ.get(FLAG) == "1"})
 
     # --- writes from here ---------------------------------------------------
@@ -293,6 +409,20 @@ def main():
         return emit({"ok": False, "error":
                      "account %s has no player_controller_id" % acct}, 1)
 
+    if mode == "--register":
+        if refusal:
+            return emit({"ok": False, "error": refusal, "claim": claim}, 1)
+        held, _ = query_json(
+            "SELECT json_build_object('n', count(*)) FROM dune.permission_actor_rank r"
+            " JOIN dune.totems t ON t.id = r.permission_actor_id"
+            " WHERE r.rank = 1 AND r.player_id = %(pid)s;", pid=pcid)
+        n_held = (held or {}).get("n", 0)
+        if n_held >= CLAIM_CAP:
+            return emit({"ok": False, "error":
+                         "account %s already holds %d of %d land claims."
+                         % (acct, n_held, CLAIM_CAP)}, 1)
+
+    shape_used = None
     force_owned = "--force-owned" in args
     prior_pcid = claim.get("owner_player_id")
     prior_name = None
@@ -376,6 +506,51 @@ def main():
                 mid=sq(str(MAP_NAME_IDS.get(claim.get("map"), 11))))
         verify = ("SELECT player_id FROM dune.permission_actor_rank "
                   "WHERE permission_actor_id = %d AND rank = 1" % totem)
+    elif mode == "--register":
+        # Shape copied from healthy siblings of the same actor class, never
+        # invented. Refuse loudly if the class has no registered example: a
+        # guessed actor_type silently costs the base its map marker.
+        shape, err = query_json(SHAPE_SQL, totem=totem)
+        if err or not shape or shape.get("actor_type") is None:
+            return emit({"ok": False, "error":
+                         "no registered totem of class %r to copy a permission "
+                         "entry shape from; refusing to invent one."
+                         % (claim.get("actor_class") or "?"),
+                         "detail": err}, 1)
+        mapinfo, _ = query_json(MAP_ID_SQL, totem=totem)
+        map_id = (mapinfo or {}).get("map_name_id")
+        if map_id is None:
+            return emit({"ok": False, "error":
+                         "no map_name_id for map %r; permission_set_player_rank "
+                         "formats \"Map\" UNQUOTED, so a non-numeric value emits "
+                         "invalid JSON to the engine." % claim.get("map")}, 1)
+        shape_used = shape
+        # 1. register: creates permission_actor AND (is_child false) the rank-1
+        #    row. Does not notify.
+        # dune.actorpermissionentry is SIX fields and the third is actor_class:
+        #   (actor_id, actor_name, actor_class, actor_type, access_level, is_child)
+        # The permission_actor TABLE has only five columns and no actor_class, so
+        # building this ROW from the table's shape silently omits one and Postgres
+        # reports it as "cannot cast type boolean to smallint in column 5" -- an
+        # error that points at the wrong field entirely. Mirror the --take call
+        # above, which already has this right.
+        call = ("PERFORM dune.permission_actor_register("
+                "ROW({tid}, {name}, {cls}, {atype}::smallint, {acc}::smallint, false)"
+                "::dune.actorpermissionentry, "
+                "ROW(1::smallint, {pcid})::dune.actorpermissionrankdata);").format(
+            tid=totem, name=sq(shape.get("actor_name") or ""),
+            cls=sq(claim.get("actor_class") or ""),
+            atype=int(shape["actor_type"]), acc=int(shape["access_level"]),
+            pcid=pcid)
+        # 2. set_player_rank: upserts the SAME (actor, player) row written above,
+        #    builds the base marker, and pg_notifies the running server. This is
+        #    the step register lacks, and the reason a bare register would leave
+        #    the DB correct and the live server none the wiser.
+        marker = ("PERFORM dune.permission_set_player_rank("
+                  "{tid}, {pcid}, 1::smallint, {mid});").format(
+            tid=totem, pcid=pcid, mid=sq(str(int(map_id))))
+        verify = ("SELECT player_id FROM dune.permission_actor_rank "
+                  "WHERE permission_actor_id = %d AND rank = 1" % totem)
     else:
         call = ("PERFORM dune.permission_remove_player_rank({tid}, {pcid});"
                 .format(tid=totem, pcid=pcid))
@@ -394,7 +569,7 @@ def main():
         verify = ("SELECT player_id FROM dune.permission_actor_rank "
                   "WHERE permission_actor_id = %d AND rank = 1" % totem)
 
-    action = "takeover" if mode == "--take" else "revert"
+    action = {"--take": "takeover", "--register": "register"}.get(mode, "revert")
     sql = """
 DO $$
 DECLARE v_log_id bigint; v_after bigint;
@@ -431,7 +606,7 @@ END $$;
         op=sq(operator), call=call, marker=marker, verify=verify,
         ppid=(prior_pcid if (mode == "--take" and force_owned and prior_pcid) else "NULL"),
         pname=(sq(prior_name) if prior_name else "NULL"),
-        expect=(("v_after = %d" % pcid) if mode == "--take"
+        expect=(("v_after = %d" % pcid) if mode in ("--take", "--register")
                 else ("v_after = %d" % restore_to) if restore_to else "v_after IS NULL"))
 
     out = subprocess.run(["/root/dq.sh", "-c", sql],
@@ -441,7 +616,7 @@ END $$;
         return emit({"ok": False, "error": "proc call failed", "detail": combined[:600]}, 1)
 
     after, err = query_json(CHECK_SQL, totem=totem)
-    if mode == "--take":
+    if mode in ("--take", "--register"):
         ok = after.get("owner_player_id") == pcid
     elif restore_to:
         ok = after.get("owner_player_id") == restore_to
@@ -452,6 +627,7 @@ END $$;
                  "character_name": who.get("character_name"),
                  "forced_owned": bool(force_owned and mode == "--take"),
                  "prior_owner": prior_name, "restored_to_player_id": restore_to,
+                 "permission_entry_used": shape_used,
                  "owner_player_id_after": after.get("owner_player_id"),
                  "rank_rows_after": after.get("rank_rows"),
                  "db_notice": combined[:400]}, 0 if ok else 1)

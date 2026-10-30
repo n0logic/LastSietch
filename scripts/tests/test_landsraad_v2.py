@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regression tests for the V2 Landsraad backend: the sibling JSON endpoint
-`GET /portal/landsraad/v2` (admin-backend/routers/portal.py) and the proxy
-swatch-chip attach (Option A).
+`GET /portal/landsraad/v2` (admin-backend/routers/portal.py) and the swatch-chip
+attach (exact placeable dyes from the LUT, house palette proxy as the fallback).
 
 Prod-safe: NO real DB, NO network. The endpoint layer is asserted by scanning the
 source. The swatch logic is exercised for real by extracting the pure swatch
@@ -15,6 +15,7 @@ import ast
 import json
 import logging
 import os
+import re
 import sys
 from typing import Optional
 
@@ -41,7 +42,8 @@ def _read(path):
 
 _SWATCH_NAMES = {
     "_house_base", "_LANDSRAAD_SWATCH_ALIAS", "_SWATCH_LUT_CACHE",
-    "_swatch_lut_by_house", "_swatch_chips_for_house",
+    "_LANDSRAAD_SWATCH_RE", "_LANDSRAAD_SWATCH_PREFIX", "_swatch_lut_hexes",
+    "_swatch_lut_by_house", "_swatch_chips_for_house", "_swatch_for_reward",
     "_attach_board_swatches", "_attach_rewards_swatches",
 }
 
@@ -62,7 +64,7 @@ def _load_swatch_ns():
     assert not missing, f"missing swatch defs in portal.py: {missing}"
     mod = ast.Module(body=wanted, type_ignores=[])
     ns = {
-        "json": json, "_os": os, "Optional": Optional,
+        "json": json, "_os": os, "re": re, "Optional": Optional,
         "logger": logging.getLogger("test"),
         "HOUSE_REP_LOCATIONS": HOUSE_REP_LOCATIONS,
         # __file__ must resolve to admin-backend/routers/portal.py so the LUT
@@ -150,8 +152,18 @@ def test_spelling_drift_aliases_present():
 
 
 # --------------------------------------------------------------------------- #
-# Swatch attach: only Swatch template ids get chips (exact:false)
+# Swatch attach: only Swatch template ids get chips; exact dyes when the LUT has
+# the dyepack the template unlocks, house palette proxy otherwise
 # --------------------------------------------------------------------------- #
+
+CURATED = os.path.join(ADMIN, "data", "dune-item-template-names-curated.json")
+
+
+def _lut_hex(key):
+    with open(LUT, "r", encoding="utf-8") as fh:
+        entry = json.load(fh)["swatches"][key]
+    return ["#" + h for h in entry["hex"]]
+
 
 def test_board_swatch_attach_only_on_swatch_tids():
     ns = _load_swatch_ns()
@@ -162,15 +174,15 @@ def test_board_swatch_attach_only_on_swatch_tids():
     raw = {"tiles": [{
         "board_index": 3, "house_name": "DA_HouseEcaz",
         "rewards": [
-            {"template_id": "Dye_Ecaz_Placeables_Swatch"},
+            {"template_id": "Ecaz_Placeables_Swatch"},
             {"template_id": "Schematic_Ecaz_Wall"},
         ],
     }]}
     ns["_attach_board_swatches"](shaped, raw)
     rows = shaped["tiles"][0]["rewards"]
     assert rows[0].get("swatch"), "swatch reward should carry chips"
-    assert rows[0]["swatch"]["exact"] is False
-    assert rows[0]["swatch"]["chips"] and rows[0]["swatch"]["chips"][0].startswith("#")
+    assert rows[0]["swatch"]["exact"] is True
+    assert rows[0]["swatch"]["chips"] == _lut_hex("PlaceableDyePackEcaz")
     assert "swatch" not in rows[1], "non-swatch reward must not carry chips"
 
 
@@ -194,27 +206,79 @@ def test_rewards_half_swatch_attach():
     }
     raw_rewards = {"houses": [{
         "house_name": "DA_HouseEcaz",
-        "items": [{"template_id": "Dye_Ecaz_Placeables_Swatch"},
+        "items": [{"template_id": "Ecaz_Placeables_Swatch"},
                   {"template_id": "Schematic_Ecaz"}],
     }]}
     ns["_attach_rewards_swatches"](rewards, raw_rewards)
     for section in ("board", "houses"):
         items = rewards[section][0]["items"]
-        assert items[0].get("swatch") and items[0]["swatch"]["exact"] is False
+        assert items[0].get("swatch") and items[0]["swatch"]["exact"] is True
         assert "swatch" not in items[1]
 
 
 def test_rewards_half_alias_house_resolves():
-    # Argosaz (house_reps spelling) must still get chips via the Agrosaz alias.
+    # The placeable dyepack is spelled Mikarrol in the LUT and Mikkarol in
+    # house_reps; a template in either spelling lands on the exact entry.
     ns = _load_swatch_ns()
-    rewards = {"board": [], "houses": [{
-        "raw": "DA_HouseArgosaz",
-        "items": [{"name": "Argosaz Swatch"}]}]}
-    raw_rewards = {"houses": [{
-        "house_name": "DA_HouseArgosaz",
-        "items": [{"template_id": "Dye_Argosaz_Placeables_Swatch"}]}]}
-    ns["_attach_rewards_swatches"](rewards, raw_rewards)
-    assert rewards["houses"][0]["items"][0].get("swatch")
+    for tid in ("Mikarrol_Placeables_Swatch", "Mikkarol_Placeables_Swatch"):
+        rewards = {"board": [], "houses": [{
+            "raw": "DA_HouseMikkarol",
+            "items": [{"name": "Mikarrol Swatch"}]}]}
+        raw_rewards = {"houses": [{
+            "house_name": "DA_HouseMikkarol",
+            "items": [{"template_id": tid}]}]}
+        ns["_attach_rewards_swatches"](rewards, raw_rewards)
+        sw = rewards["houses"][0]["items"][0]["swatch"]
+        assert sw["exact"] is True, tid
+        assert sw["chips"] == _lut_hex("PlaceableDyePackMikarrol"), tid
+
+
+def test_unknown_swatch_template_falls_back_to_house_palette():
+    # Wakyu_Placeables_Swatch is a misspelt game template with no dyepack of its
+    # own; it keeps the honest house-palette proxy rather than a guessed exact.
+    ns = _load_swatch_ns()
+    sw = ns["_swatch_for_reward"]("Wakyu_Placeables_Swatch", "Wayku")
+    assert sw["exact"] is False
+    assert sw["chips"] == _lut_hex("HArmCharDyepackWayku")
+
+
+def test_swatch_with_no_house_palette_is_omitted():
+    ns = _load_swatch_ns()
+    assert ns["_swatch_for_reward"]("Nobody_Placeables_Swatch", "Nobody") is None
+
+
+def test_armor_and_stillsuit_swatches_are_exact():
+    ns = _load_swatch_ns()
+    for tid, key in (("Ecaz_LightArmor_Swatch", "LArmCharDyepackEcaz"),
+                     ("Ecaz_HeavyArmor_Swatch", "HArmCharDyepackEcaz"),
+                     ("Taligari_Stillsuit_Swatch", "StillSCharDyepackTalgari")):
+        sw = ns["_swatch_for_reward"](tid, "Ecaz")
+        assert sw["exact"] is True, tid
+        assert sw["chips"] == _lut_hex(key), tid
+
+
+def test_every_house_placeable_swatch_template_is_exact():
+    # Every <House>_Placeables_Swatch template the game ships resolves to its own
+    # LUT entry. Wakyu is the one misspelt template and stays a proxy.
+    ns = _load_swatch_ns()
+    with open(CURATED, "r", encoding="utf-8") as fh:
+        tids = [k for k in json.load(fh) if k.endswith("_Placeables_Swatch")]
+    assert len(tids) >= 25
+    inexact = [t for t in tids
+               if not ns["_swatch_for_reward"](t, "Ecaz")["exact"]]
+    assert inexact == ["Wakyu_Placeables_Swatch"], inexact
+
+
+def test_lut_carries_build_stamp_and_five_dyes():
+    with open(LUT, "r", encoding="utf-8") as fh:
+        lut = json.load(fh)
+    meta = lut["_meta"]
+    assert meta["build"] == "2168446"
+    assert meta["count"] == len(lut["swatches"]) == 317
+    for key, entry in lut["swatches"].items():
+        assert len(entry["rgb"]) == 5 and len(entry["hex"]) == 5, key
+        # portal-gear-viewer.js reads repr_rgb, falling back to primary_rgb.
+        assert len(entry["repr_rgb"]) == 3 and len(entry["primary_rgb"]) == 3, key
 
 
 def _all_tests():

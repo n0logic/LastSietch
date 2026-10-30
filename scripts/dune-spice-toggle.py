@@ -104,22 +104,19 @@ def resolve_db_pod():
 
 
 def run_psql(ns, pod, sql, extra_args, timeout=45):
-    # The ONLY place a DB connection is opened. Reads POSTGRES_PASSWORD from the
-    # pod env, then execs psql inside the already-running pod. Mirrors
-    # dune-grant.sh run_psql().
+    # Expand the credential only inside the DB pod, then exec psql with SQL on stdin.
     try:
-        pw_out = subprocess.run(
+        auth_out = subprocess.run(
             ["sudo", "kubectl", "exec", "-n", ns, pod, "--",
-             "printenv", "POSTGRES_PASSWORD"],
+             "sh", "-c", 'test -n "${POSTGRES_PASSWORD:-}"'],
             capture_output=True, text=True, timeout=30, check=False)
     except subprocess.TimeoutExpired:
         fail("timeout reading POSTGRES_PASSWORD from DB pod", 3)
-    pgpass = (pw_out.stdout or "").strip()
-    if not pgpass:
+    if auth_out.returncode != 0:
         fail(f"could not read POSTGRES_PASSWORD from DB pod {pod}", 3)
 
     cmd = ["sudo", "kubectl", "exec", "-i", "-n", ns, pod, "--",
-           "env", f"PGPASSWORD={pgpass}", "psql",
+           "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_",
            "-h", "localhost", "-p", DB_PORT, "-U", DB_USER, "-d", DB_NAME,
            "-v", "ON_ERROR_STOP=1", *extra_args]
     try:

@@ -3,7 +3,7 @@
 
 Source of truth = dune-market-bot/item-data.json (the game's own item table;
 its keys ARE the template_ids the native give-item / AddItemToInventory
-ServerCommand accepts — "Stone", "PlantFiber" verified live 2026-06-10). Every
+ServerCommand accepts, "Stone", "PlantFiber" verified live 2026-06-10). Every
 key already passes the wrapper charset [A-Za-z0-9_], so the catalog never offers
 an item the relay would reject.
 
@@ -22,6 +22,12 @@ dir. Enrichment fields (2026-06-12, only emitted when meaningful):
   non_tradeable  - true when the id is in the dune-item-non-tradeable.json
                    sidecar (cannot be listed on the exchange).
   tier / rarity  - from item-data where present.
+  is_gradeable   - true when the template can exist at a grade above Base. Carried
+                   verbatim from item-data (the canonical flag); the Karum wanted-order
+                   picker uses it to decide whether to offer Base / G1..G5 at all.
+                   Schematics DO carry real grades (live-verified 2026-08-25 on
+                   dune.items: SMG_Unique_LargeMag_06_Schematic spans quality_level
+                   0..5), so they are NOT suppressed here. Grades top out at 5.
 """
 import json
 import os
@@ -77,6 +83,10 @@ def main() -> None:
         rarity = meta.get("rarity")
         if rarity:
             entry["rarity"] = rarity
+        # Emitted only when true, matching the other enrichment fields: absent means
+        # "Base only", which is what every consumer already assumes for an old catalog.
+        if meta.get("is_gradeable") is True:
+            entry["is_gradeable"] = True
         out.append(entry)
 
     out.sort(key=lambda e: (e["name"].lower(), e["id"]))

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# STAGED — apply during a maintenance/update window only (patching the CR rolls
+# STAGED, apply during a maintenance/update window only (patching the CR rolls
 # the affected map pods). Aligns Last Sietch per-map memory limits to Funcom's official
 # per-map memory chart (zing5780, build 1973075; see MEMORY-SIZING-AND-
 # EQUILIBRIUM-PANEL-2026-06-03.md). Robust to set reordering: resolves each set
 # index by map name from the live CR, then JSON-patches resources.
 #
 # Changes (limit = OOM ceiling; official max in parens):
-#   DeepDesert_1  16Gi -> 18Gi  (official max 17 GB) ; request 3Gi -> 4Gi
-#   Survival_1    20Gi -> 24Gi  (official max 25-32 GB, formula 0.390852*CCU+11.5594) ; request 5Gi -> 6Gi
+#   DeepDesert_1  18Gi -> 22Gi  (was 18; +4 for growth headroom + upcoming maps e.g. Polar Cap) ; request stays 4Gi
+#   Survival_1    already 24Gi live (2026-06) - commented out below, no re-patch
 # Others already have ample headroom vs official (Overmap 6Gi vs 2.4; smalls 3Gi vs ~1.7).
 # The postgres pod is intentionally left unbounded (no OOM-from-limit); monitor node pressure.
 set -euo pipefail
@@ -17,8 +17,8 @@ BG="${DUNE_BG:-sh-<your-hostid>-<random>}"
 
 # map -> "requestGi limitGi"
 declare -A WANT=(
-  [DeepDesert_1]="4 18"
-  [Survival_1]="6 24"
+  [DeepDesert_1]="4 22"
+  # [Survival_1]="6 24"   # ALREADY APPLIED (live 6Gi/24Gi) - do NOT re-patch, would roll Hagga
 )
 
 CR_JSON=$(sudo kubectl -n "$NS" get igwbg "$BG" -o json)
@@ -57,5 +57,5 @@ else
   echo "DRY RUN. Patch that WOULD be applied:"
   echo "$PATCH" | python3 -m json.tool
   echo
-  echo "Re-run with --apply DURING A WINDOW to patch (rolls DD + Hagga pods)."
+  echo "Re-run with --apply DURING A WINDOW to patch (rolls DeepDesert pods only; Hagga already at 24Gi)."
 fi

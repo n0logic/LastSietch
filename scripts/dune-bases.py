@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Read-only base/land-claim ownership directory for the Last Sietch relay. No writes.
-# Deployed to lastsietch-dune:/root/dune-bases.py — invoked by the relay over SSH.
+# Deployed to lastsietch-dune:/root/dune-bases.py, invoked by the relay over SSH.
 #
 # Ownership is NOT on the actor. A totem has no owner_account_id, and the
 # buildings around it carry owner_entity_id pointing at the TOTEM's own FGL
@@ -17,7 +17,7 @@
 # silos. Only 166 are totems, i.e. actual land claims.)
 #
 # PII rule: this emits character names and tells you who owns what. Same rule as
-# dune-roster.py but stronger — the relay endpoint is auth-gated and this must
+# dune-roster.py but stronger, the relay endpoint is auth-gated and this must
 # NEVER be merged into the shared /portal/maps/{map}/data payload, which the
 # public site is designed to consume.
 import json
@@ -70,7 +70,9 @@ segs AS (
 -- Verified 2026-07-25: all 138 owned totems have no state row, so absence of a
 -- state row is the live-claim signal, not a data gap.
 state AS (
-  SELECT actor_id, state::text AS state FROM dune.actor_state
+  -- Keep the legacy JSON null for normal actors; 1.5 stores it as Default.
+  SELECT id AS actor_id, state::text AS state FROM dune.actors
+  WHERE state <> 'Default'::dune.actorstate
 ),
 holders AS (
   SELECT par.permission_actor_id AS totem_id,
@@ -86,6 +88,35 @@ holders AS (
   FROM dune.permission_actor_rank par
   LEFT JOIN dune.player_state ps ON ps.player_controller_id = par.player_id
   GROUP BY 1
+),
+-- Base directory (admin plan A0). A partition is resident while a ready, alive
+-- game server serves it: its actors are in that server's RAM, and a shutdown
+-- save writes them back over any DB edit. NULL partition = held (stored, loaded
+-- by no server, e.g. the Kulon leftovers after the 10-28 close).
+resident AS (
+  SELECT DISTINCT w.partition_id
+  FROM dune.world_partition w
+  JOIN dune.farm_state f ON f.server_id = w.server_id
+  WHERE f.ready AND f.alive
+),
+owner_ctl AS (
+  SELECT permission_actor_id AS totem_id, min(player_id) AS player_id
+  FROM dune.permission_actor_rank WHERE rank = 1 GROUP BY 1
+),
+backup_slots AS (
+  SELECT player_id, count(*) AS used FROM dune.base_backups GROUP BY 1
+),
+backup_tools AS (
+  SELECT ps.player_controller_id AS player_id, count(*) AS tools
+  FROM dune.items i
+  JOIN dune.inventories inv ON inv.id = i.inventory_id
+  JOIN dune.player_state ps ON inv.actor_id = ps.player_pawn_id
+  WHERE i.template_id = 'BaseBackupTool'
+  GROUP BY 1
+),
+packed_in AS (
+  SELECT actor_id AS totem_id, min(id) AS backup_id
+  FROM dune.base_backup_linked_actors GROUP BY 1
 )
 SELECT coalesce(json_agg(b ORDER BY b->>'map', (b->'owner'->>'name')), '[]'::json)
 FROM (
@@ -107,6 +138,15 @@ FROM (
               WHERE (h->>'rank')::int = 1 LIMIT 1),
     'holders', hs.holders,
     'actor_state', st.state,
+    'partition_alive', a.partition_id IS NOT NULL
+                       AND EXISTS (SELECT 1 FROM resident r WHERE r.partition_id = a.partition_id),
+    -- Where the BRT rebuilds a packed base: the stored claim origin, not the
+    -- parked actor position (they differ after a relocate, see modeb README).
+    'origin_x', round((t.landclaim_original_global_location[array_lower(t.landclaim_original_global_location, 1)])::numeric, 0)::bigint,
+    'origin_y', round((t.landclaim_original_global_location[array_lower(t.landclaim_original_global_location, 1) + 1])::numeric, 0)::bigint,
+    'backup_id', pk.backup_id,
+    'owner_backup_slots', CASE WHEN oc.player_id IS NULL THEN NULL ELSE coalesce(bs.used, 0) END,
+    'owner_backup_tools', CASE WHEN oc.player_id IS NULL THEN NULL ELSE coalesce(bt.tools, 0) END,
     'ownership', CASE
       WHEN st.state = 'BaseBackup' THEN 'stored_backup'
       WHEN hs.holders IS NULL THEN 'orphaned'
@@ -142,6 +182,10 @@ FROM (
   LEFT JOIN pieces p ON p.totem_id = t.id
   LEFT JOIN placeable_count pc ON pc.totem_id = t.id
   LEFT JOIN segs s ON s.totem_id = t.id
+  LEFT JOIN packed_in pk ON pk.totem_id = t.id
+  LEFT JOIN owner_ctl oc ON oc.totem_id = t.id
+  LEFT JOIN backup_slots bs ON bs.player_id = oc.player_id
+  LEFT JOIN backup_tools bt ON bt.player_id = oc.player_id
 ) q;
 """
 
@@ -155,12 +199,12 @@ WITH near AS (
             + power(((a.transform).location).y - %(y)s, 2)) AS dist_units
   FROM dune.totems t
   JOIN dune.actors a ON a.id = t.id
-  LEFT JOIN dune.actor_state ast ON ast.actor_id = t.id
   -- Stored backups still have a totem row and a world transform, but they are
   -- not claims on the ground. Never surface one as "the base you clicked".
   --
   -- The dimension filter is NOT optional. PvE and PvP Hagga are two worlds
-  -- sharing one coordinate space (dim 0 = Habbanya PvE, dim 1 = Kulon PvP),
+  -- sharing one coordinate space (dim 0 = Habbanya PvE, dim 2 = Amtal PvP;
+  -- dim 1 was Kulon until its 2026-10-28 close),
   -- so filtering on map alone ranks claims from the OTHER world against the
   -- point you clicked. Measured 2026-07-27 from a dim 0 standing position: a
   -- dim 1 totem came back second at 81 m, ahead of every real neighbour, and
@@ -168,7 +212,7 @@ WITH near AS (
   -- said which world a row belonged to, so it read as a correct answer.
   WHERE a.map = %(map)s
     AND a.dimension_index = %(dim)s
-    AND (ast.state IS NULL OR ast.state::text <> 'BaseBackup')
+    AND a.state IS DISTINCT FROM 'BaseBackup'::dune.actorstate
   ORDER BY dist_units
   LIMIT %(limit)s
 )
@@ -235,6 +279,11 @@ LEGEND = {
         "abandoned": "Owner last seen 60+ days ago.",
         "_null": "No owner to measure (orphaned claim or stored backup).",
     },
+    "partition_alive": ("Whether a ready game server holds this base's partition "
+                        "right now. While it does, the base lives in that server's "
+                        "memory and a shutdown save overwrites database edits. "
+                        "False with no partition means the base is held: stored, "
+                        "loaded by no server."),
     "health_pct": ("Average condition of the base's pieces. There is no "
                    "max-health column in the schema, so each piece is measured "
                    "against the highest health seen server-wide for its type. "

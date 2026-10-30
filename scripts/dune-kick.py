@@ -145,12 +145,6 @@ def resolve_fls_id_from_account(namespace, db_pod, account_id):
     `-c`, so the binding reached the server literally). int() is the authoritative
     guard: a non-integer raises before any SQL is built."""
     aid = int(account_id)
-    pgpass_r = kubectl(
-        "exec", "-n", namespace, db_pod, "--", "printenv", "POSTGRES_PASSWORD",
-        check=False)
-    pgpass = (pgpass_r.stdout or "").strip()
-    if not pgpass:
-        fail("could not read POSTGRES_PASSWORD from db pod %s" % db_pod)
     # PlayerId for RMQ ServerCommands must be accounts."user" (the hex Funcom
     # UUID, represented as a hexadecimal account ID), NOT accounts.funcom_id (the display
     # "Name#tag"). Confirmed against Red-Blink dune-admin rmq_commands.go:285
@@ -167,8 +161,7 @@ def resolve_fls_id_from_account(namespace, db_pod, account_id):
     )
     r = subprocess.run(
         ["kubectl", "exec", "-i", "-n", namespace, db_pod, "--",
-         "env", "PGPASSWORD=%s" % pgpass,
-         "psql", "-h", "localhost", "-p", str(DB_PORT),
+         "sh", "-c", '[ -n "${POSTGRES_PASSWORD:-}" ] || { echo "FATAL: POSTGRES_PASSWORD unavailable in DB pod" >&2; exit 3; }; PGPASSWORD=$POSTGRES_PASSWORD exec psql "$@"', "_", "-h", "localhost", "-p", str(DB_PORT),
          "-U", DB_USER, "-d", DB_NAME,
          "-tA", "-v", "ON_ERROR_STOP=1",
          "-c", sql],

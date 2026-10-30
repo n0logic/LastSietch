@@ -101,17 +101,21 @@ VALUES
 INSERT INTO dune.inventories (id, actor_id, inventory_type, max_item_count, max_item_volume)
 VALUES ($SENDER_BANK, 5001, 30, 50, 500),
        ($RECIP_BANK,  5002, 30, 50, 500),
+       ($SENDER_PACK, 5001, 0, 50, 500),
        ($EXCHANGE_INV, NULL, 2, -1, -1);
 
 INSERT INTO dune.items
   (id, inventory_id, stack_size, position_index, template_id, stats, quality_level,
    acquisition_time, is_new, volume_override)
-VALUES ($ITEM, $SENDER_BANK, 3, 0, '$TEMPLATE', '{}'::jsonb, 6, 0, false, 1.0);
+VALUES ($ITEM, $SENDER_BANK, 3, 0, '$TEMPLATE', '{}'::jsonb, 6, 0, false, 1.0),
+       ($PACK_ITEM, $SENDER_PACK, 3, 0, '$TEMPLATE', '{}'::jsonb, 4, 0, false, 1.0);
 EOF
 }
 
 # --- the subject SQL ---------------------------------------------------------
 # Pulled from the writer itself so this test cannot drift from what ships.
+SENDER_PACK=2915
+PACK_ITEM=8899
 IDEM=11111111-2222-3333-4444-555555555555
 build_txn() {
   local payload
@@ -338,6 +342,111 @@ else
   else
     bad "take_skip: inv=$swhere" "$(printf '%s' "$sout" | tr '\n' ' ' | tail -c 220)"
   fi
+fi
+
+# --- the grade guard ---------------------------------------------------------
+# Added 2026-08-25 with Karum wanted-order grades. EXECUTED rather than scanned: the guard
+# is PL/pgSQL reading the row it just locked, inside the transaction that moves it. "Does
+# postgres accept this block" and "does it actually refuse a G4 for a G3 order" are not
+# questions the dry-run text assertions in test_karum_grade.py can answer.
+head_ "the grade guard (exact / minimum / Base)"
+grade_case() {
+  local name="$1" itemq="$2" expect="$3"
+  shift 3
+  local sql out rc where
+  sql=$(karum_take_item item_id=$ITEM owner_account_id=$SENDER_ACCT dst=exchange \
+          correlation_id=$KARUM_CORR expected_template=$TEMPLATE "$@")
+  if [[ -z "$sql" ]]; then
+    bad "$name" "karum_take_item emitted nothing"
+    return
+  fi
+  psqlq -c "$(reset_sql)" >/dev/null
+  psqlq -c "UPDATE dune.items SET quality_level=$itemq WHERE id=$ITEM;" >/dev/null
+  out=$(printf 'BEGIN;\nSET LOCAL search_path TO dune, public;\n%s\nCOMMIT;\n' "$sql" | psqlq 2>&1)
+  rc=$?
+  where=$(psqlq -c "SELECT inventory_id FROM dune.items WHERE id=$ITEM;" | tr -d '[:space:]')
+  if [[ "$expect" == move ]]; then
+    if [[ $rc -eq 0 && "$where" == "$EXCHANGE_INV" ]]; then
+      ok "$name"
+    else
+      bad "$name (expected the take to commit)" \
+          "rc=$rc inv=$where $(printf '%s' "$out" | tr '\n' ' ' | tail -c 200)"
+    fi
+  else
+    if [[ $rc -ne 0 ]] && printf '%s' "$out" | grep -q grade_mismatch \
+       && [[ "$where" == "$SENDER_BANK" ]]; then
+      ok "$name"
+    else
+      bad "$name (expected a grade_mismatch refusal, item unmoved)" \
+          "rc=$rc inv=$where $(printf '%s' "$out" | tr '\n' ' ' | tail -c 200)"
+    fi
+  fi
+}
+
+grade_case "exact G3 vs a G3 row -> takes"      3 move           expected_quality=3 quality_mode=exact
+grade_case "exact G3 vs a G4 row -> refused"    4 grade_mismatch expected_quality=3 quality_mode=exact
+grade_case "exact G3 vs a G2 row -> refused"    2 grade_mismatch expected_quality=3 quality_mode=exact
+grade_case "min G3 vs a G5 row -> takes"        5 move           expected_quality=3 quality_mode=min
+grade_case "min G3 vs a G3 row -> takes"        3 move           expected_quality=3 quality_mode=min
+grade_case "min G3 vs a G2 row -> refused"      2 grade_mismatch expected_quality=3 quality_mode=min
+# Base is a REAL request, not "unset". If either layer ever reads 0 as "no guard" this is
+# the case that catches it, and it is the one a falsy check would silently invert.
+grade_case "Base-only vs a G3 row -> refused"   3 grade_mismatch expected_quality=0
+grade_case "Base-only vs a Base row -> takes"   0 move           expected_quality=0
+# A wanted order posted before grades existed keeps its any-grade meaning.
+grade_case "legacy any-grade vs a G3 row -> takes" 3 move
+
+# --- the take SOURCE (bank vs backpack) --------------------------------------
+# Added 2026-08-25. The source used to be hardcoded to inventory_type 30. These prove the
+# `src=` selector actually reaches a different inventory rather than silently defaulting,
+# which is the failure that would look identical to "the feature works" until a player's
+# bank item vanished instead of their backpack one.
+head_ "the take source (src=bank | src=backpack)"
+src_case() {
+  local name="$1" item="$2" expect_from="$3"
+  shift 3
+  local sql out rc where
+  sql=$(karum_take_item item_id=$item owner_account_id=$SENDER_ACCT dst=exchange \
+          correlation_id=$KARUM_CORR expected_template=$TEMPLATE "$@")
+  if [[ -z "$sql" ]]; then bad "$name" "emitted nothing"; return; fi
+  psqlq -c "$(reset_sql)" >/dev/null
+  out=$(printf 'BEGIN;\nSET LOCAL search_path TO dune, public;\n%s\nCOMMIT;\n' "$sql" | psqlq 2>&1)
+  rc=$?
+  where=$(psqlq -c "SELECT inventory_id FROM dune.items WHERE id=$item;" | tr -d '[:space:]')
+  if [[ "$expect_from" == refuse ]]; then
+    if [[ $rc -ne 0 ]] && printf '%s' "$out" | grep -q item_not_found; then
+      ok "$name"
+    else
+      bad "$name (expected item_not_found)" "rc=$rc inv=$where"
+    fi
+  elif [[ $rc -eq 0 && "$where" == "$EXCHANGE_INV" ]]; then
+    ok "$name"
+  else
+    bad "$name (expected the take to commit)" \
+        "rc=$rc inv=$where $(printf '%s' "$out" | tr '\n' ' ' | tail -c 200)"
+  fi
+}
+
+src_case "default (no src=) still takes the BANK item"   "$ITEM"      move
+src_case "src=bank takes the BANK item"                  "$ITEM"      move           src=bank
+src_case "src=backpack takes the BACKPACK item"          "$PACK_ITEM" move           src=backpack
+# 🔴 The two that matter: a source selector that silently fell back to the bank would pass
+# every test above and fail only these.
+src_case "src=bank REFUSES a backpack item"              "$PACK_ITEM" refuse         src=bank
+src_case "src=backpack REFUSES a bank item"              "$ITEM"      refuse         src=backpack
+
+# the offline gate is in the library, so it must cover the backpack source too
+psqlq -c "$(reset_sql)" >/dev/null
+psqlq -c "UPDATE dune.encrypted_player_state SET online_status='Online' WHERE account_id=$SENDER_ACCT;" >/dev/null
+BP_SQL=$(karum_take_item item_id=$PACK_ITEM owner_account_id=$SENDER_ACCT dst=exchange \
+           correlation_id=$KARUM_CORR expected_template=$TEMPLATE src=backpack)
+bpout=$(printf 'BEGIN;\nSET LOCAL search_path TO dune, public;\n%s\nCOMMIT;\n' "$BP_SQL" | psqlq 2>&1)
+bprc=$?
+bpwhere=$(psqlq -c "SELECT inventory_id FROM dune.items WHERE id=$PACK_ITEM;" | tr -d '[:space:]')
+if [[ $bprc -ne 0 ]] && printf '%s' "$bpout" | grep -q player_online && [[ "$bpwhere" == "$SENDER_PACK" ]]; then
+  ok "seller Online -> a BACKPACK take is refused by the same offline gate"
+else
+  bad "backpack offline gate: rc=$bprc inv=$bpwhere" "$(printf '%s' "$bpout" | tr '\n' ' ' | tail -c 200)"
 fi
 
 # --- verdict -----------------------------------------------------------------

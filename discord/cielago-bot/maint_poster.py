@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # Last Sietch maintenance announcements -> #announcements (Cielago bot, raw REST).
 # Window: 2026-06-28 22:00 ET datacenter power maintenance. epoch(22:00 ET)=1782698400
-import sys, json, urllib.request, urllib.error
+import os, sys, json, urllib.request, urllib.error
 
-CHANNEL_ID = "<discord-id>"  # 📢｜announcements
+CHANNEL_ID = os.environ.get("CIELAGO_ANNOUNCEMENTS_CHANNEL_ID", "")
 EPOCH = 1782698400
 TS_T = f"<t:{EPOCH}:t>"   # viewer-local time (auto-converts per timezone)
 TS_R = f"<t:{EPOCH}:R>"   # live relative countdown

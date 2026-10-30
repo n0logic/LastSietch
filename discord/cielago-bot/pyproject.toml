@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Last Sietch Discord administration bot"
 requires-python = ">=3.12"
 dependencies = [
-    "discord.py>=2.4.0",
+    "discord.py>=2.7.1",
     "pydantic>=2.7.0",
     "pydantic-settings>=2.4.0",
     "structlog>=24.1.0",
@@ -15,7 +15,7 @@ dependencies = [
 [project.optional-dependencies]
 # Local bge-small embeddings for the assistant's semantic dedup. Optional so the
 # core bot stays light; without it the assistant falls back to a hashing embedder.
-# Install on the web host with: uv sync --extra embeddings
+# Install on <web-host> with: uv sync --extra embeddings
 embeddings = [
     "onnxruntime>=1.18.0",
     "tokenizers>=0.20.0",

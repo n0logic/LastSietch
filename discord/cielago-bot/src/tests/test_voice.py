@@ -14,11 +14,11 @@ def test_is_trigger_name_rejects_others():
 
 
 def test_temp_channel_name_uses_game_when_present():
-    assert temp_channel_name("the owner", "Conan Exiles") == "Conan Exiles"
+    assert temp_channel_name("Player One", "Conan Exiles") == "Conan Exiles"
 
 
 def test_temp_channel_name_falls_back_to_owner():
-    assert temp_channel_name("the owner", None) == "the owner's Channel"
+    assert temp_channel_name("Player One", None) == "Player One's Channel"
 
 
 def test_temp_channel_name_truncates_to_100():

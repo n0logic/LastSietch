@@ -16,7 +16,7 @@ Config (cielago.config.settings):
   CIELAGO_ASSISTANT_DB_PATH            support.sqlite path
   CIELAGO_ASSISTANT_MOD_CHANNEL_ID     where ticket/FR embeds are posted
   CIELAGO_ASSISTANT_WATCH_CHANNEL_IDS  CSV of channels to watch (default: feedback)
-  CIELAGO_ASSISTANT_OWNER_ID           pinged on Escalate-to-owner
+  CIELAGO_ASSISTANT_OWNER_ID           pinged on Escalate-to-n0logic
   CIELAGO_ASSISTANT_MOD_ROLE_ID        pinged on urgent items
   CIELAGO_ASSISTANT_EMBED_MODEL_DIR    bge-small ONNX dir (falls back to hashing)
   CIELAGO_ASSISTANT_DUP_THRESHOLD      cosine dup cutoff override (else backend default)
@@ -25,6 +25,7 @@ Config (cielago.config.settings):
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -40,6 +41,7 @@ from discord.ext import commands, tasks
 from cielago.assistant import store as S
 from cielago.assistant.classify import (
     CAT_FEATURE,
+    CAT_REPORT,
     CATEGORY_META,
     classify_category,
     classify_severity,
@@ -49,7 +51,7 @@ from cielago.assistant.classify import (
 )
 from cielago.assistant.dedup import best_match
 from cielago.assistant import intake
-from cielago.assistant.embeddings import load_embedder
+from cielago.assistant.embeddings import backfill_embeddings, load_embedder
 from cielago.assistant.migrate import migrate_tracker_json
 from cielago.assistant.store import FeatureRequest, Lead, SupportStore, Ticket
 from cielago.audit import audit
@@ -119,7 +121,7 @@ STATUS_LABEL = {
 
 # The Cielago Ops agent (Claude channels bridge). New ticket/FR cards mention it so
 # the ops session is auto-notified via the bridge and can work the request. 0 disables.
-OPS_AGENT_ID = int(os.environ.get("OPS_AGENT_ID", "0"))
+OPS_AGENT_ID = int(os.environ.get("CIELAGO_OPS_AGENT_ID", "") or 0)
 
 
 def _ops_mention() -> str:
@@ -237,7 +239,7 @@ class ClaimButton(_LifecycleButton, template=r"assist:claim:(?P<tid>\d+)"):
 
 class EscalateButton(_LifecycleButton, template=r"assist:escalate:(?P<tid>\d+)"):
     action = "escalate"
-    label = "Escalate to owner"
+    label = "Escalate to n0logic"
     style = discord.ButtonStyle.danger
 
 
@@ -312,6 +314,7 @@ class Assistant(commands.Cog):
         self.bot = bot
         self.store = SupportStore(settings.cielago_assistant_db_path)
         self.embedder = None
+        self._backfill_task = None
         self._disabled_marker = Path(settings.cielago_assistant_db_path + ".disabled")
         self.enabled = settings.cielago_assistant_enabled and not self._disabled_marker.exists()
 
@@ -324,8 +327,33 @@ class Assistant(commands.Cog):
             migrate_tracker_json(self.store, self.embedder, settings.cielago_tracker_data_path)
         except Exception:
             log.warning("assistant.migrate_failed", exc_info=True)
+        # Backfill rows left behind by an embedder change. Fire-and-forget so a slow
+        # first run never delays the bot coming up; dedup degrades to "finds less"
+        # until it completes, which is the same state it was already in.
+        self._backfill_task = asyncio.create_task(self._run_embedding_backfill())
         if self._watch_ids() and self._mod_channel_id():
             self._sweep.start()
+
+    async def _run_embedding_backfill(self) -> None:
+        """Bring every stored vector up to the live backend.
+
+        OFF the event loop, deliberately: OnnxEmbedder.embed() is CPU-bound
+        onnxruntime, and re-embedding the whole table inline would stall every other
+        command for the length of the run.
+
+        Failure is logged and swallowed. A backfill that cannot run leaves dedup
+        exactly as degraded as it already was; taking the bot down over it would turn
+        a quality problem into an outage."""
+        if self.embedder is None:
+            return
+        try:
+            done = await asyncio.to_thread(backfill_embeddings, self.store, self.embedder)
+        except Exception:
+            log.warning("assistant.embedding_backfill_failed", exc_info=True)
+            return
+        if done:
+            log.info("assistant.embedding_backfill", backend=self.embedder.backend,
+                     dim=self.embedder.dim, **done)
 
     async def cog_unload(self) -> None:
         self._sweep.cancel()
@@ -427,7 +455,7 @@ class Assistant(commands.Cog):
         self.store.add_lead(ld)
         self.store.record_audit(str(message.author), "lead-open", str(ld.id),
                                 category=category, severity=severity)
-        if live:
+        if live and settings.cielago_assistant_react_to_players:
             try:
                 await message.add_reaction(LEAD_EMOJI)
             except discord.DiscordException as exc:
@@ -517,10 +545,11 @@ class Assistant(commands.Cog):
         inferred from message age -- "how old is too old" is a guess, and the caller
         already knows the answer for certain.
         """
-        try:
-            await message.add_reaction(ACK_DUP_EMOJI if dup else ACK_EMOJI)
-        except discord.DiscordException as exc:
-            log.warning("assistant.ack_reaction_failed", item=item_id, error=str(exc))
+        if settings.cielago_assistant_react_to_players:
+            try:
+                await message.add_reaction(ACK_DUP_EMOJI if dup else ACK_EMOJI)
+            except discord.DiscordException as exc:
+                log.warning("assistant.ack_reaction_failed", item=item_id, error=str(exc))
         body = (ACK_TEXT_DUP if dup
                 else ACK_TEXT.get(category or "", ACK_TEXT_DEFAULT)).format(id=item_id)
         try:
@@ -626,7 +655,7 @@ class Assistant(commands.Cog):
             note = f"#{ticket_id} resolved."
         elif action == "escalate":
             self.store.update_ticket(ticket_id, status=S.TICKET_ESCALATED)
-            note = "Escalated to the owner."
+            note = "Escalated to n0logic."
             await self._ping_owner(interaction, t)
         elif action == "disregard":
             self.store.update_ticket(
@@ -642,6 +671,9 @@ class Assistant(commands.Cog):
         await self._refresh_ticket(ticket_id)
         if not interaction.response.is_done():
             await interaction.response.send_message(note, ephemeral=True)
+        # After the ephemeral reply: a DM lookup can outlast the 3 s interaction window.
+        if action == "resolve":
+            await self._notify_reporter(t)
 
     async def _ping_owner(self, interaction: discord.Interaction, t: Ticket) -> None:
         channel = self._mod_channel()
@@ -657,6 +689,35 @@ class Assistant(commands.Cog):
             )
         except discord.DiscordException:
             log.warning("assistant.escalate_ping_failed", ticket=t.id, exc_info=True)
+
+    async def _notify_reporter(self, t: Ticket) -> None:
+        """Tell the reporter their ticket was resolved: a DM, or, when their DMs are
+        closed, a line in the channel the ticket came from. The channel line never
+        mentions the reporter, and a player report (someone misbehaving) shows its
+        number only, no title, so a public post never shows who reported whom. Other
+        tickets keep the title so the channel can see it is fixed and not re-report it.
+        Best-effort: the ticket is already
+        resolved in support.sqlite, so a failed notice is logged, not raised. Neither
+        text names an admin."""
+        if not t.author_id:
+            return
+        body = f'Your ticket #{t.id} ("{t.title}") has been resolved. Thanks for the report!'
+        try:
+            user = self.bot.get_user(t.author_id) or await self.bot.fetch_user(t.author_id)
+            await user.send(body)
+            return
+        except discord.DiscordException as exc:
+            log.info("assistant.resolve_dm_failed", ticket=t.id, error=str(exc))
+        channel = self.bot.get_channel(t.channel_id) if t.channel_id else None
+        if channel is None:
+            log.warning("assistant.resolve_notice_undelivered", ticket=t.id)
+            return
+        try:
+            shown = f"Ticket #{t.id}" if t.category == CAT_REPORT else f'Ticket #{t.id} ("{t.title}")'
+            await channel.send(f"{shown} has been resolved. Thanks for the report!",
+                               allowed_mentions=discord.AllowedMentions.none())
+        except discord.DiscordException:
+            log.warning("assistant.resolve_notice_failed", ticket=t.id, exc_info=True)
 
     async def do_merge(
         self, interaction: discord.Interaction, source_id: int, target_id: int
@@ -841,6 +902,7 @@ class Assistant(commands.Cog):
         await audit(interaction.guild, "assist-resolve", actor=interaction.user, ticket=ticket_id)
         await self._refresh_ticket(ticket_id)
         await interaction.response.send_message(f"Resolved #{ticket_id}.", ephemeral=True)
+        await self._notify_reporter(t)
 
     # --- slash: assistant control ---
 

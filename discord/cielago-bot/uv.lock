@@ -288,7 +288,7 @@ embeddings = [
 [package.metadata]
 requires-dist = [
     { name = "better-profanity", specifier = ">=0.7.0" },
-    { name = "discord-py", specifier = ">=2.4.0" },
+    { name = "discord-py", specifier = ">=2.7.1" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.0" },
     { name = "numpy", marker = "extra == 'embeddings'", specifier = ">=1.26.0" },

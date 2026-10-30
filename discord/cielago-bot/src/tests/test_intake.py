@@ -49,8 +49,12 @@ def test_surface_never_guesses_when_it_cannot_tell():
 def test_server_canonicalises_but_keeps_what_it_cannot_place():
     assert I.normalise_server("habbanya") == "Habbanya (PvE)"
     assert I.normalise_server("Habanya basin") == "Habbanya (PvE)"
-    assert I.normalise_server("kulon pvp") == "Kulon-PvP"
-    assert I.normalise_server("the PvP one") == "Kulon-PvP"
+    assert I.normalise_server("amtal") == "Amtal-Full-PvP"
+    assert I.normalise_server("Amtal-Full-PvP") == "Amtal-Full-PvP"
+    assert I.normalise_server("the PvP one") == "Amtal-Full-PvP"
+    # Kulon closed 2026-10-28: old names stay recognisable, flagged as the closed world.
+    assert I.normalise_server("kulon pvp") == "Kulon (closed, now Amtal)"
+    assert I.normalise_server("Kulon-PvP") == "Kulon (closed, now Amtal)"
     assert I.normalise_server("deep desert") == "Deep Desert"
     # Unrecognised is PRESERVED, never blanked: it is the only location we have.
     assert I.normalise_server("some cave near the sietch") == "some cave near the sietch"

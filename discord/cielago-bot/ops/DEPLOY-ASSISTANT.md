@@ -1,6 +1,6 @@
 # Deploying the Cielago Assistant (Phase 0/1)
 
-The Assistant is a cog inside the existing Cielago bot on **the web host**
+The Assistant is a cog inside the existing Cielago bot on **<web-host>**
 (`mail.example.com`). Deploying it = updating the Cielago code + env, applying
 the resource-cap drop-in, and (optionally) staging the embedding model. No game
 server, mail server, or game DB is touched.
@@ -13,18 +13,18 @@ The service runs `python -m cielago.bot` from the **venv site-packages**, NOT
 from `/opt/cielago/src`. A code-only `git pull` will NOT take effect until the
 package is re-synced into the venv. Every deploy must reinstall the package:
 
-`/opt/cielago` is the deploy dir on the web host and is **NOT a git repo** — the
+`/opt/cielago` is the deploy dir on <web-host> and is **NOT a git repo** — the
 assistant code is local/unpushed, so deploy by **rsync from the dev box**, then
 re-sync into the venv (the live venv is `venv`, **not** `.venv`):
 
 ```bash
-# from the dev box (~/Source/Gaming/LastSietch/discord/cielago-bot):
+# from the dev box (<your clone>/discord/cielago-bot):
 rsync -ai --no-owner --no-group \
   --exclude='/.env' --exclude='/.venv/' --exclude='/venv/' --exclude='/logs/' \
   --exclude='/data/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='*.sqlite' --exclude='.pytest_cache/' \
-  -e ssh ~/Source/Gaming/LastSietch/discord/cielago-bot/ the web host:/opt/cielago/
+  -e ssh <your clone>/discord/cielago-bot/ <web-host>:/opt/cielago/
 
-# on the web host:
+# on <web-host>:
 cd /opt/cielago
 sudo -u cielago venv/bin/pip install -e .   # editable re-sync (venv, NOT .venv)
 ```

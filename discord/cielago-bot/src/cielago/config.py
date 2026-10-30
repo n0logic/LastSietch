@@ -20,17 +20,25 @@ class Settings(BaseSettings):
     )
     cielago_log_level: str = Field(alias="CIELAGO_LOG_LEVEL", default="INFO")
 
-    # Dune server-status digest (daily/weekly) — posts to #dune-server-info.
+    # Dune server-status digest (daily/weekly) — posts to the merged #server-info
+    # (the former #service-alerts channel id, merged 2026-08-27).
     cielago_dune_status_channel_id: int | None = Field(
         alias="CIELAGO_DUNE_STATUS_CHANNEL_ID", default=None
     )
-    # lastsietch-relay (the web host localhost) supplies the stats blob from lastsietch-dune.
+    # lastsietch-relay (<web-host> localhost) supplies the stats blob from lastsietch-dune.
     cielago_relay_base_url: str = Field(
         alias="CIELAGO_RELAY_BASE_URL", default="http://127.0.0.1:8077"
     )
     cielago_relay_api_key: str = Field(alias="CIELAGO_RELAY_API_KEY", default="")
 
-    # Market price-alert DMs. The admin backend (same the web host box) exposes
+    # New editions use the portal archive and a separate scoped publisher key.
+    cielago_reports_enabled: bool = Field(alias="CIELAGO_REPORTS_ENABLED", default=False)
+    cielago_report_publish_key: str = Field(alias="CIELAGO_REPORT_PUBLISH_KEY", default="")
+    cielago_reports_public_origin: str = Field(
+        alias="CIELAGO_REPORTS_PUBLIC_ORIGIN", default="https://portal.lastsietch.com"
+    )
+
+    # Market price-alert DMs. The admin backend (same <web-host> box) exposes
     # /_internal/market-alerts/{pending,ack}; this cog polls it and DMs players.
     # Disabled (no DMs) when the base URL or poll key is unset.
     cielago_admin_base_url: str = Field(
@@ -40,6 +48,10 @@ class Settings(BaseSettings):
     cielago_market_alert_interval: int = Field(
         alias="CIELAGO_MARKET_ALERT_INTERVAL", default=120
     )
+    # Portal events -> Discord scheduled events. Same base URL and key as the
+    # alerts; off by default (the backend has its own flag too).
+    cielago_events_sync_enabled: bool = Field(alias="CIELAGO_EVENTS_SYNC_ENABLED", default=False)
+    cielago_events_sync_interval: int = Field(alias="CIELAGO_EVENTS_SYNC_INTERVAL", default=60)
 
     # Bug/feature tracker (RETIRED — superseded by the assistant). The feedback
     # channel id is still used: it's the default channel the assistant watches,
@@ -54,6 +66,16 @@ class Settings(BaseSettings):
     # Cielago Assistant (Phase 0/1): mod-facing support triage with local-embedding
     # dedup, a ticket lifecycle, and feature-request upvotes. No external LLM.
     cielago_assistant_enabled: bool = Field(alias="CIELAGO_ASSISTANT_ENABLED", default=True)
+    # Emoji reactions the bot places on PLAYER messages (👁 lead-noticed, 📝 filed,
+    # 🔗 merged). Disabled 2026-08-26 at the owner's request: the watcher's lead
+    # detection is broad, so 👁 landed on most posts and read as the bot reacting
+    # to everything. Off by default so it stays off if .env is ever rebuilt; a v2
+    # of the assistant is planned and will revisit the player-facing surface.
+    # Does NOT affect the 👍 vote reaction, which goes on the bot's OWN embed in
+    # the mod channel, not on anyone's post.
+    cielago_assistant_react_to_players: bool = Field(
+        alias="CIELAGO_ASSISTANT_REACT_TO_PLAYERS", default=False
+    )
     cielago_assistant_db_path: str = Field(
         alias="CIELAGO_ASSISTANT_DB_PATH", default="data/support.sqlite"
     )
@@ -145,8 +167,57 @@ class Settings(BaseSettings):
         alias="CIELAGO_BUILDWATCH_STATE_PATH", default="data/dune-buildwatch.json"
     )
 
+    # Social publisher approvals (ops/social-publisher). Off by default. The
+    # approver is cielago_assistant_owner_id (the owner); with that unset the cog
+    # never starts. The approvals dir must be writable by the cielago user ONLY.
+    cielago_social_approvals_enabled: bool = Field(
+        alias="CIELAGO_SOCIAL_APPROVALS_ENABLED", default=False
+    )
+    cielago_social_outbox_dir: str = Field(
+        alias="CIELAGO_SOCIAL_OUTBOX_DIR", default="/var/lib/social-pub/outbox"
+    )
+    cielago_social_approvals_dir: str = Field(
+        alias="CIELAGO_SOCIAL_APPROVALS_DIR", default="/var/lib/social-pub/approvals"
+    )
+    cielago_social_sent_path: str = Field(
+        alias="CIELAGO_SOCIAL_SENT_PATH", default="data/social-approvals-sent.json"
+    )
+
+    # Event contests (cogs/contests.py, definitions in data/contests.json). Off by
+    # default. The channel is 🏆｜server-events; staff reports go to the assistant
+    # mod channel. The award key is X-Sietch-Award-Key, the same value as
+    # LASTSIETCH_SIETCH_AWARD_KEY on lastsietch-admin; blank = no payouts and no link hints.
+    cielago_contests_enabled: bool = Field(alias="CIELAGO_CONTESTS_ENABLED", default=False)
+    cielago_contest_channel_id: int | None = Field(
+        alias="CIELAGO_CONTEST_CHANNEL_ID", default=None
+    )
+    cielago_contest_data_path: str = Field(
+        alias="CIELAGO_CONTEST_DATA_PATH", default="data/contests-state.json"
+    )
+    cielago_contest_award_key: str = Field(alias="CIELAGO_CONTEST_AWARD_KEY", default="")
+
+    # Join welcome card (cogs/onboarding.py). Blank channel = the channel whose name
+    # ends in "intro", which is where the old one-line greeting always posted.
+    cielago_welcome_channel_id: int | None = Field(
+        alias="CIELAGO_WELCOME_CHANNEL_ID", default=None
+    )
+    # Short public "welcome to <sietch>" line on a member's FIRST sietch pick. No
+    # pings. Blank channel = the channel whose name ends in "dune-general".
+    cielago_sietch_public_welcome: bool = Field(
+        alias="CIELAGO_SIETCH_PUBLIC_WELCOME", default=True
+    )
+    cielago_sietch_welcome_channel_id: int | None = Field(
+        alias="CIELAGO_SIETCH_WELCOME_CHANNEL_ID", default=None
+    )
+    cielago_sietch_welcomed_path: str = Field(
+        alias="CIELAGO_SIETCH_WELCOMED_PATH", default="data/sietch-welcomed.json"
+    )
+
     @field_validator(
         "cielago_audit_channel_id",
+        "cielago_welcome_channel_id",
+        "cielago_sietch_welcome_channel_id",
+        "cielago_contest_channel_id",
         "cielago_jtc_trigger_channel_id",
         "cielago_dune_status_channel_id",
         "cielago_feedback_channel_id",

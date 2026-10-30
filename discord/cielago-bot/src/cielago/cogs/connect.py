@@ -23,7 +23,7 @@ CONAN_MODS = [
 ]
 
 
-def _dune_embed() -> discord.Embed:
+def dune_embed() -> discord.Embed:
     embed = discord.Embed(
         title="\U0001F3DC️ Last Sietch - Dune: Awakening",
         color=0xD4A574,
@@ -31,16 +31,22 @@ def _dune_embed() -> discord.Embed:
     embed.add_field(
         name="Find the Server",
         value=(
-            "Open the in-game server browser, switch to the **Experimental** tab, set region "
-            "**North America**, and search for **Last Sietch**. Expand the row and hit Join."
+            "New character: **New Game** > **Multiplayer** > **Confirm** > **Server Browser** "
+            "(in the Recommended Server popup). Existing character: **Characters** > "
+            "**Server Browser**.\n"
+            "Switch to the **Experimental** tab, set region **North America**, and search for "
+            "**Last Sietch**. Expand the row and hit Join, or **Transfer** for an existing "
+            "character."
         ),
         inline=False,
     )
     embed.add_field(
         name="Sietches",
         value=(
-            "Two persistent Hagga sietches, **Habbanya** and **Kulon**, "
-            "plus Deep Desert in PvP and PvE flavors."
+            "Two persistent Hagga sietches: **Habbanya** (PvE) and **Amtal** (full PvP, "
+            "tradeposts included), plus Deep Desert in PvP and PvE flavors.\n"
+            "\u26a0\ufe0f On Amtal only the **Riftwatch** and **Helius Gate** settlements "
+            "are safe. Tradeposts are PvP even when their banner flickers to Guild Peace."
         ),
         inline=False,
     )
@@ -60,7 +66,9 @@ def _dune_embed() -> discord.Embed:
         ),
         inline=False,
     )
-    embed.add_field(name="Build", value="Dune: Awakening 1.4, custom-tuned rules", inline=True)
+    # No version number: a typed "1.4" went stale on the next patch, and the buildwatch
+    # state is the latest Steam release, not necessarily what our servers run yet.
+    embed.add_field(name="Build", value="Current Funcom build, custom-tuned rules", inline=True)
     embed.add_field(
         name="Steam",
         value="[Dune: Awakening](https://store.steampowered.com/app/1172710/Dune_Awakening/)",
@@ -73,7 +81,7 @@ def _dune_embed() -> discord.Embed:
         value=(
             f"See <#{info_id}> for the full feature list."
             if info_id
-            else "See #dune-server-info for the full feature list."
+            else "See #server-info for the full feature list."
         ),
         inline=False,
     )
@@ -118,7 +126,7 @@ def _enshrouded_embed() -> discord.Embed:
 
 
 _BUILDERS = {
-    "dune": _dune_embed,
+    "dune": dune_embed,
     "conan": _conan_embed,
     "enshrouded": _enshrouded_embed,
 }

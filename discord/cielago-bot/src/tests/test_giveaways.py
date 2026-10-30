@@ -108,3 +108,95 @@ def test_store_active_excludes_ended():
     store.giveaways[2] = Giveaway(2, 1, 1, ["B"], 10, ended=True)
     active = store.active()
     assert [g.message_id for g in active] == [1]
+
+
+# --- Founders mode ---
+
+import asyncio  # noqa: E402
+import json  # noqa: E402
+
+from cielago.cogs.giveaways import normalize_friend_code  # noqa: E402
+
+
+def test_friend_code_digits_and_spacing():
+    assert normalize_friend_code("123456789") == "123456789"
+    assert normalize_friend_code(" 1234 5678-9 ") == "123456789"
+
+
+def test_friend_code_profile_links():
+    assert normalize_friend_code("https://steamcommunity.com/id/example-player/") is not None
+    assert normalize_friend_code("steamcommunity.com/profiles/" + "7656119" + "0" * 10) is not None
+
+
+def test_friend_code_rejects_junk():
+    assert normalize_friend_code("") is None
+    assert normalize_friend_code("1234") is None
+    assert normalize_friend_code("12345678901") is None
+    assert normalize_friend_code("me@example.com") is None
+    assert normalize_friend_code("https://evil.example/steamcommunity.com/id/x") is None
+
+
+def test_founders_round_trip_keeps_codes_and_role():
+    g = Giveaway(
+        message_id=1,
+        channel_id=2,
+        guild_id=3,
+        prizes=["DLC"] * 5,
+        ends_at=10,
+        entrants={7, 8},
+        founders_role_id=99,
+        starter_id=42,
+        codes={7: "123456789"},
+    )
+    back = Giveaway.from_dict(json.loads(json.dumps(g.to_dict())))
+    assert back.founders_role_id == 99
+    assert back.starter_id == 42
+    assert back.codes == {7: "123456789"}
+
+
+def test_old_records_load_without_founders_fields():
+    g = Giveaway.from_dict(
+        {"message_id": 1, "channel_id": 2, "guild_id": 3, "prizes": ["A"], "ends_at": 5}
+    )
+    assert g.founders_role_id is None and g.codes == {}
+
+
+def test_founders_draw_discards_non_winner_codes_and_dms_winners():
+    from cielago.cogs.giveaways import Giveaways
+
+    sent_channel, sent_dm = [], []
+
+    class Chan:
+        guild = type("G", (), {"get_member": staticmethod(lambda uid: None)})()
+
+        async def send(self, text, **kw):
+            sent_channel.append(text)
+
+    class User:
+        async def send(self, text):
+            sent_dm.append(text)
+
+    class Bot:
+        def get_user(self, uid):
+            return User()
+
+    cog = Giveaways.__new__(Giveaways)
+    cog.bot = Bot()
+    cog.store = type("S", (), {"save": lambda self: None})()
+    g = Giveaway(
+        message_id=1,
+        channel_id=2,
+        guild_id=3,
+        prizes=["DLC"] * 2,
+        ends_at=10,
+        entrants={1, 2, 3},
+        winners=[1, 3],
+        founders_role_id=99,
+        starter_id=42,
+        codes={1: "111111", 2: "222222", 3: "333333"},
+    )
+    asyncio.run(cog._finish_founders(g, Chan()))
+    assert g.codes == {1: "111111", 3: "333333"}
+    assert "222222" not in sent_dm[0]
+    assert "111111" in sent_dm[0] and "333333" in sent_dm[0]
+    assert "111111" not in sent_channel[0]

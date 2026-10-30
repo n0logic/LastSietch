@@ -529,7 +529,11 @@ class SupportStore:
     def candidate_vectors(self, table: str, backend: str, dim: int,
                           statuses: tuple[str, ...]) -> list[tuple[int, list[float]]]:
         """Open rows that carry an embedding from the *live* backend/dim, for
-        cosine dedup. Mismatched-backend rows are skipped (they get backfilled)."""
+        cosine dedup. Mismatched-backend rows are skipped.
+
+        They are backfilled by `backfill_embeddings()` at startup. Before 2026-08-26
+        that was not true and this docstring said it was, which is why nobody noticed
+        that a backend change would silently empty this result set."""
         if table not in ("tickets", "feature_requests"):
             raise ValueError(table)
         ph = ",".join("?" * len(statuses))
@@ -540,6 +544,42 @@ class SupportStore:
             (*statuses, backend, dim),
         ).fetchall()
         return [(r["id"], unpack(r["embedding"])) for r in rows]
+
+    def rows_needing_embedding(self, table: str, backend: str, dim: int,
+                               limit: int = 256) -> list[tuple[int, str]]:
+        """Rows whose stored vector is missing, or came from a different backend/dim.
+
+        This is what makes changing the embedder survivable. `candidate_vectors()`
+        filters on the LIVE backend and dim, so the moment either changes, every
+        existing row stops being a dedup candidate and dedup silently finds nothing.
+        Until 2026-08-26 nothing called `set_embedding()` at all, so the promise in
+        that method's neighbour docstring that mismatched rows "get backfilled" was
+        simply false: staging the ONNX model would have taken dedup from
+        lexical-but-working to not-working, with no error anywhere.
+
+        The text returned is the SAME text the insert path embeds (body, falling back
+        to title; question patterns for kb), so a backfilled vector is comparable with
+        a freshly inserted one. Embedding different text here would produce vectors
+        that never match, which looks identical to dedup being broken.
+
+        `IS NOT` rather than `<>`: the stale rows are exactly the ones with NULL in
+        these columns, and `<>` does not match NULL.
+        """
+        if table not in ("tickets", "feature_requests", "kb"):
+            raise ValueError(table)
+        text_expr = (
+            "question_patterns" if table == "kb"
+            else "CASE WHEN body IS NOT NULL AND body <> '' THEN body ELSE title END"
+        )
+        rows = self.conn.execute(
+            f"""SELECT id, {text_expr} AS src FROM {table}
+                 WHERE embedding IS NULL
+                    OR embed_backend IS NOT ?
+                    OR embed_dim IS NOT ?
+                 ORDER BY id LIMIT ?""",
+            (backend, dim, limit),
+        ).fetchall()
+        return [(r["id"], r["src"] or "") for r in rows]
 
     def set_embedding(self, table: str, row_id: int, embedding: list[float],
                       backend: str) -> None:

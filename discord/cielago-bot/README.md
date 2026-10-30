@@ -13,9 +13,7 @@ All-in-one Discord administration bot for the Last Sietch server. Named after th
    - `/ping` health check
    - Audit log: every admin action posts to `#cielago-audit` + appends JSONL on disk
 2. **Phase 2 — Member onboarding**
-   - Welcome flow, rules-accept gate
-   - 3-question quiz (reuse the pattern from existing internal OAuth portal)
-   - Auto-assign `At The Gate` → `Holders` after verification
+   - Welcome card with an opt-in PvE/PvP sietch role (`Habbanya` / `Amtal`) for notices; no role ladder, nothing gated
 3. **Phase 3 — Game integration**
    - Dune: Awakening server status (live/down, player count)
    - Optional Discord ↔ in-game account linking via OAuth
@@ -86,6 +84,27 @@ Folded in from the old `jtc-bot` (the Node bot it replaces):
   Entries use a `DynamicItem` button keyed by the giveaway message ID, so the **Enter** button
   keeps working across bot restarts. State persists to `CIELAGO_GIVEAWAY_DATA_PATH`
   (`data/giveaways.json`); a 30s background loop ends due giveaways and fires weekend reminders.
+
+**Event contests** (`cogs/contests.py`, rules in `cielago/contests.py`): one pinned panel in
+🏆｜server-events with a **Submit entry** button (modal: one image, a title, an optional caption).
+Each entry becomes a bot-posted card with a 🏮 **Vote** button; one entry and one vote per member
+per contest (a resubmission replaces the old card; voting again moves or takes back the vote).
+Tallies stay hidden until voting closes, then a results report with **Confirm and pay** goes to
+the mod channel; nothing is paid or announced until staff confirm.
+
+- **Contests are data**: `src/cielago/data/contests.json` (local times + IANA zone). Add or edit a
+  row and restart Cielago. The id is part of every payout case id; never rename one that has run.
+- **State** (entries, votes, notices sent, payouts, panel id) persists to
+  `CIELAGO_CONTEST_DATA_PATH` (`data/contests-state.json`).
+- **Rewards** go through a lane in `contests.LANES`; only `ls_tokens` exists. It calls lastsietch-admin
+  `POST /_internal/sietch/contest-award` (case ids `contest:<id>:entry:<discord_id>` and
+  `contest:<id>:place:<n>`, idempotent) with `X-Sietch-Award-Key` = `CIELAGO_CONTEST_AWARD_KEY`,
+  which must equal `LASTSIETCH_SIETCH_AWARD_KEY` on lastsietch-admin (unset there: 503). lastsietch-admin also pays
+  only contest ids listed in `LASTSIETCH_SIETCH_CONTEST_IDS` (comma-separated, e.g. `halloween-2026`)
+  and places 1 to 3; add a new contest's id there before its confirm.
+- Off unless `CIELAGO_CONTESTS_ENABLED=1` and `CIELAGO_CONTEST_CHANNEL_ID` are set.
+- Staff commands (`/contest panel|status|remove|results|confirm`) need Manage Server, an admin id
+  or the mod role. `confirm` is safe to repeat: it retries only cases that are not yet paid.
 
 **Join-to-Create voice** (`cogs/voice.py`): joining the trigger voice channel spawns a temp
 channel named after the member's current game (uses the **Presence** intent, now enabled in code

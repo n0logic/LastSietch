@@ -23,7 +23,7 @@ def test_name_fallback():
 
 
 def test_most_active_uses_name_fallback():
-    out = _f_most_active([{"name": "acct 17", "hours": 3.0}, {"name": "AlphaPlayer", "hours": 1.0}])
+    out = _f_most_active([{"name": "acct 17", "hours": 3.0}, {"name": "Bufo", "hours": 1.0}])
     assert "a fellow Sleeper" in out
     assert "acct 17" not in out
 
@@ -39,15 +39,13 @@ def test_worlds_no_elsewhere_when_balanced():
     assert "elsewhere" not in out
 
 # A realistic stats blob shaped like the lastsietch-relay /dune/stats/digest payload.
-RETIRED_BRANDING: list[str] = []
-
 SAMPLE_DAILY = {
     "period": "daily",
-    "new_players": {"names": ["AlphaPlayer", "GammaPlayer"], "count": 2, "total_all_time": 40},
+    "new_players": {"names": ["Bufo", "PotatoToo"], "count": 2, "total_all_time": 40},
     "worlds": {"hagga_players": 3, "deep_desert_players": 1, "online_total": 4},
     "server_pulse": {"peak": 4, "play_hours": 29.6, "busiest_hour_utc": 0, "active_days": None},
-    "most_active": [{"name": "AlphaPlayer", "hours": 13.5}, {"name": "BetaPlayer", "hours": 7.4}],
-    "deaths": [{"name": "DeltaPlayer", "count": 1}],
+    "most_active": [{"name": "Bufo", "hours": 13.5}, {"name": "Suk Medic", "hours": 7.4}],
+    "deaths": [{"name": "Suk Medic", "count": 1}],
     "raids": {"events": [], "self_demos": 2, "storm_orni": 1, "storm_buggy": 0},
     "server_health": {"pods_total": 6, "troubled": [], "up_since_utc": "2026-05-28T18:53:38+00:00"},
     "improvements": ["Spice toggle shipped", "Moderation trio live"],
@@ -77,7 +75,8 @@ def test_friendly_vehicle_model_name():
 
 def test_worlds_render():
     out = _f_worlds(SAMPLE_DAILY["worlds"])
-    assert "Habbanya" in out and "Kulon" in out
+    assert "Habbanya" in out and "Amtal" in out
+    assert "Kulon" not in out
     assert "Online now: **4**" in out
 
 
@@ -132,12 +131,9 @@ def test_build_embed_daily_branding():
     assert embed.author.name == "Last Sietch"
     assert "lastsietch.com" in embed.footer.text
     blob = (embed.title + embed.footer.text + embed.author.name).lower()
-    # Guard against retired branding leaking into player-facing chrome.
-    # Fill RETIRED_BRANDING with whatever names your server used to go by:
-    # renames are exactly when this slips through, and the embed chrome is
-    # the last place anyone thinks to look.
-    for term in RETIRED_BRANDING:
-        assert term not in blob, f"retired branding {term!r} leaked into embed chrome"
+    # No retired Last Sietch / House 0f Fedaykin branding anywhere in the chrome.
+    assert "fedaykin" not in blob
+    assert "house 0f" not in blob
 
 
 def test_build_embed_daily_has_new_sections():
@@ -156,13 +152,14 @@ def test_build_embed_weekly_sections():
         "peak": 5, "play_hours": 108.8, "busiest_hour_utc": 0, "active_days": 7,
     }
     weekly["pilot"] = [
-        {"name": "EtaPlayer", "km": 145.0, "vehicle_raw": "BP_LightOrnithopter_Choam_C"}
+        {"name": "Sungila", "km": 145.0, "vehicle_raw": "BP_LightOrnithopter_Choam_C"}
     ]
     weekly["origins"] = [{"country": "United States", "count": 25}]
     embed = build_embed(weekly)
     names = [f.name for f in embed.fields]
     assert embed.title == "🏜️ Sietch Weekly Report"
     assert "🪶 Pilot of the Week" in names
+    assert "🏗️ Sietch Construction" not in names
     assert "Origins" in names
 
 
@@ -258,11 +255,11 @@ _TS_STATIONS = {
     "first_run": False,
     "stations": [
         {"name": "Testing Station 195", "top_difficulty": 59, "top_this_period": 59,
-         "record_runner": "ZetaPlayer", "record_party_size": 3},
+         "record_runner": "Graymorn", "record_party_size": 3},
         {"name": "Testing Station 152", "top_difficulty": 40, "top_this_period": 0,
-         "record_runner": "ZetaPlayer", "record_party_size": 1},
+         "record_runner": "Graymorn", "record_party_size": 1},
         {"name": "Testing Station 89", "top_difficulty": 40, "top_this_period": 0,
-         "record_runner": "EpsilonPlayer", "record_party_size": 4},
+         "record_runner": "synthetic_runner", "record_party_size": 4},
     ],
 }
 
@@ -278,13 +275,14 @@ def test_testing_stations_orders_by_tier_and_marks_new():
     assert "record set this week" in out
 
 
-def test_testing_stations_shows_party_size_not_a_solo_credit():
-    """A 4-player clear must never render as one player's solo record."""
+def test_testing_stations_never_names_anyone_on_a_group_record():
+    """A group clear shows the party size only: its one surviving name is unreliable (#132)."""
     out = _f_testing_stations(_TS_STATIONS, "weekly")
-    assert "EpsilonPlayer +3" in out
-    assert "ZetaPlayer +2" in out
-    # a genuine solo run carries no +N
-    assert "ZetaPlayer\n" in out or out.rstrip().endswith("ZetaPlayer")
+    lines = out.splitlines()
+    assert "party of 3" in lines[0] and "Graymorn" not in lines[0]
+    assert "party of 4" in out and "synthetic_runner" not in out
+    # a verified solo is credited by name with no party suffix
+    assert any(l.endswith("Graymorn") for l in lines)
 
 
 def test_testing_stations_first_run_suppresses_new_markers():

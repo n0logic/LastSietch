@@ -50,7 +50,11 @@ _GAME = ("game", "in-game", "ingame", "server", "client", "world",
 # dozen spellings of each.
 _SERVERS = {
     "Habbanya (PvE)": ("habbanya", "habanya", "habbanaya", "pve", "hagga pve"),
-    "Kulon-PvP": ("kulon", "pvp", "kulon pvp", "kulonpvp"),
+    # Kulon closed 2026-10-28 and its bases moved to Amtal. Checked before Amtal so a
+    # report that still says "Kulon" (a missing or moved base, most likely) keeps the
+    # player's reference instead of reading as an ordinary Amtal ticket.
+    "Kulon (closed, now Amtal)": ("kulon",),
+    "Amtal-Full-PvP": ("amtal", "pvp"),
     "Deep Desert": ("deep desert", "deepdesert", "dd", "the deep"),
 }
 

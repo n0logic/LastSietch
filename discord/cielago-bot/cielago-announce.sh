@@ -15,6 +15,7 @@ for CH in "$@"; do
     -X POST "https://discord.com/api/v10/channels/$CH/messages" \
     -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
     -H "Content-Type: application/json" \
+    -H "User-Agent: DiscordBot (https://lastsietch.com, 1.0)" \
     -d "$PAYLOAD")
   if [ "$code" = "200" ]; then
     mid=$(jq -r '.id // "?"' < "$resp")

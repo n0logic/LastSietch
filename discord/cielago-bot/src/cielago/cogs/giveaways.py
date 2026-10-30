@@ -68,6 +68,22 @@ def group_game_entries(entries: list[dict]) -> list[dict]:
     return list(grouped.values())
 
 
+_STEAM_PROFILE = re.compile(
+    r"^(https?://)?(www\.)?steamcommunity\.com/(id/[A-Za-z0-9_-]{2,64}|profiles/\d{17})/?$"
+)
+
+
+def normalize_friend_code(raw: str) -> str | None:
+    """A Steam friend code (the 32-bit account id, digits only) or a steamcommunity profile link."""
+    text = (raw or "").strip()
+    digits = re.sub(r"[\s-]", "", text)
+    if digits.isdigit() and 5 <= len(digits) <= 10:
+        return digits
+    if _STEAM_PROFILE.match(text):
+        return text
+    return None
+
+
 def select_winners(entrants, count: int) -> list[int]:
     pool = list(entrants)
     return _rng.sample(pool, min(count, len(pool)))
@@ -90,6 +106,11 @@ class Giveaway:
     game_entries: list[dict] | None = None
     platform: str | None = None
     reminder_sent: bool = False
+    # Founders mode: entry needs the Founder role and a Steam friend code, collected in a form.
+    # Codes are kept only until the draw; non-winners' codes are discarded then.
+    founders_role_id: int | None = None
+    starter_id: int | None = None
+    codes: dict[int, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -105,6 +126,9 @@ class Giveaway:
             "game_entries": self.game_entries,
             "platform": self.platform,
             "reminder_sent": self.reminder_sent,
+            "founders_role_id": self.founders_role_id,
+            "starter_id": self.starter_id,
+            "codes": {str(k): v for k, v in self.codes.items()},
         }
 
     @classmethod
@@ -122,6 +146,9 @@ class Giveaway:
             game_entries=data.get("game_entries"),
             platform=data.get("platform"),
             reminder_sent=bool(data.get("reminder_sent", False)),
+            founders_role_id=_opt_int(data.get("founders_role_id")),
+            starter_id=_opt_int(data.get("starter_id")),
+            codes={int(k): str(v) for k, v in (data.get("codes") or {}).items()},
         )
 
 
@@ -163,13 +190,13 @@ class GiveawayStore:
 
 def build_giveaway_embed(giveaway: Giveaway, ended: bool = False) -> discord.Embed:
     prize_lines = [
-        f"\U0001F3C6 **Grand Prize:** {p}"
+        f"\U0001f3c6 **Grand Prize:** {p}"
         if i == 0
-        else f"\U0001F381 **{ordinal(i + 1)} Place:** {p}"
+        else f"\U0001f381 **{ordinal(i + 1)} Place:** {p}"
         for i, p in enumerate(giveaway.prizes)
     ]
     embed = discord.Embed(
-        title="\U0001F389 Giveaway Ended!" if ended else "\U0001F389 Last Sietch Giveaway!",
+        title="\U0001f389 Giveaway Ended!" if ended else "\U0001f389 Last Sietch Giveaway!",
         color=ENDED_COLOR if ended else LIVE_COLOR,
         description="\n".join(prize_lines),
     )
@@ -179,9 +206,9 @@ def build_giveaway_embed(giveaway: Giveaway, ended: bool = False) -> discord.Emb
             for i, w in enumerate(giveaway.winners):
                 prize = giveaway.prizes[i] if i < len(giveaway.prizes) else "Prize"
                 if i == 0:
-                    winner_lines.append(f"\U0001F3C6 **Grand Prize** ({prize}): <@{w}>")
+                    winner_lines.append(f"\U0001f3c6 **Grand Prize** ({prize}): <@{w}>")
                 else:
-                    winner_lines.append(f"\U0001F381 **{ordinal(i + 1)} Place** ({prize}): <@{w}>")
+                    winner_lines.append(f"\U0001f381 **{ordinal(i + 1)} Place** ({prize}): <@{w}>")
             embed.add_field(name="Winners", value="\n".join(winner_lines), inline=False)
         else:
             embed.add_field(name="Winners", value="Not enough entrants!", inline=False)
@@ -206,15 +233,15 @@ def build_weekend_embed(giveaway: Giveaway) -> discord.Embed:
     for g in grouped:
         label = f"{g['name']} ({g['count']} keys)" if g["count"] > 1 else g["name"]
         if g["url"]:
-            game_lines.append(f"\U0001F3AE [{label}]({g['url']})")
+            game_lines.append(f"\U0001f3ae [{label}]({g['url']})")
         else:
-            game_lines.append(f"\U0001F3AE {label}")
+            game_lines.append(f"\U0001f3ae {label}")
     game_list = "\n".join(game_lines)
     ts = giveaway.ends_at
     total_keys = len(giveaway.prizes)
     label = platform_label(giveaway.platform)
     embed = discord.Embed(
-        title="\U0001F389 Weekend Game Giveaway!",
+        title="\U0001f389 Weekend Game Giveaway!",
         color=LIVE_COLOR,
         description=(
             "**The Last Sietch free game weekend is here!**\n\n"
@@ -234,21 +261,87 @@ def build_weekend_embed(giveaway: Giveaway) -> discord.Embed:
 
 def build_weekend_end_embed(giveaway: Giveaway) -> discord.Embed:
     label = platform_label(giveaway.platform)
-    embed = discord.Embed(title="\U0001F389 Weekend Giveaway: Winners!", color=WEEKEND_END_COLOR)
+    embed = discord.Embed(title="\U0001f389 Weekend Giveaway: Winners!", color=WEEKEND_END_COLOR)
     if giveaway.winners:
         winner_lines = []
         for i, w in enumerate(giveaway.winners):
             prize = giveaway.prizes[i] if i < len(giveaway.prizes) else "Game"
-            winner_lines.append(f"\U0001F3AE **{prize}**: <@{w}>")
+            winner_lines.append(f"\U0001f3ae **{prize}**: <@{w}>")
         embed.description = (
             "Congratulations to our winners!\n\n"
             + "\n".join(winner_lines)
-            + f"\n\nAn admin will DM you your {label} key shortly. \U0001F381"
+            + f"\n\nAn admin will DM you your {label} key shortly. \U0001f381"
         )
     else:
         embed.description = "Not enough entrants to pick winners, better luck next time!"
     embed.set_footer(text=f"{len(giveaway.entrants)} total entries")
     return embed
+
+
+FOUNDERS_COLOR = 0x3A7BD5
+
+
+def build_founders_embed(giveaway: Giveaway, ended: bool = False) -> discord.Embed:
+    prize = giveaway.prizes[0] if giveaway.prizes else "Prize"
+    count = len(giveaway.prizes)
+    ts = giveaway.ends_at
+    if ended:
+        embed = discord.Embed(
+            title="\U0001f3db\ufe0f Founders Giveaway: Winners!", color=WEEKEND_END_COLOR
+        )
+        if giveaway.winners:
+            embed.description = (
+                f"**{prize}**\n\n"
+                + "\n".join(f"\U0001f381 <@{w}>" for w in giveaway.winners)
+                + "\n\nAn admin will add you on Steam and send your gift. \U0001f64c"
+            )
+        else:
+            embed.description = "No entries this time."
+        embed.set_footer(text=f"{len(giveaway.entrants)} entries")
+        return embed
+    embed = discord.Embed(
+        title="\U0001f3db\ufe0f Founders Giveaway",
+        color=FOUNDERS_COLOR,
+        description=(
+            f"**{count}\u00d7 {prize}**\n\n"
+            "**How to enter:** click **Enter Giveaway** and type your **Steam friend code** "
+            "(Steam \u2192 Friends \u2192 Add a Friend shows it) or your Steam profile link. "
+            "Winners get the gift through Steam, so your code is only used to send it.\n\n"
+            f"**Drawing:** <t:{ts}:F> (<t:{ts}:R>). {count} winners, one entry each, Founders only."
+        ),
+    )
+    embed.add_field(name="Entries", value=str(len(giveaway.entrants)), inline=True)
+    embed.add_field(name="Winners", value=str(count), inline=True)
+    embed.add_field(name="Drawing", value=f"<t:{ts}:R>", inline=True)
+    embed.set_footer(
+        text="Founders only | One entry per person | Codes of non-winners are deleted at the draw"
+    )
+    return embed
+
+
+def _embed_for(giveaway: Giveaway, ended: bool = False) -> discord.Embed:
+    if giveaway.founders_role_id:
+        return build_founders_embed(giveaway, ended=ended)
+    if giveaway.is_weekend:
+        return build_weekend_end_embed(giveaway) if ended else build_weekend_embed(giveaway)
+    return build_giveaway_embed(giveaway, ended=ended)
+
+
+class FriendCodeModal(discord.ui.Modal, title="Enter the Founders Giveaway"):
+    code = discord.ui.TextInput(
+        label="Steam friend code (or profile link)",
+        placeholder="e.g. 123456789",
+        min_length=5,
+        max_length=120,
+    )
+
+    def __init__(self, cog: "Giveaways", message_id: int) -> None:
+        super().__init__()
+        self.cog = cog
+        self.message_id = message_id
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog.finish_founders_entry(interaction, self.message_id, str(self.code.value))
 
 
 # --- Restart-surviving enter button ---
@@ -262,7 +355,7 @@ class GiveawayEnterButton(
         self.message_id = message_id
         super().__init__(
             discord.ui.Button(
-                label="\U0001F389 Enter Giveaway",
+                label="\U0001f389 Enter Giveaway",
                 style=discord.ButtonStyle.success,
                 custom_id=f"giveaway_enter:{message_id}",
                 disabled=disabled,
@@ -364,11 +457,7 @@ class Giveaways(commands.Cog):
             log.warning("giveaway.end_no_channel", message_id=giveaway.message_id)
             return
         guild = channel.guild
-        end_embed = (
-            build_weekend_end_embed(giveaway)
-            if giveaway.is_weekend
-            else build_giveaway_embed(giveaway, ended=True)
-        )
+        end_embed = _embed_for(giveaway, ended=True)
         try:
             message = await channel.fetch_message(giveaway.message_id)
             await message.edit(
@@ -378,9 +467,11 @@ class Giveaways(commands.Cog):
         except discord.DiscordException:
             log.warning("giveaway.end_edit_failed", message_id=giveaway.message_id, exc_info=True)
 
-        if giveaway.winners:
+        if giveaway.founders_role_id:
+            await self._finish_founders(giveaway, channel)
+        elif giveaway.winners:
             mentions = "\n".join(
-                f"\U0001F3AE **{_prize_at(giveaway, i)}**: <@{w}>"
+                f"\U0001f3ae **{_prize_at(giveaway, i)}**: <@{w}>"
                 for i, w in enumerate(giveaway.winners)
             )
             claim = (
@@ -389,7 +480,7 @@ class Giveaways(commands.Cog):
                 else "Contact an admin to claim your prize!"
             )
             await channel.send(
-                "**\U0001F389 Giveaway ended!** Congratulations to our winners!\n\n"
+                "**\U0001f389 Giveaway ended!** Congratulations to our winners!\n\n"
                 f"{mentions}\n\n{claim}"
             )
         else:
@@ -420,20 +511,97 @@ class Giveaways(commands.Cog):
         if interaction.user.id in giveaway.entrants:
             await interaction.response.send_message("You're already entered!", ephemeral=True)
             return
+        if giveaway.founders_role_id:
+            roles = getattr(interaction.user, "roles", [])
+            if not any(r.id == giveaway.founders_role_id for r in roles):
+                await interaction.response.send_message(
+                    "This giveaway is for Founders only.", ephemeral=True
+                )
+                return
+            await interaction.response.send_modal(FriendCodeModal(self, message_id))
+            return
         giveaway.entrants.add(interaction.user.id)
         self.store.save()
         await interaction.response.send_message(
-            f"You're in! \U0001F389 Entry #{len(giveaway.entrants)}, good luck!", ephemeral=True
+            f"You're in! \U0001f389 Entry #{len(giveaway.entrants)}, good luck!", ephemeral=True
         )
         updated = (
-            build_weekend_embed(giveaway)
-            if giveaway.is_weekend
-            else build_giveaway_embed(giveaway)
+            build_weekend_embed(giveaway) if giveaway.is_weekend else build_giveaway_embed(giveaway)
         )
         try:
             await interaction.message.edit(embeds=[updated], view=giveaway_view(message_id))
         except discord.DiscordException:
             pass
+
+    async def finish_founders_entry(
+        self, interaction: discord.Interaction, message_id: int, raw_code: str
+    ) -> None:
+        giveaway = self.store.giveaways.get(message_id)
+        if giveaway is None or giveaway.ended:
+            await interaction.response.send_message("This giveaway has ended.", ephemeral=True)
+            return
+        code = normalize_friend_code(raw_code)
+        if code is None:
+            await interaction.response.send_message(
+                "That doesn't look like a Steam friend code (digits only, from Steam "
+                "\u2192 Friends \u2192 Add a Friend) or a steamcommunity.com profile link. "
+                "Click Enter again to retry.",
+                ephemeral=True,
+            )
+            return
+        first = interaction.user.id not in giveaway.entrants
+        giveaway.entrants.add(interaction.user.id)
+        giveaway.codes[interaction.user.id] = code
+        self.store.save()
+        await interaction.response.send_message(
+            (
+                f"You're in! \U0001f389 Entry #{len(giveaway.entrants)}, good luck!"
+                if first
+                else "Updated your friend code."
+            ),
+            ephemeral=True,
+        )
+        channel = self._channel(giveaway)
+        if channel is not None:
+            try:
+                message = await channel.fetch_message(message_id)
+                await message.edit(embeds=[_embed_for(giveaway)], view=giveaway_view(message_id))
+            except discord.DiscordException:
+                pass
+
+    async def _finish_founders(self, giveaway: Giveaway, channel: discord.TextChannel) -> None:
+        winner_codes = {w: giveaway.codes.get(w, "(no code)") for w in giveaway.winners}
+        giveaway.codes = dict(winner_codes)  # discard non-winners' codes at the draw
+        self.store.save()
+        if giveaway.winners:
+            await channel.send(
+                "**\U0001f3db\ufe0f Founders Giveaway drawn!** Congratulations "
+                + ", ".join(f"<@{w}>" for w in giveaway.winners)
+                + "! Your gift will come through Steam. \U0001f64c",
+                allowed_mentions=discord.AllowedMentions(users=True),
+            )
+        else:
+            await channel.send("Founders Giveaway ended with no entries.")
+        if giveaway.starter_id is None:
+            return
+        lines = []
+        for w, code in winner_codes.items():
+            member = channel.guild.get_member(w)
+            name = member.display_name if member else str(w)
+            lines.append(f"\u2022 {name} (<@{w}>): `{code}`")
+        text = (
+            f"Founders Giveaway winners for **{_prize_at(giveaway, 0, 'the prize')}** "
+            f"({len(giveaway.entrants)} entries):\n" + ("\n".join(lines) or "no winners")
+        )
+        try:
+            starter = self.bot.get_user(giveaway.starter_id) or await self.bot.fetch_user(
+                giveaway.starter_id
+            )
+            await starter.send(text)
+        except discord.DiscordException:
+            log.warning(
+                "giveaway.founders_dm_failed", message_id=giveaway.message_id, exc_info=True
+            )
 
     # --- Slash commands ---
 
@@ -510,18 +678,18 @@ class Giveaways(commands.Cog):
         if channel is not None:
             try:
                 message = await channel.fetch_message(giveaway.message_id)
-                await message.edit(embeds=[build_giveaway_embed(giveaway, ended=True)])
+                await message.edit(embeds=[_embed_for(giveaway, ended=True)])
             except discord.DiscordException:
                 pass
             mentions = []
             for i, w in enumerate(giveaway.winners):
                 prize = giveaway.prizes[i] if i < len(giveaway.prizes) else "Prize"
                 if i == 0:
-                    mentions.append(f"\U0001F3C6 **Grand Prize**, {prize}: <@{w}>")
+                    mentions.append(f"\U0001f3c6 **Grand Prize**, {prize}: <@{w}>")
                 else:
-                    mentions.append(f"\U0001F381 **{ordinal(i + 1)} Place**, {prize}: <@{w}>")
+                    mentions.append(f"\U0001f381 **{ordinal(i + 1)} Place**, {prize}: <@{w}>")
             await channel.send(
-                "**\U0001F504 Re-roll!** New winners:\n\n"
+                "**\U0001f504 Re-roll!** New winners:\n\n"
                 + "\n".join(mentions)
                 + "\n\nContact an admin to claim your prize!"
             )
@@ -603,9 +771,9 @@ class Giveaways(commands.Cog):
         for g in grouped:
             label = f"({g['count']} keys)" if g["count"] > 1 else "(1 key)"
             if g["url"]:
-                game_lines.append(f"\U0001F3AE {g['name']}, [{platform} Store]({g['url']}) {label}")
+                game_lines.append(f"\U0001f3ae {g['name']}, [{platform} Store]({g['url']}) {label}")
             else:
-                game_lines.append(f"\U0001F3AE {g['name']} {label}")
+                game_lines.append(f"\U0001f3ae {g['name']} {label}")
         game_list = "\n".join(game_lines)
         timing_text = {
             "tomorrow": "STARTS TOMORROW",
@@ -618,7 +786,7 @@ class Giveaways(commands.Cog):
             "today": f"Come back **today at {time}**",
         }[timing]
         embed = discord.Embed(
-            title=f"\U0001F3AE FREE GAME WEEKEND {timing_text}!",
+            title=f"\U0001f3ae FREE GAME WEEKEND {timing_text}!",
             color=LIVE_COLOR,
             description=(
                 "To celebrate the Last Sietch Discord, website, and game servers, "
@@ -633,7 +801,7 @@ class Giveaways(commands.Cog):
                 f"• An admin will DM winners their {platform} key\n\n"
                 f"**{total_keys} keys. {total_keys} winners. "
                 f"Week {week} of {total_weeks}, don't miss it!**\n\n"
-                f"\U0001F310 [lastsietch.com]({SITE_URL})"
+                f"\U0001f310 [lastsietch.com]({SITE_URL})"
             ),
         )
         await interaction.response.defer(ephemeral=True)
@@ -723,6 +891,70 @@ class Giveaways(commands.Cog):
             f"24hr reminder: {reminder_note}.",
             ephemeral=True,
         )
+
+    @giveaway.command(
+        name="founders",
+        description="Founders-only giveaway with Steam friend codes; winners DM'd to you",
+    )
+    @app_commands.describe(
+        prize="The prize (one per winner)",
+        winners="How many winners (1-20)",
+        duration="Duration in hours (1-168)",
+        role="Role allowed to enter (the Founder role)",
+        channel="Channel to post in (default: current)",
+    )
+    @admin_only()
+    async def founders(
+        self,
+        interaction: discord.Interaction,
+        prize: str,
+        winners: app_commands.Range[int, 1, 20],
+        duration: app_commands.Range[int, 1, 168],
+        role: discord.Role,
+        channel: discord.TextChannel | None = None,
+    ) -> None:
+        target = channel or interaction.channel
+        if not isinstance(target, discord.TextChannel):
+            await interaction.response.send_message(
+                "Pick a text channel to post in.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        ends_at = int(time.time()) + duration * 3600
+        giveaway = Giveaway(
+            message_id=0,
+            channel_id=target.id,
+            guild_id=interaction.guild_id or 0,
+            prizes=[prize.strip()] * winners,
+            ends_at=ends_at,
+            founders_role_id=role.id,
+            starter_id=interaction.user.id,
+        )
+        message = await target.send(embed=build_founders_embed(giveaway))
+        giveaway.message_id = message.id
+        self.store.giveaways[message.id] = giveaway
+        self.store.save()
+        await message.edit(view=giveaway_view(message.id))
+        await audit(
+            interaction.guild,
+            "giveaway-founders",
+            actor=interaction.user,
+            prize=prize,
+            winners=winners,
+            channel=target.name,
+        )
+        await interaction.followup.send(
+            f"Founders giveaway started in {target.mention}: {winners}\u00d7 {prize}, "
+            f"drawing <t:{ends_at}:R>. Winners' friend codes will be DM'd to you.",
+            ephemeral=True,
+        )
+
+
+def _opt_int(value) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _prize_at(giveaway: "Giveaway", index: int, default: str = "Prize") -> str:

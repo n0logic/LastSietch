@@ -1,6 +1,6 @@
 """Market price-alert DMs for the Last Sietch portal.
 
-A player sets a price watch on lastsietch.com/portal (the CHOAM Exchange market
+A player sets a price watch on portal.lastsietch.com (the CHOAM Exchange market
 page). The admin backend's watcher fires an alert row when the cheapest listing
 crosses the player's target. This cog polls the admin backend's internal endpoint
 on localhost, DMs the player, and acks delivered alerts so they are not re-sent.

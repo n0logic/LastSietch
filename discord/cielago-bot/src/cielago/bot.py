@@ -30,12 +30,21 @@ class Cielago(commands.Bot):
         await self.load_extension("cielago.cogs.dune_buildwatch")
         await self.load_extension("cielago.cogs.giveaways")
         await self.load_extension("cielago.cogs.market_alerts")
+        await self.load_extension("cielago.cogs.landsraad_claims")
+        await self.load_extension("cielago.cogs.events_sync")
         await self.load_extension("cielago.cogs.onboarding")
         await self.load_extension("cielago.cogs.assistant")
         # AFTER assistant: Reports reads that cog's store and _post_ticket so both
         # intake paths share one queue, one id space and one dedup pass.
         await self.load_extension("cielago.cogs.report")
         await self.load_extension("cielago.cogs.voice")
+        # Optional: the public release ships without this cog (it needs the private
+        # social publisher), so its absence must not stop the bot.
+        try:
+            await self.load_extension("cielago.cogs.social_approvals")
+        except commands.ExtensionNotFound:
+            log.info("cielago.optional_cog_absent", cog="social_approvals")
+        await self.load_extension("cielago.cogs.contests")
         guild = discord.Object(id=settings.last_sietch_guild_id)
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)

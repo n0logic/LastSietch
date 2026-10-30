@@ -1,0 +1,19 @@
+{
+  "_comment": "Event contest definitions for cogs/contests.py. Times are local wall-clock in 'timezone' (DST handled by the zone). Windows: submit_opens_at < submit_closes_at <= vote_opens_at < vote_closes_at; contests must not overlap. id is 1-24 of a-z 0-9 - and is part of every payout case id, so never rename one that has run. reward_lane must be a key of contests.LANES. Edit, then restart Cielago.",
+  "contests": [
+    {
+      "id": "halloween-2026",
+      "event_label": "Night of Costumes",
+      "title": "Night of Costumes",
+      "prompt": "Post a screenshot of your strangest costume or your spookiest base.",
+      "timezone": "America/New_York",
+      "submit_opens_at": "2026-10-31 20:00",
+      "submit_closes_at": "2026-11-01 12:00",
+      "vote_opens_at": "2026-11-01 12:00",
+      "vote_closes_at": "2026-11-01 17:00",
+      "entrant_reward": 6,
+      "winner_rewards": [50, 30, 20],
+      "reward_lane": "ls_tokens"
+    }
+  ]
+}

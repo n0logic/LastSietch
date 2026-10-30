@@ -128,7 +128,7 @@ def test_ticket_roundtrip_and_dedup_candidates(tmp_path):
     s = _store(tmp_path)
     emb = HashEmbedder()
     vec = emb.embed(["spice map broken"])[0]
-    t = Ticket(id=0, created_at=100, author_id=7, author_name="the owner",
+    t = Ticket(id=0, created_at=100, author_id=7, author_name="Player One",
                category=CAT_BUG, severity=SEV_NORMAL, title="spice map broken",
                guild_id=1, channel_id=2, message_id=3)
     saved = s.add_ticket(t, embedding=vec, backend=emb.backend)
@@ -197,7 +197,7 @@ def test_migrate_tracker_json(tmp_path):
                   "reporter_id": 5, "reporter_name": "Medic", "created_at": 10,
                   "status": "open", "source_message_id": 901},
             "2": {"id": 2, "kind": "feature", "title": "add a kill feed",
-                  "reporter_id": 6, "reporter_name": "the owner", "created_at": 11,
+                  "reporter_id": 6, "reporter_name": "Player One", "created_at": 11,
                   "status": "open"},
             "3": {"id": 3, "kind": "bug", "title": "fixed thing",
                   "reporter_id": 5, "reporter_name": "Medic", "created_at": 12,
@@ -227,7 +227,7 @@ def test_migrate_feature_with_source_id_is_idempotent(tmp_path):
         "board_message_id": 1, "next_id": 2,
         "items": {
             "1": {"id": 1, "kind": "feature", "title": "more starting volume",
-                  "reporter_id": 6, "reporter_name": "the owner", "created_at": 11,
+                  "reporter_id": 6, "reporter_name": "Player One", "created_at": 11,
                   "status": "open", "source_message_id": 902,
                   "source_channel_id": 77},
         },

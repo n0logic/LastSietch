@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# the web host-side notifier: after the 2026-06-09 Landsraad term rollover, run the
+# <web-host>-side notifier: after the 2026-06-09 Landsraad term rollover, run the
 # read-only goal verification on lastsietch-dune and post the verdict to the private
 # Cielago audit channel (no public noise). Fired once by
 # cielago-landsraad-verify.timer. Reuses the existing cielago-announce poster.

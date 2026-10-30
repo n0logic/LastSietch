@@ -165,7 +165,20 @@ class OnnxEmbedder:
 
 def load_embedder(model_dir: str | None, prefer_onnx: bool = True) -> Embedder:
     """Return the best available embedder. Falls back to HashEmbedder on any
-    problem so the assistant always has working dedup."""
+    problem so the assistant always has working dedup.
+
+    🔴 The absent-config case used to be INVISIBLE, and it was the case that was
+    actually happening. The guard below is `prefer_onnx and model_dir`, so an unset
+    model_dir skips the try entirely: no exception is raised, so the
+    `embedder_onnx_unavailable` warning inside it could never fire, and the only
+    record was an INFO line reporting backend=hash. <web-host> ran on lexical
+    trigram hashing from deploy until 2026-08-26 and nothing ever said so. The
+    explicit warning below exists so that cannot recur: a fallback nobody can see
+    is a fallback nobody fixes."""
+    if prefer_onnx and not model_dir:
+        log.warning("assistant.embedder_not_configured",
+                    hint="CIELAGO_ASSISTANT_EMBED_MODEL_DIR is unset; dedup is running "
+                         "on lexical hashing, not semantic embeddings")
     if prefer_onnx and model_dir:
         try:
             emb = OnnxEmbedder(model_dir)
@@ -176,3 +189,49 @@ def load_embedder(model_dir: str | None, prefer_onnx: bool = True) -> Embedder:
     emb = HashEmbedder()
     log.info("assistant.embedder", backend=emb.backend, dim=emb.dim)
     return emb
+
+
+def backfill_embeddings(store, embedder, batch: int = 64) -> dict[str, int]:
+    """Re-embed every row whose vector is stale relative to the live backend.
+
+    🔴 This and staging the model are ONE task. `candidate_vectors()` filters on the
+    live backend and dim, so switching HashEmbedder (dim 256) to OnnxEmbedder (dim
+    384) without this orphans every stored vector: zero candidates, `best_match`
+    returns None for everything, and dedup stops entirely with no error. That is
+    strictly worse than the lexical-but-working state it replaces. Never schedule
+    the model and this function as separate pieces of work.
+
+    SYNCHRONOUS and CPU-bound: `OnnxEmbedder.embed()` calls `onnxruntime.run()`.
+    Call it off the event loop (`asyncio.to_thread`), never inline in a cog, or it
+    stalls every other command for the length of the run.
+
+    Idempotent and resumable: each pass re-reads the pending set from the database,
+    so a crash mid-run just means the next start finishes the job.
+    """
+    # Settle the dim BEFORE querying. OnnxEmbedder starts at a declared 384 and
+    # corrects self.dim from the real model output on its first embed; querying with
+    # the declared value and then writing the real one would re-select the same rows
+    # forever.
+    try:
+        embedder.embed(["warmup"])
+    except Exception:
+        log.warning("assistant.embedding_backfill_warmup_failed", exc_info=True)
+        return {}
+
+    done: dict[str, int] = {}
+    for table in ("tickets", "feature_requests", "kb"):
+        moved = 0
+        while True:
+            pending = store.rows_needing_embedding(
+                table, embedder.backend, embedder.dim, batch)
+            if not pending:
+                break
+            vectors = embedder.embed([text for _, text in pending])
+            for (row_id, _), vector in zip(pending, vectors):
+                store.set_embedding(table, row_id, vector, embedder.backend)
+            moved += len(pending)
+            if len(pending) < batch:
+                break
+        if moved:
+            done[table] = moved
+    return done

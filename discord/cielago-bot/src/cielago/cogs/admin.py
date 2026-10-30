@@ -8,14 +8,17 @@ from cielago.permissions import admin_only
 
 log = structlog.get_logger()
 
+# Bootstrap only ensures these exist; it never edits or deletes other roles. The old
+# Gatekeepers / Wallwatchers / Holdouts / Holders / Wanderers ladder was deleted by
+# the owner on 2026-10-25 and must not come back. Colours and hoist match the live
+# roles, so a recreate never changes how they look.
 DEFAULT_ROLES = [
     ("Naib", 0xF4A148, True),
-    ("Gatekeepers", 0xD4AF37, True),
-    ("Wallwatchers", 0xC8923D, True),
-    ("Holdouts", 0xA4441F, True),
-    ("Holders", 0x8B6F47, False),
-    ("Wanderers", 0x6B6555, False),
     ("At The Gate", 0x5A5752, False),
+    ("Founder", 0x3A7BD5, False),
+    # Opt-in sietch roles, self-assigned from the welcome card (cogs/onboarding.py).
+    ("Habbanya", 0x7FA67F, False),
+    ("Amtal", 0xB83A3A, False),
 ]
 
 
@@ -70,7 +73,11 @@ class Admin(commands.Cog):
                 skipped.append(name)
                 continue
             await guild.create_role(
-                name=name, color=discord.Color(color_int), hoist=hoist, reason="Cielago bootstrap"
+                name=name,
+                color=discord.Color(color_int),
+                hoist=hoist,
+                mentionable=False,
+                reason="Cielago bootstrap",
             )
             created.append(name)
         log.info("role.bootstrap", created=created, skipped=skipped, by=interaction.user.id)

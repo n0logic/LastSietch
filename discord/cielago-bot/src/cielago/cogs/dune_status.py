@@ -29,6 +29,7 @@ from discord.ext import commands, tasks
 from cielago.audit import audit
 from cielago.config import settings
 from cielago.permissions import admin_only
+from cielago.cogs.report_editions import ReportPublisher, build_report_embed, report_links
 
 log = structlog.get_logger()
 
@@ -149,8 +150,10 @@ def _f_worlds(d: dict) -> str:
     if elsewhere > 0:
         where += f", +{elsewhere} elsewhere"
     lines = [
-        "**Habbanya** and **Kulon** are our two Hagga Basin maps; "
-        "the Deep Desert runs in PvP and PvE flavors.",
+        "**Habbanya** (PvE) and **Amtal** (full PvP) are our two Hagga Basin "
+        "maps; the Deep Desert runs in PvP and PvE flavors.",
+        "\u26a0\ufe0f On Amtal only the **Riftwatch** and **Helius Gate** settlements "
+        "are safe. Tradeposts are PvP even when their banner flickers to Guild Peace.",
         "A quiet hour on the sands right now." if online == 0
         else f"Online now: **{online}** ({where})",
     ]
@@ -220,12 +223,12 @@ def _f_spice(d: dict) -> str:
 def _f_testing_stations(d: dict, period: str) -> str | None:
     """Highest difficulty cleared per repeatable testing station.
 
-    Two things this deliberately does NOT do. It never presents the recorded runner as
-    the sole clearer of a group run -- dungeon_completion_players stores about one row
-    per completion whatever the party size, so a solo-looking credit on a 4-player clear
-    would be wrong; party size is shown as "+N" instead. And on the first run there is no
-    cursor baseline, so the "new this period" markers are suppressed rather than flagging
-    every record as fresh.
+    Two things this deliberately does NOT do. It never names anyone on a group clear --
+    party player rows are lost over time, so the one name left may not even be a member
+    (ticket #132); a group record shows "party of N" instead, and the collector only
+    supplies a runner for a verified solo. And on the first run there is no cursor
+    baseline, so the "new this period" markers are suppressed rather than flagging every
+    record as fresh.
     """
     stations = d.get("stations") or []
     if not stations:
@@ -241,9 +244,11 @@ def _f_testing_stations(d: dict, period: str) -> str | None:
         name = s.get("name") or s.get("dungeon_id") or "?"
         line = f"**{name}** — tier **{top}**"
         runner = (s.get("record_runner") or "").strip()
-        if runner:
-            party = int(s.get("record_party_size") or 0)
-            line += f" · {_name(runner)}" + (f" +{party - 1}" if party > 1 else "")
+        party = int(s.get("record_party_size") or 0)
+        if party > 1:
+            line += f" · party of {party}"
+        elif runner:
+            line += f" · {_name(runner)}"
         if not first_run and int(s.get("top_this_period") or 0) >= top:
             line += "  🆕"
         lines.append(line)
@@ -460,11 +465,14 @@ class DuneStatus(commands.Cog):
         self.bot = bot
 
     async def cog_load(self) -> None:
+        if not settings.cielago_reports_enabled:
+            log.info("dune_status.editions_disabled")
+            return
         if not settings.cielago_dune_status_channel_id:
             log.warning("dune_status.disabled_no_channel")
             return
-        if not settings.cielago_relay_api_key:
-            log.warning("dune_status.disabled_no_relay_key")
+        if len(settings.cielago_report_publish_key) < 32:
+            log.warning("dune_status.disabled_no_report_key")
             return
         self._daily.start()
         self._weekly.start()
@@ -487,27 +495,21 @@ class DuneStatus(commands.Cog):
             return resp.json()
 
     async def _post(self, period: str) -> bool:
+        if not settings.cielago_reports_enabled:
+            return False
         channel = self.bot.get_channel(settings.cielago_dune_status_channel_id)
         if not isinstance(channel, discord.TextChannel):
-            log.warning(
-                "dune_status.channel_missing",
-                channel_id=settings.cielago_dune_status_channel_id,
-            )
+            log.warning("dune_status.channel_missing")
             return False
         try:
-            data = await self._fetch(period)
+            publisher = ReportPublisher(self.bot, settings.cielago_admin_base_url,
+                                        settings.cielago_report_publish_key, settings.cielago_reports_public_origin)
+            result = await publisher.publish(period, channel)
+            log.info("dune_status.edition_delivery", period=period, state=result["state"])
+            return result["state"] in ("sent", "already_sent", "reconciled")
         except Exception:
-            log.warning("dune_status.fetch_failed", period=period, exc_info=True)
+            log.warning("dune_status.edition_unavailable", period=period)
             return False
-        embed = build_embed(data)
-        try:
-            await channel.send(embed=embed)
-        except discord.DiscordException:
-            log.warning("dune_status.post_failed", period=period, exc_info=True)
-            return False
-        log.info("dune_status.posted", period=period,
-                 online=(data.get("worlds") or {}).get("online_total"))
-        return True
 
     # --- scheduled loops ---
 
@@ -528,6 +530,25 @@ class DuneStatus(commands.Cog):
     @_weekly.before_loop
     async def _before_weekly(self) -> None:
         await self.bot.wait_until_ready()
+
+    @app_commands.command(name="dune-report-preview", description="Preview a report without publishing it (admin).")
+    @app_commands.choices(period=[app_commands.Choice(name="daily", value="daily"),
+                                 app_commands.Choice(name="weekly", value="weekly")])
+    @admin_only()
+    async def report_preview(self, interaction: discord.Interaction, period: app_commands.Choice[str]) -> None:
+        await interaction.response.defer(ephemeral=True)
+        if not settings.cielago_reports_enabled:
+            await interaction.followup.send("The new report editions are not enabled.", ephemeral=True)
+            return
+        try:
+            publisher = ReportPublisher(self.bot, settings.cielago_admin_base_url,
+                                        settings.cielago_report_publish_key, settings.cielago_reports_public_origin)
+            edition = await publisher.preview(period.value)
+            await interaction.followup.send(embed=build_report_embed(edition, settings.cielago_reports_public_origin, True),
+                view=report_links(edition, settings.cielago_reports_public_origin, True),
+                ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            await interaction.followup.send("The report preview could not be prepared. Nothing was published.", ephemeral=True)
 
     # --- manual trigger (admin) ---
 

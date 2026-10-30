@@ -30,7 +30,7 @@ CONTENT = [
                              r'xox[baprs]-|gh[pousr]_[A-Za-z0-9]{20,}|discord(?:app)?\.com/api/webhooks/')),
     ('deployment namespace', re.compile(r'(?i)funcom-seabass-sh-[0-9a-f]{16}|\bsh-[0-9a-f]{16}-')),
     ('private reference', re.compile(r'(?i)(?:feedback|reference|project)_[a-z]+_[a-z_]{4,}|'
-                                    r'\[\[[a-z][a-z0-9]*[_-][a-z0-9_-]*\]\]|ops/maint-\d{4}-\d{2}')),
+                                    r'\[\[[a-z][a-z0-9]*[_-][a-z0-9_-]*\]\]|ops/maint[-]\d{4}-\d{2}')),
     ('local workstation path', re.compile(r'(?i)/mnt/[a-z]/Users/|[A-Z]:\\Users\\|'
                                          r'(?:/home/|/Users/)[^/\s]+/(?:Source|Documents|Desktop|Tools)/|'
                                          r'(?:~/|["\'])Source/(?:Security|Private|Internal)/')),

@@ -7,8 +7,8 @@ of the title/body text).
 Invoked by the relay forced-command dispatcher (action `broadcast-send`, payload
 on stdin) so arbitrary broadcast text never crosses a shell. The publisher
 base64-encodes the envelope into the rabbitmqctl eval, so the text is safe end
-to end. The AuthToken defaults to the build-baked BUILTIN_AUTH_TOKEN inside
-dune-service-broadcast.py (override via DUNE_COMMAND_AUTH_TOKEN / --token-file).
+to end. dune-service-broadcast.py reads the command credential from
+DUNE_COMMAND_AUTH_TOKEN or --token-file.
 
 stdin JSON:
   { "title": "...",                 # required, 1..MAX_TITLE chars

@@ -42,12 +42,8 @@ from datetime import datetime, timezone
 AUDIT_LOG = "/opt/lastsietch-rmq-bridge/service-broadcast.log"
 NS_PREFIX = "funcom-seabass-"
 MQ_POD_SUFFIX = "-mq-game-sts-0"
-# The NotificationSystem validates the inner AuthToken against a BUILD-BAKED
-# constant Funcom ships in every Dune dedicated server (same for all self-host),
-# NOT the per-server FuncomLiveServices__ServiceAuthToken JWT. Using the JWT is
-# rejected with "Invalid Auth Token" -- which is why broadcasts published OK at
-# the broker but never actually displayed in-game. Proven live 2026-06-10.
-# Override via --token-file / DUNE_COMMAND_AUTH_TOKEN if a future build rotates it.
+# The NotificationSystem validates the inner command credential, which is not the per-server
+# service JWT (that one is rejected with "Invalid Auth Token").
 # Command credentials are supplied by the operator at runtime.
 SHUTDOWN_TYPES = ("Restart", "Maintenance", "Update")
 DEFAULT_FREQUENCY_S = 600

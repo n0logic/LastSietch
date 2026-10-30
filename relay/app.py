@@ -5,13 +5,8 @@ import os
 import re
 import subprocess
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from configparser import ConfigParser
 from datetime import datetime
-from io import StringIO
-from pathlib import Path
 
-import psutil
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -27,88 +22,6 @@ app.add_middleware(
 )
 
 API_KEY = os.environ.get("LASTSIETCH_RELAY_API_KEY", "")
-PVE_NODE = "pve"
-RCON_PS_SCRIPT = r"C:\Tools\lastsietch-rcon.ps1"
-BASE_DIR = Path(__file__).parent
-INFRA_PLATFORM = os.environ.get("INFRA_PLATFORM", "")
-INFRA_LOCATION = os.environ.get("INFRA_LOCATION", "")
-
-# Load game registry
-with open(BASE_DIR / "games.json") as f:
-    GAMES = json.load(f)
-
-# Load settings schemas
-SCHEMAS = {}
-for game_id, game in GAMES.items():
-    schema_name = game.get("settings_schema")
-    if not schema_name:
-        continue
-    schema_path = BASE_DIR / "schemas" / schema_name
-    if schema_path.exists():
-        with open(schema_path) as f:
-            SCHEMAS[game_id] = json.load(f)
-
-# Per-game VM memory cache: {game_id: (timestamp, payload)}. TTL 10s, per-process.
-_VM_MEM_CACHE: dict[str, tuple[float, dict]] = {}
-_VM_MEM_TTL = 10.0
-
-# Per-game installed buildid cache (read from appmanifest via guest_exec).
-# Buildid only changes when SteamCMD runs, so a 60s TTL is generous.
-_INSTALLED_BUILDID_CACHE: dict[str, tuple[float, str]] = {}
-_INSTALLED_BUILDID_TTL = 60.0
-
-# Per-VMID guest-exec serialization. The Windows qemu-guest-agent returns
-# mismatched output buffers when two `qm guest exec` calls overlap on the same
-# VM (observed 2026-06-02: a 30-min SteamCMD update collided with the 60s
-# metrics sampler and got handed the sampler's output, failing the JSON parse
-# and aborting the update orchestrator). Serializing exec per VM eliminates the
-# race. Short-lived callers (status/memory sampler) acquire with GUEST_EXEC_LOCK_WAIT
-# and simply skip a tick if an update holds the lock; long updates acquire with
-# UPDATE_LOCK_WAIT and hold it for the full run.
-import threading
-GUEST_EXEC_LOCK_WAIT = 8.0    # seconds a normal exec waits before giving up (skip tick)
-UPDATE_LOCK_WAIT = 120.0      # seconds an update waits for in-flight execs to drain
-_VM_EXEC_LOCKS: dict[str, threading.Lock] = {}
-_VM_EXEC_LOCKS_GUARD = threading.Lock()
-
-
-def _vm_exec_lock(vmid: str) -> threading.Lock:
-    key = str(vmid)
-    with _VM_EXEC_LOCKS_GUARD:
-        lk = _VM_EXEC_LOCKS.get(key)
-        if lk is None:
-            lk = threading.Lock()
-            _VM_EXEC_LOCKS[key] = lk
-        return lk
-
-
-class MessageRequest(BaseModel):
-    message: str
-
-
-class ConfigUpdateRequest(BaseModel):
-    changes: dict  # {key: new_value, ...}
-
-
-class BackupConfigRequest(BaseModel):
-    buildid: str
-
-
-class RestoreConfigRequest(BaseModel):
-    buildid: str
-
-
-class FileHashRequest(BaseModel):
-    paths: list[str]
-
-
-class CreateSnapshotRequest(BaseModel):
-    name_suffix: str | None = None
-
-
-# Allow alphanumeric + dash/underscore/dot. Used for buildid + snapshot name suffix
-# to keep ZFS / filesystem names sane and prevent shell metachar injection.
-VALID_NAME_RE = re.compile(r'^[a-zA-Z0-9_.-]+$')
 
 
 def verify_key(x_api_key: str = Header()):
@@ -116,241 +29,17 @@ def verify_key(x_api_key: str = Header()):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-def get_game(game_id: str) -> dict:
-    if game_id not in GAMES:
-        raise HTTPException(404, f"Unknown game: {game_id}")
-    return GAMES[game_id]
-
-
-def require_provisioned(game: dict):
-    # Absence of the field is treated as provisioned for back-compat.
-    if game.get("provisioned", True) is False:
-        raise HTTPException(503, f"{game.get('display_name', 'Game')} is not provisioned yet")
-
-
-SUDO_CMDS = {"qm", "zfs", "crontab"}
-
-
-def run_cmd(cmd, timeout=30):
-    # Auto-prepend sudo for privileged commands (qm, zfs, crontab)
-    if cmd and cmd[0] in SUDO_CMDS:
-        cmd = ["sudo"] + list(cmd)
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return result.returncode, result.stdout, result.stderr
-    except subprocess.TimeoutExpired:
-        return -1, "", "Command timed out"
-
-
-def guest_exec(vmid: str, command: str, timeout=30):
-    # Serialize per-VM (see _vm_exec_lock). If an update is holding the lock,
-    # bail out fast rather than queue — callers (status/memory) treat None as
-    # "couldn't read" and skip, which is correct during an update window.
-    lk = _vm_exec_lock(vmid)
-    if not lk.acquire(timeout=GUEST_EXEC_LOCK_WAIT):
-        return None, f"VM {vmid} busy (guest-exec lock held by another operation)"
-    try:
-        cmd = ["qm", "guest", "exec", vmid, "--", "cmd.exe", "/c", command]
-        code, stdout, stderr = run_cmd(cmd, timeout=timeout)
-        if code != 0:
-            return None, stderr
-        try:
-            data = json.loads(stdout)
-            return data.get("out-data", ""), data.get("err-data", "")
-        except json.JSONDecodeError:
-            return stdout, stderr
-    finally:
-        lk.release()
-
-
-def _run_long_update_exec(vmid, encoded, required_keys, label, attempts=4):
-    """Run a long-running PowerShell guest-exec (steamcmd / workshop) under the
-    per-VM lock, with stale-buffer detection + retry.
-
-    Even with per-VM serialization, the Windows qemu-guest-agent can return a
-    *previously completed* exec's output because it keys results by Windows PID
-    and PIDs get reused (observed 2026-06-02: the workshop phase got a stale
-    `tasklist` CSV buffer and returned in ~1s). Our scripts always emit a single
-    compressed JSON object containing `required_keys`; anything else (CSV, a
-    foreign JSON shape, empty) is a stale/foreign buffer, so we re-run. Stale
-    returns come back instantly, so retrying is cheap and lands a fresh PID.
-
-    Returns (inner_dict, err_data). Raises HTTPException on hard failure or after
-    exhausting attempts.
-    """
-    cmd = ["qm", "guest", "exec", "--timeout", "1800", str(vmid), "--",
-           "powershell.exe", "-NoProfile", "-EncodedCommand", encoded]
-    last_out = ""
-    for attempt in range(1, attempts + 1):
-        lk = _vm_exec_lock(vmid)
-        if not lk.acquire(timeout=UPDATE_LOCK_WAIT):
-            raise HTTPException(503, f"VM {vmid} busy: another guest-exec did not drain within {int(UPDATE_LOCK_WAIT)}s; retry shortly")
-        try:
-            code, stdout, stderr = run_cmd(cmd, timeout=1860)
-        finally:
-            lk.release()
-        if code != 0:
-            raise HTTPException(500, f"{label} qm guest exec failed: {stderr[:500]}")
-        try:
-            outer = json.loads(stdout)
-        except json.JSONDecodeError:
-            raise HTTPException(500, f"Failed to parse qm guest exec wrapper: {stdout[:500]}")
-        out_data = (outer.get("out-data") or "").strip()
-        err_data = (outer.get("err-data") or "").strip()
-        last_out = out_data
-        # Our real result is a single ConvertTo-Json object on the last line.
-        candidate = out_data.split("\r\n")[-1].strip() if out_data else ""
-        if candidate:
-            try:
-                inner = json.loads(candidate)
-            except json.JSONDecodeError:
-                inner = None
-            if isinstance(inner, dict) and any(k in inner for k in required_keys):
-                return inner, err_data
-        print(f"[update] {label} vm={vmid} attempt {attempt}/{attempts}: unexpected "
-              f"guest-exec output (stale qemu-ga buffer?), retrying. head={out_data[:120]!r}",
-              flush=True)
-        time.sleep(3)
-    raise HTTPException(500, f"{label}: no valid result after {attempts} attempts "
-                             f"(qemu-ga kept returning stale buffers); last output head: {last_out[:300]}")
-
-
-def _ps_encoded(script: str) -> str:
-    """Encode a PowerShell script as UTF-16-LE base64 for -EncodedCommand."""
-    import base64
-    return base64.b64encode(script.encode("utf-16-le")).decode("ascii")
-
-
-def _ps_quote_path(path: str) -> str:
-    """Single-quote a Windows path for embedding in a PowerShell script."""
-    return "'" + path.replace("'", "''") + "'"
-
-
-def _validate_name(name: str, field: str = "name") -> str:
-    if not name or not VALID_NAME_RE.match(name):
-        raise HTTPException(400, f"Invalid {field} (alphanumeric, dot, dash, underscore only)")
-    return name
-
-
-def _ps_array_unwrap(parsed):
-    """PowerShell ConvertTo-Json returns a single object (not an array) when the source list has length 1.
-    Normalize to a list."""
-    if parsed is None:
-        return []
-    if isinstance(parsed, dict):
-        return [parsed]
-    return parsed
-
-
-def rcon_command(game: dict, command: str) -> str:
-    if not game.get("supports_rcon", True):
-        raise HTTPException(501, f"RCON is not supported for {game.get('display_name', 'this game')}")
-    password_env = game.get("rcon_password_env", "LASTSIETCH_RCON_PASSWORD")
-    rcon_port = game.get("rcon_port", 25576)
-    # Sanitize — reject shell metacharacters that could escape into cmd.exe
-    if re.search(r'[&|<>^%]', command):
-        raise HTTPException(400, "RCON command contains invalid characters")
-    password = os.environ.get(password_env)
-    if not password:
-        raise HTTPException(500, "RCON password not configured")
-    # Use EncodedCommand to avoid cmd.exe mangling special chars in password
-    import base64
-    safe_cmd = command.replace('"', '`"')
-    ps_script = (
-        f'& "{RCON_PS_SCRIPT}" -Command "{safe_cmd}"'
-        f' -Port {rcon_port} -Password "{password}"'
-    )
-    encoded = base64.b64encode(ps_script.encode("utf-16-le")).decode("ascii")
-    ps_cmd = f"powershell.exe -ExecutionPolicy Bypass -EncodedCommand {encoded}"
-    out, err = guest_exec(game["vmid"], ps_cmd, timeout=15)
-    if out is None:
-        raise HTTPException(500, f"RCON guest exec failed: {err}")
-    out = (out or "").strip()
-    # Check for errors first
-    for line in out.split("\r\n"):
-        if line.startswith("ERROR:"):
-            raise HTTPException(500, f"RCON error: {line}")
-    # Return everything after the first RESULT: prefix (preserves multi-line responses)
-    result_idx = out.find("RESULT:")
-    if result_idx >= 0:
-        return out[result_idx + 7:].strip()
-    return out
-
-
-def parse_ini(text: str) -> dict:
-    """Parse Windows INI text into {section: {key: value}}."""
-    sections = {}
-    current_section = "DEFAULT"
-    for line in text.replace("\r\n", "\n").split("\n"):
-        line = line.strip()
-        if not line or line.startswith(";") or line.startswith("#"):
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            current_section = line[1:-1]
-            if current_section not in sections:
-                sections[current_section] = {}
-            continue
-        if "=" in line:
-            key, _, value = line.partition("=")
-            sections.setdefault(current_section, {})[key.strip()] = value.strip()
-    return sections
-
-
-def rebuild_ini(original_text: str, changes: dict) -> str:
-    """Apply {section: {key: value}} changes to original INI text, preserving structure."""
-    lines = original_text.replace("\r\n", "\n").split("\n")
-    result = []
-    current_section = "DEFAULT"
-    applied = set()
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            current_section = stripped[1:-1]
-            result.append(line)
-            continue
-        if "=" in stripped and not stripped.startswith(";") and not stripped.startswith("#"):
-            key = stripped.split("=", 1)[0].strip()
-            section_changes = changes.get(current_section, {})
-            if key in section_changes:
-                result.append(f"{key}={section_changes[key]}")
-                applied.add((current_section, key))
-                continue
-        result.append(line)
-
-    # Append any new keys that weren't in the original
-    for section, keys in changes.items():
-        for key, value in keys.items():
-            if (section, key) not in applied:
-                # Find or create section
-                section_header = f"[{section}]"
-                if section_header not in "\n".join(result):
-                    result.append("")
-                    result.append(section_header)
-                result.append(f"{key}={value}")
-
-    return "\r\n".join(result)
-
-
-def get_dot_path(data: dict, path: str):
-    """Walk dot-separated path through a dict. Returns None if any segment missing."""
-    cur = data
-    for part in path.split("."):
-        if not isinstance(cur, dict) or part not in cur:
-            return None
-        cur = cur[part]
-    return cur
-
-
-def set_dot_path(data: dict, path: str, value):
-    """Set value at dot-separated path, creating intermediate dicts as needed."""
-    parts = path.split(".")
-    cur = data
-    for part in parts[:-1]:
-        if part not in cur or not isinstance(cur[part], dict):
-            cur[part] = {}
-        cur = cur[part]
-    cur[parts[-1]] = value
+def _karum_src(body):
+    """Validate the optional take source. Absent/None = bank, which is what every leg did
+    before 2026-08-25. Returned as a dict to splice into `fields`, because `fields` is a
+    HARD ALLOWLIST: a key not present there is dropped silently before the writer sees it,
+    and a dropped `src` would take from the BANK while the UI said backpack."""
+    src = body.get("src")
+    if src is None:
+        return {}
+    if src not in ("bank", "backpack"):
+        raise HTTPException(400, "src must be bank or backpack")
+    return {"src": src}
 
 
 # --- Health ---
@@ -358,7 +47,6 @@ def set_dot_path(data: dict, path: str, value):
 @app.get("/health")
 def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
-
 
 
 # --- Dune self-host status (read-only; SSH proxy to <game-host>) ---
@@ -394,7 +82,7 @@ SSH_CONTROLMASTER_OPTS = [
 
 
 def _dune_ssh(remote_cmd: str, timeout: int = 45):
-    """Run a command on the game host over SSH. Returns (stdout, stderr, returncode)."""
+    """Run a command on <game-host> over SSH. Returns (stdout, stderr, returncode)."""
     cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
            "-o", "StrictHostKeyChecking=yes",
            "-o", f"UserKnownHostsFile={DUNE_SSH_KNOWN_HOSTS}",
@@ -412,7 +100,7 @@ def _dune_ssh_stdin(remote_cmd: str, stdin_data: str, timeout: int = 45):
     """Same as _dune_ssh but pipes stdin_data into ssh's stdin instead of
     embedding it in the remote_cmd argv. Required for grant payloads above
     ~150KB that hit ARG_MAX when passed as a positional argv. The
-    dispatcher on the game host must use an action that reads stdin
+    dispatcher on <game-host> must use an action that reads stdin
     (e.g. 'grant-stdin' for /root/dune-grant.sh --grant-b64-stdin)."""
     cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
            "-o", "StrictHostKeyChecking=yes",
@@ -485,7 +173,8 @@ def dune_bases_near(map_name: str, dim: int, x: float, y: float, limit: int = 5)
     ground. Read-only. Same PII rule as /dune/bases.
 
     `dim` is required and has no default. Hagga runs two sietches over one
-    coordinate space (0 = Habbanya PvE, 1 = Kulon PvP), so a lookup that does
+    coordinate space (0 = Habbanya PvE, 2 = Amtal PvP; 1 was Kulon until
+    2026-10-28), so a lookup that does
     not pin the dimension ranks the other world's bases against the clicked
     point and names the wrong owner."""
     if not re.fullmatch(r"[A-Za-z0-9_]{1,40}", map_name or ""):
@@ -589,7 +278,7 @@ def dune_guild_census(guild_id: int):
 
 
 # Guild op payload: op verbs + a UUID idempotency key check, mirroring the
-# grant/market write validation. Every field is re-validated on the game host by
+# grant/market write validation. Every field is re-validated on <game-host> by
 # dune-guild-op.sh; this is the first layer.
 _GUILD_OP_VERBS = {"edit_description", "accept_invite", "reject_invite", "send_invite",
                    "promote", "demote", "remove"}
@@ -861,8 +550,9 @@ async def dune_item_transfer_op(request: Request):
 #
 # Every identity is resolved SERVER-SIDE by the admin-backend from the authenticated
 # session before it reaches here, and re-resolved in the writer's transaction. A client can
-# never trade AS another player: this layer will not accept a character name, a controller
-# id or a discord id, only account ids the backend already vouched for.
+# never trade AS another player. Wanted-order fills also carry the selected buyer and
+# filler controllers that the backend resolved; the writer re-proves both against those
+# accounts before using them.
 #
 # The writer's JSON is surfaced VERBATIM, including its `paid` and `delivered` booleans,
 # because L4's branch table depends on them separately. Do not collapse them into a
@@ -874,6 +564,7 @@ async def dune_item_transfer_op(request: Request):
 _KARUM_ACTIONS = {
     "list":   "karum-list",
     "buy":    "karum-buy",
+    "fill":   "karum-fill",
     "cancel": "karum-cancel",
     "admin":  "karum-admin",
 }
@@ -970,6 +661,7 @@ async def dune_karum_list(request: Request):
         "seller_account_id": _karum_pos_int(body, "seller_account_id"),
         "item_id": _karum_pos_int(body, "item_id"),
         "template_id": template_id,
+        **_karum_src(body),
     }
     return _karum_dispatch(_KARUM_ACTIONS["list"],
                            _karum_common(body, corr, fields))
@@ -1005,6 +697,66 @@ async def dune_karum_buy(request: Request):
         "amount": _karum_pos_int(body, "amount"),
     }
     return _karum_dispatch(_KARUM_ACTIONS["buy"],
+                           _karum_common(body, corr, fields))
+
+
+@app.post("/dune/karum/fill", dependencies=[Depends(verify_key)])
+async def dune_karum_fill(request: Request):
+    """FILL: atomically take one exact filler stack and move the requester's total
+    payment, then deliver through the existing claim lane. Body = {request_id,
+    listing_id, buyer_account_id, buyer_ctrl, seller_account_id, seller_ctrl, item_id,
+    template_id, stack_size, amount, take_correlation_id, correlation_id, ...}.
+
+    The separate take correlation and payment correlation each land in their existing
+    game-DB unique gate. The writer requires both gates to be new or both to be replays.
+    """
+    body, corr = await _karum_body(request)
+    buyer = _karum_pos_int(body, "buyer_account_id")
+    seller = _karum_pos_int(body, "seller_account_id")
+    buyer_ctrl = _karum_pos_int(body, "buyer_ctrl")
+    seller_ctrl = _karum_pos_int(body, "seller_ctrl")
+    if buyer == seller or buyer_ctrl == seller_ctrl:
+        raise HTTPException(400, "cannot fill your own wanted order")
+    template_id = body.get("template_id")
+    if not isinstance(template_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{2,64}", template_id):
+        raise HTTPException(400, "template_id must be 2-64 chars of letters, digits, _ or -")
+    take_corr = body.get("take_correlation_id")
+    if not isinstance(take_corr, str) or not _GUILD_OP_UUID_RE.match(take_corr):
+        raise HTTPException(400, "take_correlation_id must be a UUID")
+    if take_corr == corr:
+        raise HTTPException(400, "take_correlation_id must differ from correlation_id")
+    # `fields` is a HARD ALLOWLIST: anything not named here is silently dropped before
+    # the writer ever sees it. That has produced three live player-facing bugs already
+    # (dry_run, period_key, and this shape of omission generally), so a new field on the
+    # portal side is not wired until it is ALSO named here. Grade is optional: an order
+    # posted before 2026-08-25 carries none and must keep meaning any-grade.
+    fields = {
+        "request_id": _karum_pos_int(body, "request_id"),
+        "listing_id": _karum_pos_int(body, "listing_id"),
+        "buyer_account_id": buyer,
+        "buyer_ctrl": buyer_ctrl,
+        "seller_account_id": seller,
+        "seller_ctrl": seller_ctrl,
+        "item_id": _karum_pos_int(body, "item_id"),
+        "template_id": template_id,
+        "stack_size": _karum_pos_int(body, "stack_size"),
+        "amount": _karum_pos_int(body, "amount"),
+        "take_correlation_id": take_corr,
+        **_karum_src(body),
+    }
+    expected_quality = body.get("expected_quality")
+    if expected_quality is not None:
+        if (isinstance(expected_quality, bool)
+                or not isinstance(expected_quality, int)
+                or expected_quality < 0 or expected_quality > 5):
+            raise HTTPException(400, "expected_quality must be an integer 0-5")
+        quality_mode = body.get("quality_mode", "exact")
+        if quality_mode not in ("exact", "min"):
+            raise HTTPException(400, "quality_mode must be exact or min")
+        fields["expected_quality"] = expected_quality
+        fields["quality_mode"] = quality_mode
+    return _karum_dispatch(_KARUM_ACTIONS["fill"],
                            _karum_common(body, corr, fields))
 
 
@@ -1074,7 +826,7 @@ async def dune_karum_admin(request: Request):
 @app.get("/dune/karum/audit", dependencies=[Depends(verify_key)])
 async def dune_karum_audit():
     """The Karum escrow audit. READ-ONLY, so this is a GET and it is safe under a change
-    freeze. Nightly from the web host, on demand from the admin panel.
+    freeze. Nightly from <web-host>, on demand from the admin panel.
 
     🔴 The exit code carries meaning that the body alone does not, and it MUST NOT be
     flattened: 0 clean, 1 at least one paging finding, 3 the audit could not run. Three is
@@ -1138,19 +890,40 @@ async def dune_reward_op(request: Request):
     account_id = _pos_int("account_id")
 
     reward_kind = body.get("reward_kind")
-    if reward_kind not in ("daily_solari", "weekly_item"):
-        raise HTTPException(400, "reward_kind must be 'daily_solari' or 'weekly_item'")
+    if reward_kind not in ("daily_solari", "weekly_item", "monthly_augment",
+                           "sn_shop_bank", "sn_shop_solari", "sn_shop_spec", "sn_shop_charxp"):
+        raise HTTPException(
+            400, "reward_kind must be 'daily_solari', 'weekly_item', 'monthly_augment', "
+                 "'sn_shop_bank', 'sn_shop_solari', 'sn_shop_spec' or 'sn_shop_charxp'")
 
     fields = {"account_id": account_id, "reward_kind": reward_kind,
               "idempotency_key": idem}
 
-    if reward_kind == "daily_solari":
+    if reward_kind in ("sn_shop_bank", "sn_shop_solari", "sn_shop_spec", "sn_shop_charxp"):
+        # Seven Nights shop. The SKU is the whole request: the writer looks up what
+        # to mint (or how much Solari) in its own allowlist, so no template,
+        # quantity, grade or amount is accepted here at all.
+        sku = body.get("sku")
+        if not isinstance(sku, str) or not re.fullmatch(r"sn-[a-z0-9-]{1,48}", sku):
+            raise HTTPException(400, "sku must be sn- followed by 1-48 of a-z, 0-9 or -")
+        fields["sku"] = sku
+        fields["controller_id"] = _pos_int("controller_id")
+        profile_id = body.get("profile_id")
+        if not isinstance(profile_id, str) or not re.fullmatch(r"[0-9a-f]{32}", profile_id):
+            raise HTTPException(400, "profile_id must be 32 lowercase hex chars")
+        fields["profile_id"] = profile_id
+        discord_id = body.get("discord_id")
+        if discord_id is not None:
+            if not isinstance(discord_id, str) or not re.fullmatch(r"[1-9][0-9]{0,19}", discord_id):
+                raise HTTPException(400, "discord_id must be a numeric string")
+            fields["discord_id"] = discord_id
+    elif reward_kind == "daily_solari":
         amount = _pos_int("amount")
         # Sanity ceiling on the Solari faucet (admin ramp tops out at 25k/day).
         if amount > 10_000_000:
             raise HTTPException(400, "amount is out of range")
         fields["amount"] = amount
-    else:  # weekly_item
+    else:  # weekly_item / monthly_augment both deliver an item to the CHOAM bank
         template_id = body.get("template_id")
         # Charset matches dune-reward-op.sh validate_template_id (alnum + underscore).
         if not isinstance(template_id, str) or not re.fullmatch(
@@ -1162,6 +935,45 @@ async def dune_reward_op(request: Request):
             raise HTTPException(400, "quality_level must be an integer 0..5")
         fields["template_id"] = template_id
         fields["quality_level"] = quality_level
+
+    if reward_kind == "monthly_augment":
+        # The monthly prize is PRE-AUGMENTED gear, so the item carries an augment
+        # list that becomes its FAugmentedItemStats blob at INSERT. `rolls` is a
+        # COUNT, not the values: roll count varies per augment (live: Lmg1 6,
+        # Ch5_Scattergun1 5, Damage1 1) and a wrong count renders an empty augment
+        # slot in game. The writer re-validates all of this; this is the edge gate.
+        augments = body.get("augments")
+        if not isinstance(augments, list) or not (1 <= len(augments) <= 3):
+            raise HTTPException(400, "augments must be a 1-3 element array")
+        clean = []
+        for a in augments:
+            if not isinstance(a, dict):
+                raise HTTPException(400, "each augment must be an object")
+            name = a.get("name")
+            if not isinstance(name, str) or not re.fullmatch(
+                    r"T\d+_Augment_[A-Za-z0-9_]{1,64}", name):
+                raise HTTPException(400, "augment name must match T<digit>_Augment_*")
+            grade = a.get("grade")
+            if isinstance(grade, bool) or not isinstance(grade, int) or not (1 <= grade <= 5):
+                raise HTTPException(400, "augment grade must be an integer 1..5")
+            rolls = a.get("rolls")
+            if isinstance(rolls, bool) or not isinstance(rolls, int) or not (1 <= rolls <= 10):
+                raise HTTPException(400, "augment rolls must be an integer 1..10")
+            clean.append({"name": name, "grade": grade, "rolls": rolls})
+        fields["augments"] = clean
+        # 🔴 REQUIRED, and its absence is silent. The writer refuses
+        # monthly_augment outright without it ("monthly_augment requires
+        # period_key"), and the reward period is a rolling 28-day window, so it
+        # cannot be re-derived here from a calendar month. Omitted from this
+        # allowlist between the feature landing and 2026-08-24, during which
+        # EVERY monthly claim failed -- the same silent-drop shape as the
+        # `dry_run` field above. A field missing from `fields` is dropped
+        # without an error anywhere in the chain.
+        period_key = body.get("period_key")
+        if not isinstance(period_key, str) or not re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}", period_key):
+            raise HTTPException(400, "period_key must be a YYYY-MM-DD date string")
+        fields["period_key"] = period_key
 
     mode = body.get("mode", "apply")
     if mode not in ("apply", "dry-run"):
@@ -1203,13 +1015,16 @@ async def dune_reward_op(request: Request):
 
 
 @app.get("/dune/rewards/login-days", dependencies=[Depends(verify_key)])
-def dune_rewards_login_days(account_id: int):
-    """Per-account daily-login history from the lastsietch-telemetry SQLite
-    portal_login_days table (UTC dates the account was seen online, newest first,
-    default 60-day window). Read-only (telemetry.db; the game DB is not touched).
-    Mirrors the /dune/stats/presence read precedent. Dispatches the 'login-days'
-    action (the telemetry read API decides the window). The backend derives streak
-    + calendar claim-state from this."""
+def dune_rewards_login_days(account_id: int = None):
+    """Daily-login history from the lastsietch-telemetry SQLite portal_login_days table
+    (UTC dates the account was seen online, newest first, default 60-day window).
+    Read-only (telemetry.db; the game DB is not touched). Mirrors the
+    /dune/stats/presence read precedent. Dispatches the 'login-days' action (the
+    telemetry read API decides the window). The backend derives streak + calendar
+    claim-state from this. Without account_id it returns every account, the
+    dispatcher's no-arg form, so the Seven Nights worker can pull once per tick."""
+    if account_id is None:
+        return _dune_ssh_json("login-days", timeout=30)
     if account_id <= 0:
         raise HTTPException(400, "account_id must be a positive integer")
     return _dune_ssh_json(f"login-days {account_id}", timeout=30)
@@ -1219,7 +1034,7 @@ def dune_rewards_login_days(account_id: int):
 def dune_read_models(account_id: int = None):
     """Per-account portal/admin read models from the telemetry mirror. Read-only
     (served from telemetry.db; the game DB is not touched). Pulled on a timer by
-    the web host local-mirror sync loop. Optional account_id narrows the pull."""
+    the <web-host> local-mirror sync loop. Optional account_id narrows the pull."""
     cmd = f"read-models {account_id}" if account_id is not None else "read-models"
     return _dune_ssh_json(cmd, timeout=30)
 
@@ -1228,7 +1043,7 @@ def dune_read_models(account_id: int = None):
 def dune_storage_models(account_id: int = None):
     """Per-account storage snapshots from the telemetry mirror (Phase 2). Read-only
     (served from telemetry.db; the game DB is not touched). Pulled on a timer by
-    the web host local-mirror sync loop. Optional account_id narrows the pull."""
+    the <web-host> local-mirror sync loop. Optional account_id narrows the pull."""
     cmd = f"storage-models {account_id}" if account_id is not None else "storage-models"
     return _dune_ssh_json(cmd, timeout=45)
 
@@ -1237,7 +1052,7 @@ def dune_storage_models(account_id: int = None):
 def dune_market_listings_all():
     """Full active CHOAM exchange listing set from the telemetry mirror (Phase 2).
     Read-only (served from telemetry.db; the game DB is not touched). Pulled on a
-    timer by the web host local-mirror sync loop, which searches it locally."""
+    timer by the <web-host> local-mirror sync loop, which searches it locally."""
     return _dune_ssh_json("market-all", timeout=45)
 
 
@@ -1246,7 +1061,7 @@ def dune_market_bot_prices():
     """NPC market-maker buy-price export: per-item per-grade caps the bot still
     pays for player listings (written by lastsietch-market-bot each tick). Read-only
     (plain file read on the game box; the game DB is not touched). Pulled on a
-    timer by the web host local-mirror sync loop for the portal market page."""
+    timer by the <web-host> local-mirror sync loop for the portal market page."""
     return _dune_ssh_json("market-bot-prices", timeout=30)
 
 
@@ -1255,7 +1070,7 @@ def dune_market_bot_limits():
     """Per-category weekly buy/sell budget usage + reset timestamps for the portal
     Exchange tracker (written by lastsietch-market-bot each tick). Read-only (plain file
     read on the game box; the game DB is not touched). Pulled on a timer by the
-    the web host local-mirror sync loop."""
+    <web-host> local-mirror sync loop."""
     return _dune_ssh_json("market-bot-limits", timeout=30)
 
 
@@ -1438,7 +1253,10 @@ async def dune_market_sell(request: Request):
     RAM-backed while online — the writer hard-gates on online_status + grace).
 
     Body = {seller_ctrl:int, item_id:int, count:int, price:int, duration_days:int,
-            max_orders?:int}. duration_days must be one of {1,3,7,14}. seller_ctrl
+            max_orders?:int, expected_template?:str, expected_src?:bank/backpack}.
+    duration_days must be one of {1,3,7,14}. expected_src names which of the seller's
+    two pawn inventories the admin-backend resolved the item to, and the writer
+    re-derives it from the locked row and refuses a mismatch. seller_ctrl
     is the player's controller_id and is resolved SERVER-SIDE by the admin-backend
     from the authenticated portal session — the relay never derives it and a client
     can never list another player's item. The admin-backend also re-verifies (via
@@ -1484,12 +1302,23 @@ async def dune_market_sell(request: Request):
                 r"[A-Za-z0-9_-]{2,64}", expected_template):
             raise HTTPException(400, "expected_template must be 2-64 chars of letters, digits, _ or -")
 
+    # Optional source pin. The admin-backend has already matched the client's
+    # container_id against the selected character's strict bank/backpack pair, so this
+    # only has to carry the answer. Closed set: an unknown value is a 400, never a
+    # dropped key, because `fields` below is a HARD ALLOWLIST and a silently dropped
+    # expected_src would let the writer list from whichever bag the item is in now.
+    expected_src = body.get("expected_src")
+    if expected_src is not None and expected_src not in ("bank", "backpack"):
+        raise HTTPException(400, "expected_src must be bank or backpack")
+
     fields = {"seller_ctrl": seller_ctrl, "item_id": item_id,
               "count": count, "price": price, "duration_days": duration_days}
     if max_orders is not None:
         fields["max_orders"] = max_orders
     if expected_template is not None:
         fields["expected_template"] = expected_template
+    if expected_src is not None:
+        fields["expected_src"] = expected_src
 
     payload = json.dumps(fields, separators=(",", ":"), sort_keys=True)
     arg = base64.b64encode(payload.encode("utf-8")).decode("ascii")
@@ -1721,6 +1550,212 @@ async def dune_storage_deposit(request: Request):
     return _dune_storage_action("deposit", body)
 
 
+@app.post("/dune/landsraad/claim", dependencies=[Depends(verify_key)])
+async def dune_landsraad_claim(request: Request):
+    """Claim every unclaimed Landsraad house reward for a portal player (backpack first,
+    CHOAM Exchange Completed orders for the overflow, swatches as unlocks). OFFLINE-only
+    for mode=apply; mode=preview runs the same transaction and rolls back. Body =
+    {owner_ctrl:int, mode:"preview"|"apply", operator?:str}. owner_ctrl is resolved
+    SERVER-SIDE by the admin-backend; the writer re-verifies offline in-transaction.
+
+    `mode` has NO default. This transport rebuilds the job from a whitelist, and a
+    whitelist rebuild that drops a field must fail closed, not fall through to the write
+    (AGENTS.md §3, the 2026-08-14 dry_run incident)."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "request body must be JSON")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "request body must be a JSON object")
+    owner_ctrl = body.get("owner_ctrl")
+    if isinstance(owner_ctrl, bool) or not isinstance(owner_ctrl, int) or owner_ctrl <= 0:
+        raise HTTPException(400, "owner_ctrl must be a positive integer")
+    mode = body.get("mode")
+    if mode not in ("preview", "apply"):
+        raise HTTPException(400, "mode must be one of preview, apply")
+    operator = re.sub(r"[^A-Za-z0-9:_#.-]", "", str(body.get("operator") or "portal"))[:64]
+    fields = {"owner_ctrl": owner_ctrl, "mode": mode, "operator": operator or "portal"}
+
+    payload = json.dumps(fields, separators=(",", ":"), sort_keys=True)
+    arg = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+    if not DUNE_GRANT_B64_RE.match(arg):
+        raise HTTPException(500, "failed to encode landsraad-claim payload")
+    out, err, code = _dune_ssh_stdin("landsraad-claim", arg, timeout=45)
+    out = (out or "").strip()
+    err = (err or "").strip()
+    if out:
+        try:
+            parsed = json.loads(out.splitlines()[-1])
+            if isinstance(parsed, dict):
+                parsed.setdefault("exit_code", code)
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    return {
+        "ok": False,
+        "error": "writer_no_output",
+        "exit_code": code,
+        "message": (err or out or "landsraad-claim produced no output")[:1000],
+    }
+
+
+AUGMENT_ID_RE = re.compile(r"^T\d_Augment_[A-Za-z0-9_]{1,48}$")
+AUGMENT_IDEM_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+@app.post("/dune/augment/apply", dependencies=[Depends(verify_key)])
+async def dune_augment_apply(request: Request):
+    """Per-item augment REROLL / SWAP write path. Replaces the item's whole
+    FAugmentedItemStats block from `augments` (the FULL resulting list, in slot
+    order) and redraws rolls only for the slots named in `reroll_only`; every
+    other slot keeps its exact current rolls AND grade. OFFLINE-only (item stats
+    are RAM-backed while online; the writer hard-gates).
+
+    Body = {owner_ctrl:int, item_id:int, augments:[str], grade?:int,
+    roll_mode?:"random"|"perfect"|"transplant", consume?:bool,
+    preserve_grades?:bool, reroll_only?:[str], swap_slot?:int,
+    idempotency_key?:str}.
+
+    `transplant` is the player-facing swap mode: instead of drawing fresh rolls
+    for the incoming augment it splices the CONSUMED copy's real rolls into the
+    destination slot, so a hand-picked augment no longer arrives as an average
+    draw. It carries NO new field -- it is a third accepted value of `roll_mode`
+    and nothing else.
+
+    🔴 owner_ctrl is resolved SERVER-SIDE by the admin-backend from the session.
+    It is never accepted from a browser: the writer trusts it completely to
+    resolve the pawn, ownership and the offline gate, so it IS the auth boundary.
+    The writer re-verifies offline + item ownership + augment ownership, and on a
+    swap consumes the incoming augment in the SAME transaction as the write.
+
+    `idempotency_key` is honoured in-transaction: a retry of an already-applied
+    intent replays the prior outcome and consumes NOTHING. Send one for anything
+    player-initiated -- a dropped response plus a retry would otherwise destroy a
+    second augment, of which only ~297 exist server-wide.
+
+    Kill-switch: the writer refuses with augment_disabled unless
+    LASTSIETCH_AUGMENT_ENABLED=1. The writer's JSON (incl. ok:false error tokens) is
+    surfaced verbatim."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "request body must be JSON")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "request body must be a JSON object")
+
+    def _pos_int(name):
+        val = body.get(name)
+        if isinstance(val, bool) or not isinstance(val, int) or val <= 0:
+            raise HTTPException(400, f"{name} must be a positive integer")
+        return val
+
+    def _aug_list(name, required):
+        raw = body.get(name)
+        if raw is None:
+            if required:
+                raise HTTPException(400, f"{name} is required")
+            return None
+        if not isinstance(raw, list) or not raw or len(raw) > 3:
+            raise HTTPException(400, f"{name} must be a 1-3 element array")
+        out = []
+        for a in raw:
+            if not isinstance(a, str) or not AUGMENT_ID_RE.match(a):
+                raise HTTPException(400, f"{name} entries must look like T6_Augment_Name")
+            out.append(a)
+        return out
+
+    fields = {
+        "owner_ctrl": _pos_int("owner_ctrl"),
+        "item_id": _pos_int("item_id"),
+        "augments": _aug_list("augments", True),
+    }
+
+    grade = body.get("grade")
+    if grade is not None:
+        if isinstance(grade, bool) or not isinstance(grade, int) or not 1 <= grade <= 5:
+            raise HTTPException(400, "grade must be an integer 1..5")
+        fields["grade"] = grade
+
+    roll_mode = body.get("roll_mode")
+    if roll_mode is not None:
+        if roll_mode not in ("random", "perfect", "transplant"):
+            raise HTTPException(
+                400, "roll_mode must be 'random', 'perfect' or 'transplant'")
+        fields["roll_mode"] = roll_mode
+
+    # 🔴 `dry_run` MUST be in this list. It was omitted until 2026-08-14, and because
+    # this handler rebuilds the request from a whitelist rather than forwarding the
+    # body, the flag was silently DROPPED -- so the admin-backend's "authoritative
+    # dry-run probe" was a LIVE WRITE on every reroll from 08-11 13:56 onward. The
+    # writer honours the flag correctly; it simply never arrived. Symptom was
+    # "That item is no longer there." (the live response carries no
+    # `already_installed`, which only do_dry_run emits) while the reroll really
+    # landed -- uncapped and redrawing EVERY slot, because the probe body also
+    # carries no reroll_only or idempotency_key.
+    # Anything added to this endpoint's contract must be added here too; a missing
+    # entry fails OPEN toward the destructive default, which is exactly backwards.
+    # 🔴 `isinstance(val, bool)` FIRST, always: bool subclasses int in Python, so an
+    # int check alone accepts True/False for a numeric field and a bool check placed
+    # after one never runs. The transplant swap mode deliberately added NO field
+    # here -- it is a `roll_mode` value -- precisely so this list did not have to
+    # grow again.
+    for flag in ("consume", "preserve_grades", "dry_run"):
+        val = body.get(flag)
+        if val is not None:
+            if not isinstance(val, bool):
+                raise HTTPException(400, f"{flag} must be a boolean")
+            fields[flag] = val
+
+    reroll_only = _aug_list("reroll_only", False)
+    if reroll_only is not None:
+        fields["reroll_only"] = reroll_only
+
+    # 0-based index into `augments` of the slot a swap REPLACES. Carries the one
+    # fact the name list cannot: WHICH slot changed, when the incoming augment has
+    # the same name as the outgoing one and only its grade differs. Without it the
+    # writer sees no new name, consumes nothing, keeps the old grade and hands out
+    # a free upgrade. Subject to the same rule as `dry_run` above -- this handler
+    # rebuilds the request from a whitelist, so an omission here is silent.
+    # Bounds are re-checked by the writer against its own post-validation list;
+    # the ceiling here is just the 3-slot cap `_aug_list` already enforces.
+    swap_slot = body.get("swap_slot")
+    if swap_slot is not None:
+        if isinstance(swap_slot, bool) or not isinstance(swap_slot, int) \
+                or not 0 <= swap_slot <= 2:
+            raise HTTPException(400, "swap_slot must be an integer 0..2")
+        fields["swap_slot"] = swap_slot
+
+    idem = body.get("idempotency_key")
+    if idem is not None:
+        if not isinstance(idem, str) or not AUGMENT_IDEM_RE.match(idem):
+            raise HTTPException(400, "idempotency_key must be 8-64 chars of letters, digits, _ or -")
+        fields["idempotency_key"] = idem
+
+    payload = json.dumps(fields, separators=(",", ":"), sort_keys=True)
+    arg = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+    if not DUNE_GRANT_B64_RE.match(arg):
+        raise HTTPException(500, "failed to encode augment-op payload")
+
+    out, err, code = _dune_ssh_stdin("augment-op", arg, timeout=45)
+    out = (out or "").strip()
+    err = (err or "").strip()
+    if out:
+        try:
+            parsed = json.loads(out)
+            if isinstance(parsed, dict):
+                parsed.setdefault("exit_code", code)
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    return {
+        "ok": False,
+        "error": "writer_no_output",
+        "exit_code": code,
+        "message": (err or out or "augment-op produced no output")[:1000],
+        "stderr": err[:2000],
+    }
+
+
 @app.post("/dune/storage/move", dependencies=[Depends(verify_key)])
 async def dune_storage_move(request: Request):
     """Drag-drop MOVE WRITE path (Tier 3): relocate a WHOLE item stack from one of a
@@ -1786,6 +1821,252 @@ async def dune_storage_move(request: Request):
     }
 
 
+@app.post("/dune/storage/pawn-move", dependencies=[Depends(verify_key)])
+async def dune_storage_pawn_move(request: Request):
+    """Move one stack only between the selected pawn's Bank and Backpack."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "request body must be JSON")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "request body must be a JSON object")
+
+    def _pos_int(name):
+        val = body.get(name)
+        if isinstance(val, bool) or not isinstance(val, int) or val <= 0:
+            raise HTTPException(400, f"{name} must be a positive integer")
+        return val
+
+    owner_ctrl = _pos_int("owner_ctrl")
+    item_id = _pos_int("item_id")
+    src_storage = body.get("src_storage")
+    dst_storage = body.get("dst_storage")
+    if src_storage not in ("bank", "backpack") or dst_storage not in ("bank", "backpack"):
+        raise HTTPException(400, "storage kinds must be bank or backpack")
+    if src_storage == dst_storage:
+        raise HTTPException(400, "source and destination must differ")
+
+    idem = body.get("idempotency_key")
+    if not isinstance(idem, str) or not _GUILD_OP_UUID_RE.match(idem):
+        raise HTTPException(400, "idempotency_key must be a UUID")
+
+    expected_template = body.get("expected_template")
+    if expected_template is not None:
+        if not isinstance(expected_template, str) or not re.fullmatch(
+                r"[A-Za-z0-9_-]{2,64}", expected_template):
+            raise HTTPException(400, "expected_template must be 2-64 chars of letters, digits, _ or -")
+
+    fields = {
+        "action": "pawn_move",
+        "owner_ctrl": owner_ctrl,
+        "item_id": item_id,
+        "src_storage": src_storage,
+        "dst_storage": dst_storage,
+        "idempotency_key": idem,
+    }
+    if expected_template is not None:
+        fields["expected_template"] = expected_template
+
+    payload = json.dumps(fields, separators=(",", ":"), sort_keys=True)
+    arg = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+    if not DUNE_GRANT_B64_RE.match(arg):
+        raise HTTPException(500, "failed to encode storage-pawn-move payload")
+
+    out, err, code = _dune_ssh_stdin("storage-pawn-move", arg, timeout=30)
+    out = (out or "").strip()
+    err = (err or "").strip()
+    if out:
+        try:
+            parsed = json.loads(out)
+            if isinstance(parsed, dict):
+                parsed.setdefault("exit_code", code)
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    return {
+        "ok": False,
+        "error": "writer_no_output",
+        "exit_code": code,
+        "message": (err or out or "storage-pawn-move produced no output")[:1000],
+        "stderr": err[:2000],
+    }
+
+
+# ---------------------------------------------------------------------------
+# The Ingot Refinery (wave 10): offline ingots + Spice Melange -> spiced dust.
+# Two routes, ONE dispatcher token (`refinery-op`); the op rides inside the
+# base64 payload and dune-refinery-write.py re-validates it along with every
+# other field, the way the Karum's four routes share `karum-op`.
+#
+# owner_ctrl and account_id are resolved SERVER-SIDE by the admin-backend from
+# the authenticated session before they reach here, and re-resolved inside the
+# writer's transaction. A client can never refine AS another player.
+#
+# 🔴 `fields` IS A WHITELIST. This handler REBUILDS the request rather than
+# forwarding the body, so a field missing from the list below is silently
+# DROPPED, and every omission fails toward the destructive default. `dry_run` is
+# the one that has already cost us: it was left off the augment route until
+# 2026-08-14, and for three days the admin-backend's "authoritative dry-run
+# probe" was a LIVE WRITE on every reroll. The five `expected_*` fields are the
+# same class of hazard: they carry the rate the player was SHOWN, and a dropped
+# one turns the writer's rate_changed guard into a trade filled at whatever
+# number the host happens to be quoting now.
+_REFINERY_OPS = ("catalog", "exchange")
+_REFINERY_TEMPLATE_RE = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
+# SAFETY bound, NOT the product ceiling. The rate table on the game host owns
+# the real per-request limit (max_batches_per_request, 50 today) and the portal
+# route refuses above whatever the catalog published. This number exists only so
+# a hand-built body cannot ask for a transaction of unbounded size, and it is
+# one full output stack: 500 dust is the most a single mint could ever land in
+# one slot, so nothing legitimate is above it and the owner can retune the real
+# ceiling anywhere below it without touching the relay.
+_REFINERY_SAFETY_MAX_BATCHES = 500
+
+
+def _dune_refinery_action(op: str, request_body: dict):
+    """Shared CATALOG/EXCHANGE relay path for the portal Ingot Refinery. Validates
+    the body, base64-encodes a compact JSON job, and hands it to the dispatcher's
+    refinery-op forced command over stdin. The refinery writer owns the ok/error
+    contract; its JSON is surfaced verbatim. Mirrors _dune_storage_action."""
+    body = request_body
+    if not isinstance(body, dict):
+        raise HTTPException(400, "request body must be a JSON object")
+    if op not in _REFINERY_OPS:
+        raise HTTPException(400, "unknown refinery op")
+
+    def _pos_int(name, maximum=None):
+        val = body.get(name)
+        if val is None:
+            raise HTTPException(400, f"{name} is required")
+        # isinstance(val, bool) FIRST, always: bool subclasses int in Python, so
+        # an int check alone accepts True/False for a numeric field.
+        if isinstance(val, bool) or not isinstance(val, int) or val <= 0:
+            raise HTTPException(400, f"{name} must be a positive integer")
+        if maximum is not None and val > maximum:
+            raise HTTPException(400, f"{name} must not exceed {maximum}")
+        return val
+
+    def _template(name):
+        val = body.get(name)
+        # fullmatch, not match: `$` also matches before a trailing newline, so
+        # .match would let "CopperBar\n" through into the base64 payload.
+        if not isinstance(val, str) or not _REFINERY_TEMPLATE_RE.fullmatch(val):
+            raise HTTPException(
+                400, f"{name} must be 2-64 chars of letters, digits, _ or -")
+        return val
+
+    fields = {
+        "op": op,
+        "owner_ctrl": _pos_int("owner_ctrl"),
+        "account_id": _pos_int("account_id"),
+    }
+
+    if op == "exchange":
+        fields["output_template"] = _template("output_template")
+        fields["batches"] = _pos_int("batches", _REFINERY_SAFETY_MAX_BATCHES)
+        fields["expected_input_template"] = _template("expected_input_template")
+        fields["expected_spice_template"] = _template("expected_spice_template")
+        fields["expected_input_per_batch"] = _pos_int("expected_input_per_batch")
+        fields["expected_spice_per_batch"] = _pos_int("expected_spice_per_batch")
+        fields["expected_output_per_batch"] = _pos_int("expected_output_per_batch")
+        # 🔴 Whole-table rate version. Subject to the same rule as dry_run above:
+        # this handler REBUILDS the request from this list, so leaving it out
+        # does not fail the guard loudly, it deletes the guard. A retune that
+        # moved only max_stack or the weekly cap would then apply to a page that
+        # had been open since before it.
+        # Same bound and charset as the writer's own validation, and as the
+        # route's. fullmatch, not match: `$` also matches before a trailing
+        # newline, and nothing here strips one.
+        rate_version = body.get("expected_rate_version")
+        if not isinstance(rate_version, str) or not re.fullmatch(
+                r"[A-Za-z0-9._-]{1,32}", rate_version):
+            raise HTTPException(
+                400, "expected_rate_version must be 1-32 chars of letters, "
+                     "digits, dot, underscore or hyphen")
+        fields["expected_rate_version"] = rate_version
+        idem = body.get("uuid")
+        # fullmatch for the same reason as _template above.
+        if not isinstance(idem, str) or not _GUILD_OP_UUID_RE.fullmatch(idem):
+            raise HTTPException(400, "uuid must be a UUID")
+        fields["uuid"] = idem
+
+    # 🔴 Read the comment above this function before touching this. Optional on
+    # purpose (a catalog read has nothing to rehearse), but when it is sent it
+    # MUST arrive: a dropped dry_run is a live write wearing a probe's name.
+    dry_run = body.get("dry_run")
+    if dry_run is not None:
+        if not isinstance(dry_run, bool):
+            raise HTTPException(400, "dry_run must be a boolean")
+        fields["dry_run"] = dry_run
+
+    payload = json.dumps(fields, separators=(",", ":"), sort_keys=True)
+    arg = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+    if not DUNE_GRANT_B64_RE.match(arg):
+        raise HTTPException(500, f"failed to encode refinery-{op} payload")
+
+    out, err, code = _dune_ssh_stdin("refinery-op", arg, timeout=45)
+    out = (out or "").strip()
+    err = (err or "").strip()
+    if out:
+        try:
+            parsed = json.loads(out)
+            if isinstance(parsed, dict):
+                parsed.setdefault("exit_code", code)
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    return {
+        "ok": False,
+        "error": "writer_no_output",
+        "exit_code": code,
+        "message": (err or out or f"refinery-{op} produced no output")[:1000],
+        "stderr": err[:2000],
+    }
+
+
+@app.post("/dune/refinery/catalog", dependencies=[Depends(verify_key)])
+async def dune_refinery_catalog(request: Request):
+    """READ: the Ingot Refinery rate table (scripts/refinery-rates.json on the game
+    host, the single rate authority) plus this character's ingot, melange and dust
+    holdings summed across bank, backpack and toolbar. Opens no write session.
+    Body = {op:"catalog", owner_ctrl:int, account_id:int}."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "request body must be JSON")
+    return _dune_refinery_action("catalog", body)
+
+
+@app.post("/dune/refinery/exchange", dependencies=[Depends(verify_key)])
+async def dune_refinery_exchange(request: Request):
+    """WRITE: consume `batches` lots of ingots plus Spice Melange from the selected
+    character's bank, backpack and toolbar (in that order) and mint the matching
+    spiced dust into the bank. OFFLINE-only: taking from an inventory the engine
+    holds in RAM is a duplication path, so the writer hard-gates on online_status
+    plus the reconnect grace under a row lock.
+
+    Body = {op:"exchange", owner_ctrl:int, account_id:int, output_template:str,
+    batches:int (1..50), expected_input_template:str, expected_spice_template:str,
+    expected_input_per_batch:int, expected_spice_per_batch:int,
+    expected_output_per_batch:int, uuid:str, dry_run?:bool}. The expected_* fields
+    carry the rate the player was shown; the writer refuses `rate_changed` rather
+    than filling at a rate nobody agreed to.
+
+    `uuid` is honoured in-transaction: a retry of an already-applied intent
+    replays the prior outcome and consumes NOTHING.
+
+    Kill switch: the writer refuses with refinery_disabled, without opening a DB
+    session, unless /etc/lastsietch/refinery-enabled exists. An explicit dry_run still
+    runs and rolls back while dark, which is what makes the deploy lane's dark
+    round trip a proof rather than a restatement of the refusal. The writer's
+    JSON is surfaced verbatim."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "request body must be JSON")
+    return _dune_refinery_action("exchange", body)
+
+
 def _dune_repair_action(action: str, request_body: dict):
     """Shared WRITE relay path for the portal Item Repair feature (box/gear/everything).
     Validates the body, base64-encodes a compact JSON job, and hands it to the
@@ -1835,124 +2116,6 @@ def _dune_repair_action(action: str, request_body: dict):
         "error": "writer_no_output",
         "exit_code": code,
         "message": (err or out or f"repair-{action} produced no output")[:1000],
-        "stderr": err[:2000],
-    }
-
-
-AUGMENT_ID_RE = re.compile(r"^T\d_Augment_[A-Za-z0-9_]{1,48}$")
-AUGMENT_IDEM_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
-
-
-@app.post("/dune/augment/apply", dependencies=[Depends(verify_key)])
-async def dune_augment_apply(request: Request):
-    """Per-item augment REROLL / SWAP write path. Replaces the item's whole
-    FAugmentedItemStats block from `augments` (the FULL resulting list, in slot
-    order) and redraws rolls only for the slots named in `reroll_only`; every
-    other slot keeps its exact current rolls AND grade. OFFLINE-only (item stats
-    are RAM-backed while online; the writer hard-gates).
-
-    Body = {owner_ctrl:int, item_id:int, augments:[str], grade?:int,
-    roll_mode?:"random"|"perfect", consume?:bool, preserve_grades?:bool,
-    reroll_only?:[str], idempotency_key?:str}.
-
-    🔴 owner_ctrl is resolved SERVER-SIDE by the admin-backend from the session.
-    It is never accepted from a browser: the writer trusts it completely to
-    resolve the pawn, ownership and the offline gate, so it IS the auth boundary.
-    The writer re-verifies offline + item ownership + augment ownership, and on a
-    swap consumes the incoming augment in the SAME transaction as the write.
-
-    `idempotency_key` is honoured in-transaction: a retry of an already-applied
-    intent replays the prior outcome and consumes NOTHING. Send one for anything
-    player-initiated -- a dropped response plus a retry would otherwise destroy a
-    second augment, of which only ~297 exist server-wide.
-
-    Kill-switch: the writer refuses with augment_disabled unless
-    LASTSIETCH_AUGMENT_ENABLED=1. The writer's JSON (incl. ok:false error tokens) is
-    surfaced verbatim."""
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(400, "request body must be JSON")
-    if not isinstance(body, dict):
-        raise HTTPException(400, "request body must be a JSON object")
-
-    def _pos_int(name):
-        val = body.get(name)
-        if isinstance(val, bool) or not isinstance(val, int) or val <= 0:
-            raise HTTPException(400, f"{name} must be a positive integer")
-        return val
-
-    def _aug_list(name, required):
-        raw = body.get(name)
-        if raw is None:
-            if required:
-                raise HTTPException(400, f"{name} is required")
-            return None
-        if not isinstance(raw, list) or not raw or len(raw) > 3:
-            raise HTTPException(400, f"{name} must be a 1-3 element array")
-        out = []
-        for a in raw:
-            if not isinstance(a, str) or not AUGMENT_ID_RE.match(a):
-                raise HTTPException(400, f"{name} entries must look like T6_Augment_Name")
-            out.append(a)
-        return out
-
-    fields = {
-        "owner_ctrl": _pos_int("owner_ctrl"),
-        "item_id": _pos_int("item_id"),
-        "augments": _aug_list("augments", True),
-    }
-
-    grade = body.get("grade")
-    if grade is not None:
-        if isinstance(grade, bool) or not isinstance(grade, int) or not 1 <= grade <= 5:
-            raise HTTPException(400, "grade must be an integer 1..5")
-        fields["grade"] = grade
-
-    roll_mode = body.get("roll_mode")
-    if roll_mode is not None:
-        if roll_mode not in ("random", "perfect"):
-            raise HTTPException(400, "roll_mode must be 'random' or 'perfect'")
-        fields["roll_mode"] = roll_mode
-
-    for flag in ("consume", "preserve_grades"):
-        val = body.get(flag)
-        if val is not None:
-            if not isinstance(val, bool):
-                raise HTTPException(400, f"{flag} must be a boolean")
-            fields[flag] = val
-
-    reroll_only = _aug_list("reroll_only", False)
-    if reroll_only is not None:
-        fields["reroll_only"] = reroll_only
-
-    idem = body.get("idempotency_key")
-    if idem is not None:
-        if not isinstance(idem, str) or not AUGMENT_IDEM_RE.match(idem):
-            raise HTTPException(400, "idempotency_key must be 8-64 chars of letters, digits, _ or -")
-        fields["idempotency_key"] = idem
-
-    payload = json.dumps(fields, separators=(",", ":"), sort_keys=True)
-    arg = base64.b64encode(payload.encode("utf-8")).decode("ascii")
-    if not DUNE_GRANT_B64_RE.match(arg):
-        raise HTTPException(500, "failed to encode augment-op payload")
-
-    out, err, code = _dune_ssh_stdin("augment-op", arg, timeout=45)
-    out = (out or "").strip()
-    err = (err or "").strip()
-    if out:
-        try:
-            parsed = json.loads(out)
-            if isinstance(parsed, dict):
-                parsed.setdefault("exit_code", code)
-                return parsed
-        except json.JSONDecodeError:
-            pass
-    return {
-        "ok": False,
-        "error": "writer_no_output",
-        "exit_code": code,
-        "message": (err or out or "augment-op produced no output")[:1000],
         "stderr": err[:2000],
     }
 
@@ -2017,10 +2180,28 @@ async def dune_repair_vehicle(request: Request):
     return _dune_repair_action("vehicle", body)
 
 
+@app.get("/dune/stats/reports", dependencies=[Depends(verify_key)])
+def dune_stats_report(period: str, window_start: int, window_end: int):
+    import base64
+    import time
+    span = window_end - window_start
+    if (period not in ("daily", "weekly") or window_start < 1 or window_end > time.time() + 1
+            or time.time() - window_end > 31 * 86400
+            or not (23 * 3600 <= span <= 25 * 3600 if period == "daily" else 167 * 3600 <= span <= 169 * 3600)):
+        raise HTTPException(400, "invalid report window")
+    job = {"period": period, "window_start": window_start, "window_end": window_end}
+    encoded = base64.b64encode(json.dumps(job, separators=(",", ":")).encode()).decode()
+    result = _dune_ssh_json("report-collect " + encoded, timeout=90)
+    if (not isinstance(result, dict) or result.get("schema") != 2 or result.get("period") != period
+            or result.get("window_start") != window_start or result.get("window_end") != window_end):
+        raise HTTPException(502, "report collector contract mismatch")
+    return result
+
+
 @app.get("/dune/stats/digest", dependencies=[Depends(verify_key)])
 def dune_stats_digest(period: str = "daily"):
     """Structured server-stats blob for the Cielago digest (Last Sietch).
-    period = 'daily' | 'weekly'. Read-only collector on the game host; Cielago
+    period = 'daily' | 'weekly'. Read-only collector on <game-host>; Cielago
     renders + posts the embed. Returns pure data, no Discord/branding."""
     if period not in ("daily", "weekly"):
         raise HTTPException(400, "period must be daily or weekly")
@@ -2030,7 +2211,9 @@ def dune_stats_digest(period: str = "daily"):
 @app.get("/dune/players/positions", dependencies=[Depends(verify_key)])
 def dune_players_positions():
     """Online player coordinates on Hagga Basin from dune.actors. Read-only.
-    PII-safe: coordinates only, no names or account ids."""
+    Raw pass-through: since 2026-09-04 each point also carries `a` (account id)
+    and `n` (character name) for the admin Live Map; the PUBLIC projection in
+    admin-backend routers/dune.py strips them and drops partition 33."""
     try:
         return _dune_ssh_json("positions", timeout=60)
     except HTTPException as e:
@@ -2501,7 +2684,7 @@ def dune_progression_levelups(limit: int = 100):
 # These two routes back the Dune progression-grant tool. They reach <game-host>
 # through the same forced-command dispatcher; the dispatcher maps "grant-players"
 # and "grant <b64>" to /root/dune-grant.sh, which does its own kubectl exec.
-# The SSH key on the game host is widened from read-only to write for this — the
+# The SSH key on <game-host> is widened from read-only to write for this — the
 # dispatcher's base64-only arg allowlist is the airtight boundary.
 
 # Grant payload base64 alphabet — the ONLY characters the relay forwards. The
@@ -2542,7 +2725,7 @@ def dune_grant_recent(limit: int = 20):
 
 @app.get("/dune/preset/list", dependencies=[Depends(verify_key)])
 def dune_preset_list():
-    """VC3 — Read lsadmin.grant_presets. Backs the Workbench preset
+    """VC3 — Read holadmin.grant_presets. Backs the Workbench preset
     chooser. ttl-cached at admin-backend so the relay call rate is low."""
     try:
         return _dune_ssh_json("preset-list", timeout=15)
@@ -2564,6 +2747,23 @@ def dune_player_recent_grants(account_id: int, limit: int = 10):
         return _dune_ssh_json(f"grant-recent-by-player {account_id} {limit}", timeout=20)
     except HTTPException as e:
         return {"available": False, "error": e.detail, "account_id": account_id, "grants": []}
+
+
+@app.get("/dune/player/{account_id}/deliveries", dependencies=[Depends(verify_key)])
+def dune_player_deliveries(account_id: int):
+    """Fremkit wave 12: the Welcome and Return packages the server sent one
+    account, with where each part landed and what is still owed. Read-only.
+
+    A failure degrades to available:false with the same empty shape rather than
+    a 502, because the portal card seals on available:false and an exception
+    here would seal the whole Home read instead of one panel."""
+    if not isinstance(account_id, int) or account_id < 1:
+        raise HTTPException(400, "account_id must be a positive integer")
+    try:
+        return _dune_ssh_json(f"deliveries-by-player {account_id}", timeout=20)
+    except HTTPException as e:
+        return {"available": False, "error": e.detail, "account_id": account_id,
+                "welcome": None, "welcome_skip": None, "returns": []}
 
 
 class GrantPostprocessRequest(BaseModel):
@@ -2634,7 +2834,7 @@ async def dune_bb_detail(backup_id: int):
 
 @app.post("/dune/grant", dependencies=[Depends(verify_key)])
 async def dune_grant(request: Request):
-    """Execute one progression grant via /root/dune-grant.sh on the game host.
+    """Execute one progression grant via /root/dune-grant.sh on <game-host>.
 
     The admin-backend posts a JSON grant body. The relay base64-encodes the
     compact JSON into a single token (no whitespace, no shell metacharacters)
@@ -2696,7 +2896,7 @@ async def dune_grant(request: Request):
 @app.post("/dune/chat/send", dependencies=[Depends(verify_key)])
 async def dune_chat_send(request: Request):
     """Send one in-game chat message as the Cielago herald via
-    /opt/lastsietch-rmq-bridge/dune-chat-send.py on the game host.
+    /opt/lastsietch-rmq-bridge/dune-chat-send.py on <game-host>.
 
     The admin-backend posts {scope, message, mode, recipient?, map?, dim?}. Same
     base64-token + stdin path as /dune/grant: the compact JSON is base64-encoded
@@ -2735,10 +2935,54 @@ async def dune_chat_send(request: Request):
     }
 
 
+@app.post('/dune/auth/whisper', dependencies=[Depends(verify_key)])
+async def dune_auth_whisper(request: Request):
+    try:
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw) > 4096:
+                raise ValueError()
+        body = json.loads(raw)
+        op = body.get('op')
+        if op == 'lookup':
+            name = body.get('character')
+            if not isinstance(name, str) or not 1 <= len(name) <= 80:
+                raise ValueError()
+            job = {'op': op, 'character': name}
+        elif op in ('send', 'check'):
+            aid = body.get('account_id')
+            if type(aid) is not int or not 0 < aid < 2**63:
+                raise ValueError()
+            job = {'op': op, 'account_id': aid}
+            if op == 'send':
+                code = body.get('code')
+                if not isinstance(code, str) or re.fullmatch('[0-9]{6}', code) is None:
+                    raise ValueError()
+                job['code'] = code
+        else:
+            raise ValueError()
+        from starlette.concurrency import run_in_threadpool
+        payload = base64.b64encode(json.dumps(job, separators=(',', ':')).encode()).decode()
+        out, _err, status = await run_in_threadpool(_dune_ssh_stdin, 'auth-whisper', payload, timeout=65)
+        parsed = json.loads(out) if status == 0 and len(out) <= 4096 else None
+        if not isinstance(parsed, dict) or parsed.get('ok') is not True:
+            raise ValueError()
+        if op == 'lookup':
+            return {'ok': True, 'account_id': parsed['account_id'], 'character_name': parsed['character_name']}
+        if op == 'send' and parsed.get('sent') is True:
+            return {'ok': True, 'sent': True}
+        if op == 'check' and parsed.get('private_queue_verified') is True and parsed.get('sent') is False:
+            return {'ok': True, 'private_queue_verified': True, 'sent': False}
+        raise ValueError()
+    except Exception:
+        return {'ok': False, 'error': 'game_verification_unavailable'}
+
+
 @app.post("/dune/broadcast/send", dependencies=[Depends(verify_key)])
 async def dune_broadcast_send(request: Request):
     """Publish one in-game ServiceBroadcast (Generic system banner) to every
-    connected player via /opt/lastsietch-rmq-bridge/dune-broadcast-send.py on the game host.
+    connected player via /opt/lastsietch-rmq-bridge/dune-broadcast-send.py on <game-host>.
 
     The admin-backend posts {title, message, duration, mode}. Same base64-token +
     stdin path as /dune/chat/send: the compact JSON is base64-encoded (no
@@ -2868,7 +3112,7 @@ def dune_player_kick(account_id: str):
 
 @app.post("/dune/player/{account_id}/ban", dependencies=[Depends(verify_key)])
 async def dune_player_ban(account_id: str, request: Request):
-    """Insert/activate a lsadmin.bans row keyed by fls_id, then publish one
+    """Insert/activate a holadmin.bans row keyed by fls_id, then publish one
     KickPlayer to disconnect now. A 30s systemd timer re-kicks any banned
     account that reconnects until `expires_at` or `active=false`.
 
@@ -2916,7 +3160,7 @@ async def dune_player_ban(account_id: str, request: Request):
 
 @app.post("/dune/player/{account_id}/unban", dependencies=[Depends(verify_key)])
 async def dune_player_unban(account_id: str, request: Request):
-    """Set `active=false` on the matching lsadmin.bans row; the watcher stops
+    """Set `active=false` on the matching holadmin.bans row; the watcher stops
     re-kicking next tick. Body: {account_id, fls_id, unban_reason,
     unbanned_by, idempotency_key}. Dispatcher case `unban <account_id>` with
     the base64-encoded JSON payload on stdin (same wire shape as `ban` for
@@ -2960,7 +3204,7 @@ async def dune_player_unban(account_id: str, request: Request):
 
 @app.get("/dune/bans", dependencies=[Depends(verify_key)])
 def dune_bans_list():
-    """Active bans from lsadmin.bans (active=true, not expired). Admin-gated."""
+    """Active bans from holadmin.bans (active=true, not expired). Admin-gated."""
     try:
         return _dune_ssh_json("bans-list", timeout=30)
     except HTTPException as e:
@@ -3045,11 +3289,11 @@ async def server_cvars_write(request: Request):
 
 @app.get("/server/cvars/history", dependencies=[Depends(verify_key)])
 def server_cvars_history(limit: int = 50, offset: int = 0):
-    """Paginated lsadmin.cvar_changes read. Clamped to limit∈[1..200],
+    """Paginated holadmin.cvar_changes read. Clamped to limit∈[1..200],
     offset∈[0..100000]. Returns `{rows: [...], total: int, limit, offset}`.
 
     Uses _dune_ssh (not _dune_ssh_json) so a SQL-level failure (e.g. the
-    lsadmin schema not yet migrated) surfaces the helper's JSON error
+    holadmin schema not yet migrated) surfaces the helper's JSON error
     envelope to the admin-backend instead of a generic 502."""
     if not isinstance(limit, int) or limit < 1:
         limit = 1
@@ -3242,7 +3486,7 @@ def rmq_travel_queue():
                 "depth": 0, "by_destination": {}}
 
 
-# Telemetry proxies — direct passthrough to http://127.0.0.1:8078 on the game host
+# Telemetry proxies — direct passthrough to http://127.0.0.1:8078 on <game-host>
 # via the curl-based dispatcher tokens. Same shape as RMQ helpers but the
 # helper is `curl ...` not a python script.
 
@@ -3253,15 +3497,25 @@ _TELEM_WINDOW_RE = re.compile(r"^[0-9]{1,3}[hdwHDW]$")
 
 
 @app.get("/dune/telemetry/events", dependencies=[Depends(verify_key)])
-def telemetry_events(limit: int = 50):
+def telemetry_events(limit: int = 50, type: int | None = None,
+                     partition: int | None = None):
     """Recent telemetry events (combat / etc.). Wraps dispatcher token
-    `telemetry-events`. Limit clamped 1..9999 to match dispatcher regex."""
+    `telemetry-events`. Limit clamped 1..9999 to match dispatcher regex.
+    Optional type/partition (0..999) narrow the read (Amtal ledger evidence)."""
     if not isinstance(limit, int) or limit < 1:
         limit = 1
     if limit > 9999:
         limit = 9999
+    for name, val in (("type", type), ("partition", partition)):
+        if val is not None and not 0 <= val <= 999:
+            raise HTTPException(400, f"{name} must be 0..999")
+    filters = ""
+    if type is not None:
+        filters += f" --type {type}"
+    if partition is not None:
+        filters += f" --partition {partition}"
     try:
-        return _dune_ssh_json(f"telemetry-events {limit}", timeout=5)
+        return _dune_ssh_json(f"telemetry-events {limit}{filters}", timeout=5)
     except HTTPException as e:
         return {"available": False, "error": e.detail, "events": []}
 
@@ -3315,3 +3569,68 @@ def telemetry_leaderboard(board: str, week: str = "current"):
                 "week": week, "leaderboard": []}
 
 
+@app.get("/dune/telemetry/amtal-pvp", dependencies=[Depends(verify_key)])
+def telemetry_amtal_pvp():
+    """Amtal PvP board + kill streaks. Wraps dispatcher token `telemetry-amtal-pvp`.
+    Returns the telemetry payload as-is, account ids included; the public portal
+    route strips them."""
+    try:
+        return _dune_ssh_json("telemetry-amtal-pvp", timeout=5)
+    except HTTPException as e:
+        return {"available": False, "error": e.detail}
+
+
+# --- Game-host feature flags (admin wave 2) -----------------------------------
+#
+# The files under /etc/lastsietch are what the game-side WRITERS read, so these two
+# routes are the switch that actually darks or lights a live player feature. The
+# name and the state are validated HERE, before any SSH argument is built: the
+# dispatcher and /root/dune-flag-set.sh each re-validate, but a bad value must
+# never become part of a remote command line in the first place.
+#
+# servercmd-enabled is in the allowlist on purpose. Turning it off darks the
+# admin panel's own live actions rather than a player feature; ssh remains the
+# way back in.
+
+DUNE_FLAG_NAMES = (
+    "karum-enabled",
+    "karum-wtb-enabled",
+    "augment-enabled",
+    "reward-enabled",
+    "servercmd-enabled",
+    "market-sell-container-enabled",
+    "storage-pawn-move-enabled",
+    "market-sell-backpack-enabled",
+    "item-transfer-enabled",
+    "landsraad-claim-enabled",
+    "refinery-enabled",
+)
+
+
+class DuneFlagSetRequest(BaseModel):
+    state: str
+
+
+@app.get("/dune/flags", dependencies=[Depends(verify_key)])
+def dune_flags():
+    """READ-ONLY: the on/off state of every allowlisted game-host kill switch,
+    from a fresh `test -f` on the box. Safe under a change freeze."""
+    return _dune_ssh_json("flag-list", timeout=30)
+
+
+@app.post("/dune/flags/{name}", dependencies=[Depends(verify_key)])
+def dune_flag_set(name: str, req: DuneFlagSetRequest):
+    """WRITE: create or remove ONE kill-switch file under /etc/lastsietch.
+
+    _claim_op, not _dune_ssh_json: the helper exits non-zero for a refusal and
+    for a write that did not verify, and both carry structured JSON the caller
+    needs to read. Flattening those into a 502 detail string is how "this flag is
+    not in the allowlist" reached the panel as a server error.
+
+    Nothing here restarts a game pod, the BattleGroup Director or k3s."""
+    if name not in DUNE_FLAG_NAMES:
+        raise HTTPException(400, "unknown flag")
+    state = (req.state or "").strip().lower()
+    if state not in ("on", "off"):
+        raise HTTPException(400, "state must be on or off")
+    return _claim_op(f"flag-set {name}:{state}", timeout=30)

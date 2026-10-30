@@ -20,7 +20,7 @@ before wiring any of them to a button.
 
 ## What is here
 
-106 routes: 99 under `/dune`, 6 under `/server`, 1 health check.
+117 routes: 110 under `/dune`, 6 under `/server`, 1 health check.
 
 This is the Dune-only relay. Our production one also carries Conan Exiles,
 Enshrouded, and some hypervisor and storage management, which are not in scope for
@@ -32,7 +32,8 @@ prefix boundary, with only the shared auth dependency crossing it.
 | Variable | Meaning |
 |---|---|
 | `DUNE_SSH_HOST` | Game host address. **Required, no default**, so a misconfigured relay fails loudly rather than reaching somewhere unexpected |
-| `RELAY_API_KEY` | Shared secret required on every request as `X-API-Key` |
+| `LASTSIETCH_RELAY_API_KEY` | Shared secret required on every request as `X-API-Key` |
+| `RELAY_ALLOWED_ORIGINS` | Comma-separated CORS origins; empty allows none |
 
 Bind to localhost and reverse-proxy to it. Do not expose it directly.
 
@@ -50,7 +51,7 @@ real authentication in front of it.
 
 ```bash
 pip install -r requirements.txt
-DUNE_SSH_HOST=<your-game-host> RELAY_API_KEY=<secret> \
+DUNE_SSH_HOST=<your-game-host> LASTSIETCH_RELAY_API_KEY=<secret> \
   uvicorn app:app --host 127.0.0.1 --port 8077
 ```
 

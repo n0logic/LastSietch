@@ -176,10 +176,15 @@ def native_origin(data):
     (backup 112 was parked on Hagga with a Deep Desert origin)."""
     totem = data['tables']['totems'][0]
     point = totem.get('landclaim_original_global_location')
-    if not isinstance(point, list) or len(point) != 3:
+    # A null or non-numeric element means no usable origin, never a failed capture.
+    if (not isinstance(point, list) or len(point) != 3
+            or any(value is None or isinstance(value, (bool, str)) for value in point)):
         point = None
     else:
-        point = [float(value) for value in point]
+        try:
+            point = [float(value) for value in point]
+        except (TypeError, ValueError):
+            point = None
     return {'totem_id': data['root_totem_id'], 'claim_origin': point}
 
 
@@ -190,7 +195,12 @@ def validate_array_bounds(data, columns):
     if not isinstance(bounds, dict) or set(bounds) != {table for table, _, _ in columns}:
         raise ValueError('array bounds missing')
     for table, keys, column in columns:
-        expected = {':'.join(str(row[key]) for key in keys) for row in data['tables'][table] if row.get(column) not in (None, [])}
+        keyed = [':'.join(str(row[key]) for key in keys) for row in data['tables'][table] if row.get(column) not in (None, [])]
+        expected = set(keyed)
+        # The capture aggregates bounds by key, so a key shared by two rows keeps only one
+        # bound and a restore would apply it to both. Refuse rather than restore it silently.
+        if len(keyed) != len(expected):
+            raise ValueError('array bounds key is not unique')
         if (not isinstance(bounds[table], dict) or set(bounds[table]) != expected
                 or any(type(v) is not int for v in bounds[table].values())):
             raise ValueError('array bounds do not cover the captured rows')

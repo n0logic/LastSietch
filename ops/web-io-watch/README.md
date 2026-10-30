@@ -9,7 +9,7 @@ shows CPU and memory, and neither moved; the kernel's IO pressure gauge was at ~
 - A bad minute is `/proc/pressure/io` full avg60 >= 30% OR the local lastsietch-admin check
   (`http://127.0.0.1:8078/api/dune/rules`) not answering 200 within 10 s. Three bad minutes in a row -> one
   alert naming the trigger ("disk stall" / "portal not answering"); the first good minute after that -> one
-  recovery note with the duration. Posts via `karum-notify-local.sh` (#server-logs + owner DM).
+  recovery note with the duration. Posts via `karum-notify-local.sh` (staff log channel + owner DM).
 - State in `/var/lib/lastsietch-io-watch/` (`streak`, `alerted`). Thresholds via env: FULL_PCT, PORTAL_SLOW_S, BAD_MIN.
 - Limit: it runs on the box it watches, so during a hard stall the alert lands when the stall eases or
   persists, not at its first second.

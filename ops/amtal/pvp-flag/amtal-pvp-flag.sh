@@ -13,7 +13,25 @@
 # Kill switch: touch /etc/lastsietch/amtal-pvp-flag-disabled
 set -u
 NS=${LASTSIETCH_GAME_NAMESPACE:?set LASTSIETCH_GAME_NAMESPACE}
-POD=${LASTSIETCH_GAME_BATTLEGROUP:?set LASTSIETCH_GAME_BATTLEGROUP}-sg-survival-1-pod-33
+# Partition and pod suffix of one map instance, from the map-instance config (LASTSIETCH_MAP_INSTANCES_FILE); prints
+# the defaults passed in when the file is absent or the entry is unusable.
+instance_target() {
+  python3 -c '
+import json, re, sys
+path, key, part, pod = sys.argv[1:5]
+try:
+    for row in json.load(open(path))["instances"]:
+        if row.get("key") == key:
+            p, s = row.get("partition"), row.get("pod")
+            if type(p) is int and 0 <= p <= 9999 and isinstance(s, str) and re.fullmatch(r"-[a-z0-9-]{1,63}", s):
+                part, pod = p, s
+            break
+except Exception:
+    pass
+print(part, pod)' "${LASTSIETCH_MAP_INSTANCES_FILE:-/etc/lastsietch/map-instances.json}" "$1" "$2" "$3" 2>/dev/null || echo "$2 $3"
+}
+read -r PARTITION POD_SUFFIX <<< "$(instance_target "${LASTSIETCH_MAP_INSTANCE_KEY:-amtal}" 33 -sg-survival-1-pod-33)"
+POD=${NS#funcom-seabass-}$POD_SUFFIX
 STATE_DIR=/var/lib/lastsietch-amtal-pvp-flag
 SEND=/root/dune-service-broadcast.py
 ENV_FILE=/opt/lastsietch-pod-watcher/.discord.env
@@ -30,7 +48,7 @@ post_discord() {
     "https://discord.com/api/v10/channels/${DISCORD_CH_BOT_LOGS}/messages" >/dev/null || true
 }
 
-sid=$(/root/dq.sh -At -c "select f.server_id from dune.farm_state f join dune.world_partition w on w.server_id = f.server_id where w.partition_id = 33;" 2>/dev/null | head -1)
+sid=$(/root/dq.sh -At -c "select f.server_id from dune.farm_state f join dune.world_partition w on w.server_id = f.server_id where w.partition_id = $PARTITION;" 2>/dev/null | head -1)
 [ -n "$sid" ] || exit 0
 [ "$(cat "$STATE_DIR/applied" 2>/dev/null)" = "$sid" ] && exit 0
 [ "$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null)" = "true" ] || exit 0

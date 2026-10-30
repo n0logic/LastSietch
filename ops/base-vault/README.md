@@ -72,7 +72,7 @@ this vault. Never prune Medic's existing protected archive.
 ## Operator workflow after deployment approval and coordination
 
 1. Read the latest resume and receipt. Verify the exact totem, owner and current
-   map through read-only queries. Announce the deployment in private mod-ops.
+   map through read-only queries. Announce the deployment in the private mod channel.
 2. Install the exact reviewed code into a new, root-owned versioned directory.
    Verify deployed hashes. Do not overwrite an existing release or old evidence.
 3. Capture on `<game-host>` into a new root-only file with a restrictive umask:
@@ -168,7 +168,7 @@ and never described as an in-game restore.
 
 ### Deploy the admin integration
 
-Announce in private mod-ops and verify the current executed paths first. Install
+Announce in the private mod channel and verify the current executed paths first. Install
 the reviewed source into a new root-owned 0700 versioned directory on both
 hosts, preserving existing `/opt/lastsietch-base-vault/27828e4e` and all archives.
 The directory must contain `vault.py`, `export-base.py`, `admin-helper.py` and

@@ -22,7 +22,7 @@
 #              refreshed on every poll so we don't re-alert on metadata churn.
 #
 # State: /var/lib/lastsietch/dune-app-<appid>.json (full snapshot)
-# Posts to #lastsietch-bot-logs (DISCORD_CH_BOTLOGS).
+# Posts to the staff log channel (DISCORD_CH_BOTLOGS).
 
 set -uo pipefail
 source /opt/lastsietch/.env

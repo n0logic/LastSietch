@@ -24,8 +24,30 @@ import json, os, random, re, subprocess
 from datetime import datetime, timezone
 
 NS = os.environ.get("LASTSIETCH_GAME_NAMESPACE", "")
-POD = os.environ.get("LASTSIETCH_GAME_BATTLEGROUP", "") + "-sg-survival-1-pod-33"
-AMTAL = 33
+# Partition and pod come from the map-instance config (LASTSIETCH_MAP_INSTANCES_FILE, entry LASTSIETCH_MAP_INSTANCE_KEY,
+# default "amtal"); without the file, or on any problem reading it, the defaults below.
+MAP_INSTANCES = os.environ.get("LASTSIETCH_MAP_INSTANCES_FILE", "/etc/lastsietch/map-instances.json")
+INSTANCE_KEY = os.environ.get("LASTSIETCH_MAP_INSTANCE_KEY", "amtal")
+INSTANCE_DEFAULT = (33, "-sg-survival-1-pod-33")
+
+
+def instance_target(key, default, path=None):
+    try:
+        with open(path or MAP_INSTANCES) as fh:
+            rows = json.load(fh)["instances"]
+        for row in rows:
+            if row.get("key") == key:
+                part, pod = row.get("partition"), row.get("pod")
+                if type(part) is int and 0 <= part <= 9999 and isinstance(pod, str) and re.fullmatch(r"-[a-z0-9-]{1,63}", pod):
+                    return part, pod
+                return default
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return default
+
+
+AMTAL, POD_SUFFIX = instance_target(INSTANCE_KEY, INSTANCE_DEFAULT)
+POD = os.environ.get("LASTSIETCH_GAME_BATTLEGROUP", "") + POD_SUFFIX
 STATE = "/var/lib/lastsietch-amtal-arrival/state.json"
 LIVE_FLAG = "/etc/lastsietch/amtal-arrival-live"
 KILL = "/etc/lastsietch/amtal-arrival-disabled"

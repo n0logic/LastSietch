@@ -136,7 +136,7 @@ def sh(argv, timeout=120, input_text=None):
 
 
 def alert(text):
-    """One line to bot-logs (the pod watcher's credentials), never a mention."""
+    """One line to the staff log channel (the pod watcher's credentials), never a mention."""
     env = {}
     try:
         for line in open(ALERT_ENV):

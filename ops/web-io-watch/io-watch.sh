@@ -7,7 +7,7 @@
 #
 # WHAT: reads /proc/pressure/io ("full avg60": the share of the last minute in which every runnable task was
 # blocked on IO) and times one local portal request. BAD_MIN consecutive bad minutes -> one alert; the first
-# good minute after an alert -> one recovery note. Notifies via karum-notify-local.sh (#server-logs + owner DM).
+# good minute after an alert -> one recovery note. Notifies via karum-notify-local.sh (staff log channel + owner DM).
 #
 # LIMIT: it runs on the box it watches. During a hard stall this timer is delayed too, so the alert lands when
 # the stall eases or persists, not at its first second. The recovery note carries how long it lasted.

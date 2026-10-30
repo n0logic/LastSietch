@@ -1,5 +1,5 @@
 # Mode B production SQL (scratch): the lab-verified restore transaction, with the lab-only guard
-# swapped for a live-DB guard. Owner GO: Medic 2026-10-28T00:52Z (Discord mod-ops).
+# swapped for a live-DB guard.
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location('restore', '/opt/lastsietch-base-vault/current/restore.py')
 r = importlib.util.module_from_spec(spec); spec.loader.exec_module(r)

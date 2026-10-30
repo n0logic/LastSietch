@@ -10,7 +10,7 @@ TownNoClimb row).
 
 `amtal-pvp-flag.sh` runs every minute (`lastsietch-amtal-pvp-flag.timer`). When Amtal's server_id changes and the new
 container has logged "Server farm is READY", it sends the set to that server_id only, reads it back, and posts
-to the bot-logs channel. Kill switch: `touch /etc/lastsietch/amtal-pvp-flag-disabled`.
+to the staff log channel. Kill switch: `touch /etc/lastsietch/amtal-pvp-flag-disabled`.
 
 Install (<game-host>, root):
 ```

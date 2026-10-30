@@ -39,7 +39,7 @@ fi
 mkdir -p "$WORKDIR"
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }
 
-dm_owner() {  # dm_owner <body> -> owner DM + #server-logs mirror (shared notifier)
+dm_owner() {  # dm_owner <body> -> owner DM + staff log channel mirror (shared notifier)
   [ "$DM_ENABLE" = "1" ] || { log "DM disabled; would send: $1"; return 0; }
   CIELAGO_SSH_HOST="$DM_SSH_HOST" CIELAGO_ENV="$CIELAGO_ENV" CIELAGO_VENV_PY="$CIELAGO_VENV_PY" \
     CIELAGO_OWNER_ID="$OWNER_ID" "${CIELAGO_NOTIFY:-$HOME/bin/cielago-notify.sh}" "$1" \

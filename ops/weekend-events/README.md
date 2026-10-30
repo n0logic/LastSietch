@@ -34,7 +34,7 @@ never touching `updated_at` (the Discord sync revision):
 - `armed` -> `running`: the worker read the value back on **every** target pod. Zero pods is a failure. A short
   readback puts the cvars back to baseline and the effect is `failed` with the count and the missing pods.
 - `armed` -> `missed`: the window closed before a start ran, or a restart effect would start more than 60 min late.
-  A live effect that starts late catches up, and the lateness is written to `effect_error` and posted to bot-logs.
+  A live effect that starts late catches up, and the lateness is written to `effect_error` and posted to the staff log channel.
 - `running` -> `done`: the end read back the baseline on every pod. Unpublishing or cancelling a running event ends it
   at once (its effect, map and window are frozen while it runs or starts).
 - anything -> `failed`: refused on <game-host>, no result within 15 min (live) or 90 min (restart), a lost job, or a
@@ -69,7 +69,7 @@ mentions). Restart effects keep their own T-10 / T-1 broadcasts on <game-host> a
   sending, so a crash mid-send loses a notice rather than repeating it (a duplicate public post is worse than a gap the
   alert makes visible). The file holds `in-game ok|failed ...` and `discord ok|failed ...` afterwards.
 - **Failures never touch the effect:** the row is already `running` when notices go out. A failed or raising send is
-  written to the claim file, logged and posted to bot-logs ("start notice ... FAILED, the effect is running"). It is
+  written to the claim file, logged and posted to the staff log channel ("start notice ... FAILED, the effect is running"). It is
   not retried: send it by hand (`post.sh`) if it matters.
 - **Why a file, not a column:** a new `portal_events` column needs the admin deploy and a lastsietch-admin restart; the claim
   file is runner-local state on the host that sends. Moving it to admin.db is a G3-full item (admin "send now").
@@ -92,7 +92,7 @@ mentions). Restart effects keep their own T-10 / T-1 broadcasts on <game-host> a
    notice sender named in `NOTICE_SEND` is not there). Alert channel:
    `/opt/lastsietch-event-effects/.alert.env` (mode 600) with `DISCORD_BOT_TOKEN=` and `DISCORD_CH_BOT_LOGS=`; without it
    alerts go to `/var/log/lastsietch-event-effects.log` only. Configured on <web-host> since 2026-10-30: mode 600, owner
-   root, Cielago's bot token, `DISCORD_CH_BOT_LOGS=<channel-id>` (`⚙️ server-logs`, ADMIN category).
+   root, Cielago's bot token, `DISCORD_CH_BOT_LOGS=<channel-id>` (the staff log channel).
    Do not use Cielago's `CIELAGO_SERVICE_ALERTS_CHANNEL_ID` for this: it is the PUBLIC #server-info. 
 4. Go live (owner): `touch /etc/lastsietch/event-effects-enabled` on <game-host>, then on <web-host>. Watch the timers by
    `LastTriggerUSec` advancing, never by `is-active`.

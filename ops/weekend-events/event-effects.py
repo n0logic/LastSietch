@@ -37,7 +37,7 @@ description. Once per event start: only the tick whose compare-and-set moved the
 row to running sends, after claiming /var/lib/lastsietch-event-effects/<id>.<start>.notice
 with O_EXCL. The claim comes first, so a crash mid-send loses a notice rather
 than repeating it, and a re-armed event with the same start never re-announces.
-A notice failure is logged, written to the claim file and posted to bot-logs; it
+A notice failure is logged, written to the claim file and posted to the staff log channel; it
 never touches the effect. Dark until /etc/lastsietch/event-effects-notices-enabled.
 """
 import base64

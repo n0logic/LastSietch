@@ -35,9 +35,29 @@ DISABLE_FLAG=/opt/lastsietch-amtal-arrival-whisper/DISABLED
 # delivery without redeploying; the DISABLE_FLAG file stops it without a
 # daemon-reload. Either one is enough.
 AMTAL_WHISPER_ENABLED="${AMTAL_WHISPER_ENABLED:-1}"
-# Partition to watch. Overridable so a dry run can be smoke-tested against a
-# populated partition without whispering anyone on Amtal.
-AMTAL_PARTITION="${AMTAL_PARTITION:-33}"
+# Partition and pod suffix of one map instance, from the map-instance config (LASTSIETCH_MAP_INSTANCES_FILE); prints
+# the defaults passed in when the file is absent or the entry is unusable.
+instance_target() {
+  python3 -c '
+import json, re, sys
+path, key, part, pod = sys.argv[1:5]
+try:
+    for row in json.load(open(path))["instances"]:
+        if row.get("key") == key:
+            p, s = row.get("partition"), row.get("pod")
+            if type(p) is int and 0 <= p <= 9999 and isinstance(s, str) and re.fullmatch(r"-[a-z0-9-]{1,63}", s):
+                part, pod = p, s
+            break
+except Exception:
+    pass
+print(part, pod)' "${LASTSIETCH_MAP_INSTANCES_FILE:-/etc/lastsietch/map-instances.json}" "$1" "$2" "$3" 2>/dev/null || echo "$2 $3"
+}
+# Partition to watch: the map-instance config's entry (LASTSIETCH_MAP_INSTANCE_KEY, default amtal). AMTAL_PARTITION
+# still overrides it so a dry run can be smoke-tested against a populated partition without whispering anyone
+# on Amtal.
+if [[ -z "${AMTAL_PARTITION:-}" ]]; then
+  read -r AMTAL_PARTITION _ <<< "$(instance_target "${LASTSIETCH_MAP_INSTANCE_KEY:-amtal}" 33 -sg-survival-1-pod-33)"
+fi
 DRY_RUN=0
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
 

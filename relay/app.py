@@ -172,11 +172,10 @@ def dune_bases_near(map_name: str, dim: int, x: float, y: float, limit: int = 5)
     Stored backups are excluded: they keep a world transform but are not on the
     ground. Read-only. Same PII rule as /dune/bases.
 
-    `dim` is required and has no default. Hagga runs two sietches over one
-    coordinate space (0 = Habbanya PvE, 2 = Amtal PvP; 1 was Kulon until
-    2026-10-28), so a lookup that does
-    not pin the dimension ranks the other world's bases against the clicked
-    point and names the wrong owner."""
+    `dim` is required and has no default. Hagga runs several sietches over one
+    coordinate space, one dimension each (the map instance config), so a lookup
+    that does not pin the dimension ranks the other world's bases against the
+    clicked point and names the wrong owner."""
     if not re.fullmatch(r"[A-Za-z0-9_]{1,40}", map_name or ""):
         raise HTTPException(400, "map_name must be alphanumeric")
     if not 0 <= dim <= 99:
@@ -2213,7 +2212,7 @@ def dune_players_positions():
     """Online player coordinates on Hagga Basin from dune.actors. Read-only.
     Raw pass-through: since 2026-09-04 each point also carries `a` (account id)
     and `n` (character name) for the admin Live Map; the PUBLIC projection in
-    admin-backend routers/dune.py strips them and drops partition 33."""
+    admin-backend routers/dune.py strips them and drops untracked partitions."""
     try:
         return _dune_ssh_json("positions", timeout=60)
     except HTTPException as e:

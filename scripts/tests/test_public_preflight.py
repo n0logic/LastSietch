@@ -80,6 +80,43 @@ class PublicationTests(unittest.TestCase):
         self.assertFalse(gate.inspect('.env.example', b'TOKEN=<configure locally>', []))
         self.assertTrue(gate.inspect('docs/img/picture.png', b'\x89PNG\0fixture', []))
 
+    def test_dotted_env_files_block_and_templates_pass(self):
+        for name in ('.alert.env', 'ops/.discord.env', 'cluster/k3s.env', 'ops/window.env', 'deploy/app.env.local',
+                     '.env.prod'):
+            self.assertTrue(gate.inspect(name, b'fixture', []), name)
+        for name in ('.env.example', 'deploy/telemetry.env.example', 'ops/app.env.sample', 'docs/environment.md',
+                     '.envrc.md'):
+            self.assertFalse(gate.inspect(name, b'fixture', []), name)
+
+    def test_disk_images_and_binary_stubs_block_by_name(self):
+        for name in ('vm/test-box.qcow2', 'boot.img', 'disk.VMDK', 'ops/stub.bin'):
+            self.assertTrue(gate.inspect(name, b'text fixture', []), name)
+
+    def test_credential_named_files_block(self):
+        for name in ('ops/admin-password/README.md', 'ops/admin-password', 'reset-password.py', 'PASSWORDS.txt',
+                     'rclone.conf', 'home/.netrc'):
+            self.assertTrue(gate.inspect(name, b'fixture', []), name)
+        for name in ('admin-backend/templates/change_password.html', 'docs/passkeys.md'):
+            self.assertFalse(gate.inspect(name, b'fixture', []), name)
+
+    def test_relative_address_vocabulary_is_native_detail(self):
+        value = 'patch at R' + 'VA of the handler'
+        self.assertTrue(gate.inspect('notes.md', value.encode(), []))
+        for value in ('rva', 'Canvas', 'nirvana', 'RVAL'):
+            self.assertFalse(gate.inspect('notes.md', value.encode(), []), value)
+
+    def test_broadcast_tool_retired_mode_blocks(self):
+        name = 'scripts/dune-service-broadcast.py'
+        builder = 'def build_cheat' + '_script_inner(fls_id, script_name):'
+        payload = '        "ServerCommand": "Cheat' + 'Script",'
+        for value in (builder, payload, '{"ServerCommand":"Cheat' + 'Script"}'):
+            findings = gate.inspect(name, value.encode(), [])
+            self.assertIn('retired ungated command mode', [hit['reason'] for hit in findings], value)
+        self.assertFalse(gate.inspect(name, b'"ServerCommand": "ServiceBroadcast",', []))
+        # The rule covers every file: the server-command verb builds the same payload.
+        hits = gate.inspect('scripts/dune-server-command.py', payload.encode(), [])
+        self.assertIn('retired ungated command mode', [hit['reason'] for hit in hits])
+
     def test_private_details_are_detected_even_in_checker_source(self):
         value = 'vp' + 'tr = pointer'
         self.assertTrue(gate.inspect('scripts/public-preflight.py', value.encode(), []))

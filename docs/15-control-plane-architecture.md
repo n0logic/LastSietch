@@ -19,21 +19,9 @@ database with players in it. There is no second line.
 
 ## The shape
 
-```
-browser
-  |  HTTPS
-Caddy
-  |  reverse proxy
-admin-backend            <- serves UI and API. SQLite only. No game DB access.
-  |  HTTP + X-API-Key
-relay                    <- the only component that can reach the game host
-  |  SSH, forced command
-dispatcher               <- fixed allowlist of actions. Runs on the game host
-  |  exec
-action script            <- one script per action, each doing one thing
-  |
-dq.sh -> kubectl exec -> psql
-```
+The request chain, from the browser down to `psql`, is drawn in
+[25-host-topology.md](25-host-topology.md#the-request-chain), together with which host runs each layer. In short:
+browser, Caddy, admin-backend, relay, SSH forced command, dispatcher, action script, `dq.sh`, psql.
 
 Every hop narrows what is possible.
 

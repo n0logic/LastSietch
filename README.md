@@ -1,74 +1,86 @@
 # Last Sietch
 
-The operational stack behind a real, self-hosted **Dune: Awakening** community server, published so other operators do not have to rediscover it.
+The operational stack behind a real, self-hosted **Dune: Awakening** community server, published so other operators do not have to rediscover it. It runs on bare-metal Debian and k3s, outside Funcom's Windows and Hyper-V wizard, and this snapshot is tested against server build `2168446` (Update 1.5.15.3) on k3s 1.35.9.
 
-Last Sietch runs on bare-metal Debian and k3s, outside Funcom's Windows and Hyper-V wizard. Everything here came out of actually running that server for players: the install path, the config that survives a Funcom update, the things that break at 2am, and the tooling built on top.
+> v0.8 brings the stack up to the post-1.5 game (1.5.15.x). It documents the in-game Custom Settings
+> screen and per-map rates, adds a second sietch run as a full PvP map with safe settlements, a weekend
+> events runner, a base backup and restore tool, and a large portal update (new Home, Sand Table maps,
+> titles, self-rescue). Map instance names are now configuration, not code. Start with [`docs/README.md`](docs/README.md).
+
+## Start here
+
+1. **Stand it up:** [01 install](docs/01-install.md), [02 canonical config](docs/02-canonical-config.md), [03 dual Deep Desert](docs/03-dual-deep-desert.md).
+2. **See what runs where:** [25 host topology](docs/25-host-topology.md).
+3. **Before your first update day:** [08 updates](docs/08-updates.md), including the regression checklist.
+4. **Then the feature docs you need:** [21 Custom Settings and per-map rates](docs/21-custom-settings-and-rates.md), [16 PvP maps](docs/16-pvp-maps.md) and [22 a full PvP sietch](docs/22-amtal-pvp-sietch.md), [23 events runner](docs/23-events-runner.md), [24 Base Vault](docs/24-base-vault.md), [20 player portal](docs/20-player-portal.md).
+
+The full list, in reading order, is [docs/README.md](docs/README.md). What changed between versions is in [CHANGELOG.md](CHANGELOG.md). Before you publish your own fork, read the [publication checks](docs/18-publication-checks.md).
+
+## How the pieces fit
+
+```text
+browser
+  |  HTTPS
+Caddy
+  |  reverse proxy
+admin-backend            portal + admin panel. SQLite only. No game DB access
+  |  HTTP + X-API-Key
+relay                    the only component that can reach the game host
+  |  SSH, forced command
+dispatcher               fixed allowlist of actions, on the game host
+  |  exec
+action script            one script per action, each doing one thing
+  |
+dq.sh -> kubectl exec -> psql
+```
+
+The web tier never holds a game database credential; its whole vocabulary is the dispatcher's allowlist. Why, and what each hop is for: [15 control plane architecture](docs/15-control-plane-architecture.md). Which host runs which piece: [25 host topology](docs/25-host-topology.md).
+
+## What is in the repository
+
+| | What it is |
+|---|---|
+| [docs/](docs/) | Install, configuration, operations and feature docs, indexed in [docs/README.md](docs/README.md) |
+| [scripts/](scripts/) | The on-host toolkit: `dq.sh` database access, the forced-command dispatcher and the action scripts it routes to (grants, bans, storage, guilds, market, bases, blueprints, telemetry feeds), presence guard, pre-window readiness, backups, schema ownership check, memory limits, config watch |
+| [ops/](ops/) | Battlegroup watchdog, update orchestration and hotfix watching, PvP partition pinning, and the v0.8 tools: per-map rates, the full PvP map jobs, the events runner, Base Vault, welcome pack |
+| [relay/](relay/) | The Dune-only relay: the web-tier side of the control plane |
+| [dune-telemetry/](dune-telemetry/) | Presence, world events, combat, market and progression collection. Standalone |
+| [discord/cielago-bot/](discord/cielago-bot/) | The support bot: help-channel tickets, digests, in-game chat herald, server status, onboarding, events sync |
+| [admin-backend/](admin-backend/) | The player portal and admin panel: FastAPI API server, and under `portal-nextgen/` the SvelteKit front end |
+| [references/](references/) | Canonical item ids, community-sourced field notes |
+
+### What ships, what you regenerate, what is not provided
+
+| Class | Examples | How you get it |
+|---|---|---|
+| Ships | Code, configuration examples, docs, curated tables that are ours (crest map, spice sites, settings catalog, presets) | `git clone` |
+| Regenerated on your machine | Item icons and names, map glyphs, fonts, the three.js core, map marker snapshots from your own database | `scripts/build-portal-assets.py`, `scripts/dune-markers-export.py` ([20](docs/20-player-portal.md)) |
+| Not provided | Anything extracted from the game: baked 3D relief, Sand Table miniatures, map backdrops. Our own art and branding. Player data. Deployment values | Yours to make, or leave out: the portal renders without them |
+
+## Tested against
+
+This is reference source, not a production configuration. Each row is what we ran at that point; it is not a blanket compatibility guarantee.
+
+| | |
+|---|---|
+| Self-host product | Steam app ID `4754530`, "Dune: Awakening Self-Hosted Server" |
+| **This snapshot (v0.8)** | `seabass-server:2168446-0-shipping` (Update 1.5.15.3), k3s `v1.35.9+k3s1`, October 2026 |
+| Player portal snapshot (v0.7) | `seabass-server:2111270-0-shipping` (Update 1.5.3), k3s `v1.34.11+k3s1`, September 2026 |
+| Later maintenance observations | `seabass-server:2064155-0-shipping`, September 2026 |
+| Historical install walkthrough | `seabass-server:2051294-0-shipping`, July 2026 |
+| Funcom operators | `v1.7.0` (battlegroup, database, server, utilities), at Update 1.5.15.3 |
+| Host OS | Debian 12 reference; Debian 13 package compatibility notes are not a full deployment certification |
+| Database | `igw-postgres:17.4-alpine-fc-13`, at Update 1.5.15.3 |
+
+Funcom ships updates frequently and changes operator behaviour with them. If your versions differ from these, expect drift, and read before you run.
+
+The private production rolling controller is deliberately not included: a portable release needs an independently reviewed credential-proof provider and operator configuration. The update orchestrator is disabled until explicitly configured and enabled.
 
 ## Why this exists
 
 Funcom ships self-hosted servers as a Windows-wizard-driven Hyper-V VM image. The Linux dedicated-server payload packaged inside that VM is the same workload this repository deploys directly on bare-metal Debian, without the Hyper-V layer. Funcom's own self-hosting FAQ acknowledges this is possible; it is simply not the supported path, so nobody documents it.
 
 We had to work it out to run our own community. A player asked whether we shared any of it. We did not, so now we do.
-
-## What is here today
-
-The September 2026 refresh makes deployment identities explicit configuration,
-strengthens local publication checks, and adds read-only schedule tooling.
-Start with [configuration changes](docs/19-configuration-changes.md) when upgrading.
-
-| | |
-|---|---|
-| [docs/](docs/) 01 to 11 | Fresh install on Debian 12 (with Debian 13 compatibility notes), canonical config, dual Deep Desert, server browser visibility, display names, memory tuning, troubleshooting, update procedure, BGD admin UI access, welcome package design |
-| [docs/12-operations.md](docs/12-operations.md) | Keeping a server alive: the tools, the `pg_dump` trap, restart rules, free maintenance windows, backups, and the failures that are quiet |
-| [docs/13-safe-database-writes.md](docs/13-safe-database-writes.md) | Read before writing to the game database. Giving is safe, taking is not, and why |
-| [docs/14-known-funcom-issues.md](docs/14-known-funcom-issues.md) | Symptoms and detection for problems we have hit, so you can identify them in minutes instead of an evening |
-| [docs/15-control-plane-architecture.md](docs/15-control-plane-architecture.md) | How a web app safely drives a live game server it must never touch directly. The one idea here most worth copying |
-| [docs/20-player-portal.md](docs/20-player-portal.md) | The player portal: what it does, the safety model, install, configuration, and the asset step that regenerates icons and maps from public sources |
-| [docs/16-persistent-map-maintenance.md](docs/16-persistent-map-maintenance.md) | Sietch instances versus map families, empty-state checks, backup and recovery boundaries |
-| [docs/17-server-time.md](docs/17-server-time.md) | Read-only server clock and explicitly configured recurrence display, with Python and JavaScript helpers |
-| [docs/18-publication-checks.md](docs/18-publication-checks.md) | Local staged-content, privacy, secret and provenance checks before publication |
-| [references/](references/) | Canonical item ids, community-sourced field notes |
-| [scripts/](scripts/) | The whole on-host toolkit: `dq.sh` database access, the forced-command dispatcher, and the 54 action scripts it routes to (grants, bans, storage, guilds, market, bases, blueprints, telemetry feeds), plus presence guard, pre-window readiness, backups, schema ownership check, memory limits |
-| [ops/](ops/) | Battlegroup watchdog (a stopped battlegroup never recovers itself), update orchestration and hotfix watching |
-| [relay/](relay/) | The Dune-only relay, 106 routes. The web-tier side of the control plane |
-| [dune-telemetry/](dune-telemetry/) | Presence, world events, combat, market and progression collection. Standalone and usable today |
-| [discord/cielago-bot/](discord/cielago-bot/) | The support bot: watches help channels, classifies and dedups player reports into tickets, posts daily and weekly digests, in-game chat herald |
-| [admin-backend/](admin-backend/) | The player portal and admin panel: FastAPI API server, and under `portal-nextgen/` the SvelteKit front end with the live 3D maps. Code only; assets are regenerated with `scripts/build-portal-assets.py` |
-
-## Tested against
-
-This is reference source, not a production configuration. The installation
-walkthrough's historical baseline and later maintenance observations are listed
-separately so they are not mistaken for a blanket compatibility guarantee.
-
-| | |
-|---|---|
-| Self-host product | Steam app ID `4754530`, "Dune: Awakening Self-Hosted Server" |
-| Historical install walkthrough | `seabass-server:2051294-0-shipping`, July 2026 |
-| Later maintenance observations | `seabass-server:2064155-0-shipping`, September 2026 |
-| Player portal snapshot (v0.7) | `seabass-server:2111270-0-shipping` (Update 1.5.3), operators `v1.7.0`, k3s `v1.34.11+k3s1`, September 2026 |
-| Funcom operators | `v1.5.0` (battlegroup, database, server, utilities) |
-| Host OS | Debian 12 reference; Debian 13 package compatibility notes are not a full deployment certification |
-| Database | `igw-postgres:17.4-alpine-fc-13` |
-
-Funcom ships updates frequently and changes operator behaviour with them. If your
-versions differ from these, expect drift, and read before you run.
-
-The new publication and clock helpers have local fixture-based tests. The
-private production rolling controller is deliberately not included: a portable
-release needs an independently reviewed credential-proof provider and operator
-configuration. The clock helper has no restart capability, and the update
-orchestrator is disabled until explicitly configured and enabled.
-
-## What is coming
-
-This repository is being expanded from a private monorepo, in stages, with each stage scrubbed of deployment-specific values before it lands. Rough order:
-
-1. ~~**Operations.**~~ Landed: see `docs/12` through `docs/14`, `scripts/`, and `ops/`.
-2. ~~**Player portal.**~~ Landed as v0.7: see `docs/20-player-portal.md` and `admin-backend/`. Character and inventory views, CHOAM market browse and sell, storage moves, coordinate-accurate Deep Desert and Hagga maps from your own database, guild directory, Landsraad board, rewards, the Karum trading venue, and a 3D base blueprint viewer.
-3. ~~**Telemetry and Discord.**~~ Landed: see `dune-telemetry/` and `discord/cielago-bot/`.
-
-No dates. This is volunteer work done around running an actual server, and a half-working portal helps nobody.
 
 ## What is deliberately not here
 

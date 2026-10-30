@@ -11,7 +11,7 @@ publish path, the builtin AuthToken, the online-status gate, and the audit log.
 
 SAFETY:
   * Only a fixed allow-list of NON-destructive verbs is reachable here. Destructive
-    verbs (clean-inventory / reset-progression / cheat-script) and spawn-vehicle are
+    verbs (clean-inventory / reset-progression) and spawn-vehicle are
     intentionally NOT routable via the relay -- they stay CLI-only.
   * Real sends still require the box-side master switch (LASTSIETCH_SERVERCMD_ENABLED=1),
     which the dispatcher sets only when /etc/lastsietch/servercmd-enabled exists. dry-run

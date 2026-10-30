@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Pin three PvP/safety settings in the shared UserGame.ini on the Hagga PVC.
 #
-# Context: 2026-08-03 research pass (docs/dune-research + red-blink-research
-# FINDINGS-2026-08-03-portal-pvp.md). The live Kulon config was already correct
+# Context: 2026-08-03 research pass. The live Kulon config was already correct
 # in the two ways that matter (m_bShouldForceEnablePvpOnAllPartitions=False, and
 # security zones effectively True via stock DefaultGame.ini:1410). These three
 # edits close the remaining "running on an unread default" gaps.

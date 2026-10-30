@@ -771,8 +771,7 @@ EOF
 # write of scripts/dune-grant.sh build_char_xp_grant: TotalXPEarned on the pawn's
 # DuneCharacter FLevelComponent[1], capped at 344440, the levels gained credited to
 # TotalSkillPoints AND UnspentSkillPoints, and the intel delta to
-# m_TechKnowledgePoints. Spent points are never recomputed (the icehunter wipe,
-# docs/dune-research/CHAR-XP-GRANT-SPEC.md). A character at 344440 refuses
+# m_TechKnowledgePoints. Spent points are never recomputed (the icehunter wipe). A character at 344440 refuses
 # already_owned; missing curve functions or no level row refuse rejected. Same
 # offline deferral as sn_shop_spec: the level is RAM-resident in game.
 #

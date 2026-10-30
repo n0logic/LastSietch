@@ -6,8 +6,7 @@ dispatcher /root/dune-relay-dispatch.sh via the `landsraad-claim` token, or dire
 with --print-sql for the throwaway-postgres suite.
 
 A portal player claims every unclaimed Landsraad house reward at once, WHILE OFFLINE,
-instead of walking to each house representative. Build spec:
-docs/dune-research/LANDSRAAD-PORTAL-CLAIM-SPEC-2026-10-06.md
+instead of walking to each house representative.
 
 One transaction per claim:
   * the ledger is decremented by the game's own landsraad_withdraw_house_reward proc,

@@ -602,7 +602,7 @@ case "$action" in
     # ONLINE player). Base64-encoded JSON job on stdin (same safe alphabet as broadcast-send);
     # decoded and handed to dune-server-command-send.py, which builds a safe argv for
     # dune-server-command.py (the publisher: builtin AuthToken, online-gate, audit log).
-    # Destructive verbs (clean-inventory/reset-progression/cheat-script) + spawn-vehicle are
+    # Destructive verbs (clean-inventory/reset-progression) + spawn-vehicle are
     # NOT routable here (wrapper allow-list). MASTER SWITCH: real --send sends require the
     # file /etc/lastsietch/servercmd-enabled to exist (sets LASTSIETCH_SERVERCMD_ENABLED=1); without it
     # dune-server-command.py refuses every --send. Remove the file to kill the whole path.
@@ -1107,8 +1107,8 @@ case "$action" in
     exec /root/dune-landsraad-board.py
     ;;
   landsraad-claim)
-    # Portal Landsraad CLAIM WRITE path (docs/dune-research/LANDSRAAD-PORTAL-CLAIM-SPEC-
-    # 2026-10-06.md). Base64-encoded JSON job on stdin (same safe alphabet as
+    # Portal Landsraad CLAIM WRITE path.
+    # Base64-encoded JSON job on stdin (same safe alphabet as
     # storage-withdraw -- no whitespace / ';' / '$' / backtick, so shell injection is
     # impossible). The writer re-validates {owner_ctrl, mode: preview|apply, operator},
     # checks its own /etc/lastsietch gates, and runs the single OFFLINE-GATED transaction (mode

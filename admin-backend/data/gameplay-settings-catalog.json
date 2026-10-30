@@ -2,7 +2,7 @@
   "_meta": {
     "generated": "2026-06-13",
     "task": "#7 settings-re — panel-ready knob catalog for the V2 Tuning-Knobs panel",
-    "source": "SETTINGSUPDATE-MESSAGE-SHAPE-2026-06-13.md (live ground-truth) + blessed binary RE (SETTINGSUPDATE-SERVERGAMEPLAYSETTINGS-RE-2026-06-13.md) + cross-ref v3-admin-knobs.json + RATE-MULTIPLIER-SYSTEMS-RE-2026-06-13.md",
+    "source": "live settingsUpdate captures and the shipped binary, cross-checked against the admin knob list",
     "scope": "The 24 EServerGameplaySettingType settings carried in the serverGameplaySettings body. These are the ONLY knobs applied via the settingsUpdate/server_state message path. Other v3-admin-knobs.json entries (landclaim segments, PvpEnabledPartitions, CAT B thresholds, spice density, SandStormConfig, Coriolis cycle, exchange fees) are a SEPARATE config surface NOT carried in this body — out of scope for this apply recipe.",
     "transport": {
       "apply_exchange_single_partition": "\"\" (default exchange), routing_key = settingsUpdateQueue_<Map>_<partition>",

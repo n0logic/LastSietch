@@ -19,10 +19,7 @@ Spice Melange and receives the matching Spice-infused metal dust:
         validates under the SAME locks and then ROLLBACKs, so a probe can never mutate.
 
 The dusts are loot-only in vanilla -- nothing in the game turns an ingot into one -- so
-this is an owner-set service rate, not a bench recipe. See
-docs/dune-research/v3-portal/WAVE10-PLAN-2026-09-04.md (sections 2-4 are the owner's
-rulings, 10 is the architecture) and
-docs/dune-research/ITEM-MOVE-WRITE-PATH-TRACE-2026-08-28.md.
+this is an owner-set service rate, not a bench recipe.
 
 Correctness rules (non-negotiable):
   * OFFLINE-GATE (STOP-SHIP): pawn-side inventories are RAM-backed while the player is

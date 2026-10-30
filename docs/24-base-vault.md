@@ -109,7 +109,8 @@ What we learned on the first live run, a 3,356-piece base:
 ### Deep Desert: restore in place
 
 A Deep Desert base is restored where it stood, during a scheduled restart of that one partition: the map is
-unloaded, the transaction commits, and the map loads the base. `unpark-window.sh` drives it:
+unloaded, the transaction commits, and the map loads the base. `unpark-window.sh` drives it. This lane is
+documented from the tooling; it has not yet been exercised in production.
 
 - `--dry-run` with the pod up runs the whole transaction and rolls back, proving every guard against live.
 - `--apply --i-have-owner-approval`, in an announced window only, stops the partition's pod and waits for the

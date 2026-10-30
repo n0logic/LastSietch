@@ -68,9 +68,9 @@ This is reference source, not a production configuration. Each row is what we ra
 | Player portal snapshot (v0.7) | `seabass-server:2111270-0-shipping` (Update 1.5.3), k3s `v1.34.11+k3s1`, September 2026 |
 | Later maintenance observations | `seabass-server:2064155-0-shipping`, September 2026 |
 | Historical install walkthrough | `seabass-server:2051294-0-shipping`, July 2026 |
-| Funcom operators | `v1.7.0` (battlegroup, database, server, utilities), recorded at Update 1.5.3 |
+| Funcom operators | `v1.7.0` (battlegroup, database, server, utilities), at Update 1.5.15.3 |
 | Host OS | Debian 12 reference; Debian 13 package compatibility notes are not a full deployment certification |
-| Database | `igw-postgres:17.4-alpine-fc-13`, recorded at Update 1.5.3 |
+| Database | `igw-postgres:17.4-alpine-fc-13`, at Update 1.5.15.3 |
 
 Funcom ships updates frequently and changes operator behaviour with them. If your versions differ from these, expect drift, and read before you run.
 

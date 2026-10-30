@@ -31,7 +31,7 @@ What changed for PvP operators, by the server image tags we ran.
 
 | Build | When | What we saw |
 |---|---|---|
-| `2051294`, `2064155` | July to September 2026 (before 1.5) | Per-partition PvP opt-in in `UserGame.ini` (`+m_PvpEnabledPartitions`). With stock security zones it arms PvP only in the map's NullSec areas (zone-gated). |
+| `2051294`, `2064155` (approximately) | July to September 2026 (before 1.5) | Per-partition PvP opt-in in `UserGame.ini` (`+m_PvpEnabledPartitions`). With stock security zones it arms PvP only in the map's NullSec areas (zone-gated). |
 | `2111270` | 1.5.3, September 2026 | The in-game Custom Settings framework ([21](21-custom-settings-and-rates.md)), which carries the battlegroup-wide `PVPMode` and `PVPDamageStructures` keys and lets a per-pod `-ini:ServerCustomSettings:` argument override a key for one partition. PvP shield damage reduced by a third (Funcom, global). The shipped `UserEngine.ini` template sets `SecurityZones.PvpResourceMultiplier=2.5`. |
 | 1.5.3.x hotfixes | late September 2026 | No PvP change from Funcom. We moved Amtal from zone-gated to full PvP with a per-pod security-zone table and a runtime flag: a configuration change, not a build change. |
 | `2168446` | 1.5.15.3, October 2026 | The build this snapshot is pinned to. No PvP-specific change observed. Kulon was closed in this build's window. |

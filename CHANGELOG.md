@@ -3,7 +3,7 @@
 Newest first. Only v0.7 and v0.8 are tagged. Earlier entries are reconstructed from this repository's commit
 history; where the history does not mark a version boundary, the range is grouped rather than given invented dates.
 
-## v0.8: post-1.5 snapshot (unreleased)
+## v0.8: post-1.5 snapshot
 
 Tested against server build `2168446` (Update 1.5.15.3) on k3s 1.35.9. Cut from private commit
 `3a146b82` (freeze sha).

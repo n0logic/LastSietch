@@ -141,7 +141,7 @@
     }
   }
 
-  /* ── Proxmox infra banner ──────────────────────────────────────────────── */
+  /* ── Infra banner ──────────────────────────────────────────────────────── */
   function loadInfraStatus() {
     fetch('/admin/api/infra/status', { credentials: 'same-origin' })
       .then(function (r) {
@@ -233,7 +233,7 @@
     vmsEl.innerHTML = vmsHtml;
 
     /* Location / platform */
-    var loc = (d.location && d.platform) ? (d.location + ' · ' + d.platform) : 'Proxmox';
+    var loc = (d.location && d.platform) ? (d.location + ' · ' + d.platform) : 'Host';
     if (typeof d.network_speed_mbps === 'number' && d.network_speed_mbps > 0) {
       var spd = d.network_speed_mbps;
       loc += ' · ' + (spd >= 1000 ? (spd / 1000) + ' Gbps' : spd + ' Mbps');
@@ -268,10 +268,10 @@
 
     var dot = document.getElementById('infra-dot');
     dot.className = 'v2-landing__dot is-unreachable';
-    dot.setAttribute('aria-label', 'Infrastructure status: Proxmox unreachable');
+    dot.setAttribute('aria-label', 'Infrastructure status: host unreachable');
 
     document.querySelectorAll('#infra-banner .v2-landing__stat dt').forEach(function (dt) {
-      dt.textContent = 'Proxmox unreachable';
+      dt.textContent = 'Host unreachable';
     });
   }
 

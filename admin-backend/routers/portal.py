@@ -1,7 +1,7 @@
 """Portal OAuth router (P4 — Discord identity surface).
 
 Routes (all under /portal/, public unless noted):
-- GET  /portal/             — landing (anonymous) OR 302 to /portal/account if linked
+- GET  /portal/             — 302 to the V2 app (v2_home), signed in or not
 - GET  /portal/login        — issue state_token, 302 to Discord authorize
 - GET  /portal/oauth/callback — verify state, exchange code, fetch identity, route
 - GET  /portal/account      — logged-in dashboard (session-cookie required)
@@ -56,6 +56,7 @@ import market_categories
 import market_history
 import portal_gift_limits
 import spice_fields
+import map_instances
 import map_model
 from database import get_db
 from portal_host import oauth_redirect_uri, safe_return_to, v2_home
@@ -443,7 +444,7 @@ async def portal_oauth_callback(
     error: Optional[str] = None,
 ):
     """Discord callback. Verify state, exchange code, fetch identity, then:
-    - existing link → set session cookie + 302 /portal/account
+    - existing link → set session cookie + 302 return_to (default: the V2 app)
     - no link      → set link_flow cookie + 302 /portal/link
     Auth: public."""
     if state and state.startswith('pa3.'):
@@ -682,7 +683,8 @@ async def portal_oauth_callback(
     if existing:
         session_value = issue_session_cookie(discord_id, int(existing["account_id"]), ip, authentication_time=int(time.time()))
         _touch_last_session(int(existing["account_id"]))
-        resp = RedirectResponse(url=payload.get("r") or "/portal/account", status_code=302)
+        resp = RedirectResponse(url=payload.get("r") or v2_home(request.headers.get("host", "").lower()),
+                                status_code=302)
         _attach_session_cookies(resp, session_value)
         return resp
 
@@ -3110,6 +3112,20 @@ async def _load_owned_augments(account_id: int) -> list:
             "effects": [str(e) for e in effects] if isinstance(effects, list) else [],
         })
     return out
+
+
+async def _load_body_type(account_id: int) -> Optional[int]:
+    """The character's body type (1 or 2) from the same cached equipped payload,
+    for the gear viewer's mesh pick. None when the reader predates the field or
+    could not read it; the viewer then falls back to its default mesh."""
+    try:
+        from routers.dune import cached_player_equipped
+        payload = await cached_player_equipped(account_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("portal: body type fetch failed: %s", exc)
+        return None
+    bt = (payload or {}).get("body_type")
+    return bt if bt in (1, 2) else None
 
 
 async def _load_equipped(account_id: int) -> Optional[list]:
@@ -10076,9 +10092,10 @@ _RESCUE_COOLDOWN_SECONDS = 3600          # 1 rescue / hour / account (durable)
 _RESCUE_MIN_INTERVAL_SECONDS = 5.0       # in-process anti-double-submit guard
 _last_rescue_at: dict = {}
 
-# Owner rule 10-29: no self-rescue on PvP maps. Habbanya = HaggaBasin dim 0;
-# Amtal (PvP) shares the HaggaBasin map name on dim 2.
-_RESCUE_ALLOWED_HAGGA_DIMS = {0}
+# Owner rule 10-29: no self-rescue on PvP maps. Every Hagga sietch shares the
+# HaggaBasin map name, so the open PvE sietches' dims (map instance config) pass.
+_RESCUE_ALLOWED_HAGGA_DIMS = frozenset(r["dim"] for r in map_instances.open_instances("hagga")
+                                       if not r["pvp"] and r["dim"] is not None)
 # Deep Desert runs two instances under one map name. Live UserGame.ini (read
 # 10-29): +m_PveEnabledPartitions=8, +m_PvpEnabledPartitions=31; dune.actors puts
 # partition 8 on dim 0 and 31 on dim 1 (docs/SERVER-RATES-AND-RULES.md PvP
@@ -12756,6 +12773,28 @@ async def portal_gear_idmap(request: Request, name: str):
                         headers={"Cache-Control": "private, max-age=86400"})
 
 
+# Garment meshes for the 3D gear viewer (data/gear-glb/, built by
+# scripts/build-gear-glb.mjs). Same gate and cache policy as the colour data:
+# game models go to linked sessions only, never through static/.
+_GEAR_GLB_NAME_RE = re.compile(r"^(?:[A-Za-z0-9_]{1,120}\.glb|manifest\.json)$")
+
+
+@router.get("/portal/gear/glb/{name}")
+async def portal_gear_glb(request: Request, name: str):
+    _, early = _require_linked_session_json(request)
+    if early is not None:
+        return early
+    path = _os.path.join(_GEAR_DATA_DIR, "gear-glb", name)
+    if not _GEAR_GLB_NAME_RE.match(name) or not _os.path.isfile(path):
+        return _v2_err("gear_glb_missing", "No such gear model.", status=404)
+    # The manifest is short-lived; a model URL carries ?v=<hash> from it.
+    if name == "manifest.json":
+        return FileResponse(path, media_type="application/json",
+                            headers={"Cache-Control": "private, max-age=3600"})
+    return FileResponse(path, media_type="model/gltf-binary",
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
 @router.get("/portal/character/v2")
 async def portal_character_v2(request: Request):
     """V2 Character overview (JSON). Per-character: honors the portal switcher's
@@ -12898,6 +12937,9 @@ async def portal_character_v2(request: Request):
             # silently discards the player's write on their next save tick.
             "player_online": await _safe(_resolve_online(active_account_id)),
             "owned_augments": (await _safe(_load_owned_augments(active_account_id))) or [],
+            # 1 | 2 | None. None until the reader is deployed with the field; the
+            # 3D stage then shows its default mesh.
+            "body_type": await _safe(_load_body_type(active_account_id)),
         }
 
     session_token = request.cookies.get(SESSION_COOKIE, "")

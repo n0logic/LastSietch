@@ -18,6 +18,8 @@
   import { api } from '$lib/api.js';
   import { home, subscribe, loadHomeOverview } from '$lib/home.svelte.js';
   import { homeAppearance } from '$lib/home/appearance.js';
+  import { mapInstances } from '$lib/mapInstances.svelte.js';
+  import { sietches } from '$lib/mapInstances.js';
   import { desertLines, needsYou } from '$lib/shellHome.js';
   import { dayText, describeSlot, monthWeekends, weekendSlots } from '$lib/weekend.js';
 
@@ -36,7 +38,7 @@
   $effect(() => { if (gate.authed) loadHomeOverview(); });
 
   let s = $derived(home.signals);
-  let appearance = $derived(homeAppearance(s, home.raw.overview?.clock));
+  let appearance = $derived(homeAppearance(s, home.raw.overview?.clock, mapInstances.list));
   let slots = $derived(weekendSlots(now).map((x) => describeSlot(x, events, now)));
   // The next four weekends from this one, from the month strip. A month's tail may
   // hold fewer than four; the Events page has the rest.
@@ -73,9 +75,9 @@
         {#if s.onlinePlayers != null} · <span class="live">{s.onlinePlayers}</span> online{/if}
       </p>
       <div class="maps">
-        {#each [{ name: 'Habbanya', slug: 'habbanya', mode: 'PvE' }, { name: 'Amtal', slug: 'amtal', mode: 'Full PvP' }] as m}
-          <a class="map" href={`${base}/maps/hagga?inst=${m.slug}`}>
-            <img src={`/img/v3/plates/${m.slug}-dusk-clear-small.jpg`} alt="" loading="lazy" width="640" height="360" />
+        {#each sietches(mapInstances.list) as m}
+          <a class="map" href={`${base}/maps/${m.map}?inst=${m.inst}`}>
+            <img src={`/img/v3/plates/${m.key}-dusk-clear-small.jpg`} alt="" loading="lazy" width="640" height="360" />
             <span><b>{m.name}</b><small>{m.mode}</small></span>
           </a>
         {/each}

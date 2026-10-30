@@ -36,14 +36,30 @@ export function weekendAction(effect, base = '') {
   }
 }
 
+// The weekend hero art per effect (art pass B1). Each name is a file stem under
+// /img/v3/weekend/: `<name>-hero` (21:9) and `<name>-mobile` (4:5), each as avif,
+// webp and jpg. The same names are the event banner slugs. Bump WEEKEND_ART_VERSION
+// whenever these files are re-cut; new art gets new names, never a reused one.
+export const WEEKEND_ART = {
+  xp: 'weekend-xp',
+  spec_xp: 'weekend-landsraad',
+  crafting: 'weekend-crafting',
+  harvest: 'weekend-harvest',
+};
+export const WEEKEND_ART_VERSION = '20261030a';
+
+/** The hero art stem for an effect, or null (an open weekend keeps the map plate). */
+export function weekendArt(effect) {
+  return Object.hasOwn(WEEKEND_ART, effect) ? `/img/v3/weekend/${WEEKEND_ART[effect]}` : null;
+}
+
 // Map NAME only. Never coordinates, region or partition: the owner ruling for
 // entity rows. Anything we do not recognise is omitted rather than passed through.
-export function mapNameOnly(name) {
+// The names are the configured instance names (GET /portal/features).
+export function mapNameOnly(name, instances) {
   const s = String(name || '').toLowerCase();
-  if (s.includes('amtal')) return 'Amtal';
-  if (s.includes('habbanya')) return 'Habbanya';
-  if (s.includes('deep desert')) return 'Deep Desert';
-  return null;
+  const hit = (instances || []).find((i) => s.includes(i.name.toLowerCase()));
+  return hit ? hit.name : null;
 }
 
 export function initials(name) {

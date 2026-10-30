@@ -33,6 +33,7 @@ _GROUPS = [
         ("Search", "/admin/v2/players/search"),
         ("Grant Bench", "/admin/v2/players/grants"),
         ("Bans", "/admin/v2/players/bans"),
+        ("Requests", "/admin/v2/players/requests"),
     ]),
     ("bases", "Bases", "bases", "/admin/v2/players/bases", [
         ("Bases", "/admin/v2/players/bases"),
@@ -84,7 +85,7 @@ _PATH_RULES = [
     ("/v2/portal", "community"),
     ("/v2/systems", "system"), ("/v2/server", "system"), ("/v2/audit", "system"),
 ]
-_DRILLDOWN = re.compile(r"^/v2/players/(?!search|grants|bans|bases|vault|claims|events)[^/]+")
+_DRILLDOWN = re.compile(r"^/v2/players/(?!search|grants|bans|requests|bases|vault|claims|events)[^/]+")
 
 
 def _strip(path: str) -> str:

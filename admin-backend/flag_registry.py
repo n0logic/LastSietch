@@ -354,7 +354,7 @@ ENTRIES = (
     {"name": "LASTSIETCH_PORTAL_VAULT_LINE_ENABLED", "kind": "planned",
      "owner": "portal: bases", "scope": "portal, every player",
      "feature": "the portal Base Vault line"},
-    {"name": "LASTSIETCH_PORTAL_REQUESTS_ENABLED", "kind": "planned",
+    {"name": "LASTSIETCH_PORTAL_REQUESTS_ENABLED", "kind": "runtime", "gate_default": "0",
      "owner": "admin: requests", "scope": "portal, every player",
      "feature": "player requests to staff (admin F7)"},
     {"name": "LASTSIETCH_AMTAL_WEEKLY_ENABLED", "kind": "planned",

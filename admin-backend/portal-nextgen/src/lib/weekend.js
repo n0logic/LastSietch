@@ -15,7 +15,12 @@
 // (LIVE and RESTART), against the values of record in
 // ops/game-config/values-of-record.json. Every meaning line says what changes
 // against the normal rate and nothing about WHERE: scope is the event's, never
-// assumed (an effect can be scoped to Amtal).
+// assumed (an effect can be scoped to one map instance, by its config key).
+
+import { byKey } from './mapInstances.js';
+
+// An instance-scoped effect names the instance by its map-instance config key.
+const SCOPE_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 export const ET = 'America/New_York';
 
@@ -152,7 +157,7 @@ export function effectOf(event) {
   if (typeof col === 'string' && EFFECTS[col]) {
     return {
       effect: col,
-      scope: event.effect_scope === 'fleet' || event.effect_scope === 'amtal' ? event.effect_scope : null,
+      scope: event.effect_scope === 'fleet' || SCOPE_RE.test(event.effect_scope || '') ? event.effect_scope : null,
       state: STATE_LABELS[event.effect_state] ? event.effect_state : null,
       source: 'column',
     };
@@ -168,9 +173,9 @@ export function effectOf(event) {
 /** Where the effect reaches, in words, or ''. Only a narrowed scope is worded:
  *  copy rule Q7 (player portal plan) bans an all-maps claim, so a fleet event
  *  says nothing about where and its meaning line carries what changes. */
-export function scopeText(scope) {
-  if (scope === 'amtal') return 'On Amtal only.';
-  return '';
+export function scopeText(scope, instances) {
+  const inst = scope && scope !== 'fleet' ? byKey(instances, scope) : null;
+  return inst ? `On ${inst.name} only.` : '';
 }
 
 /** The published event that IS this weekend: overlapping its window and carrying

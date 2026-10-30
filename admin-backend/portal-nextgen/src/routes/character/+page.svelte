@@ -25,6 +25,9 @@
   import JourneyCard from '$lib/components/character/JourneyCard.svelte';
   import LandsraadTeaser from '$lib/components/character/LandsraadTeaser.svelte';
   import EquippedList from '$lib/components/character/EquippedList.svelte';
+  import GearStage from '$lib/components/character/GearStage.svelte';
+  import { onMount } from 'svelte';
+  import { shell, loadShell } from '$lib/shellNext.svelte.js';
 
   const gate = useAuthGate();
 
@@ -34,6 +37,10 @@
   // non-default selected character (equipped.ctrl_scoped:false) or always as a
   // gentle reminder that balances lag a live session.
   let vitalsLastLogout = $derived(character.equipped?.ctrl_scoped === false);
+
+  // The 3D gear stage is part of the redesign: it shows only behind the shell
+  // switch (?shell=next or the server flag); the shipped page is unchanged.
+  onMount(() => { if (shell.status !== 'ready') loadShell(); });
 
   let loaded = false;
   $effect(() => {
@@ -100,6 +107,9 @@
       <div class="col right">
         <CarvedSlab><JourneyCard journey={character.journey} /></CarvedSlab>
         <CarvedSlab><LandsraadTeaser teaser={character.landsraadTeaser} /></CarvedSlab>
+        {#if shell.status === 'ready' && shell.next}
+          <CarvedSlab><GearStage equipped={character.equipped} /></CarvedSlab>
+        {/if}
         <CarvedSlab sharp={true}><EquippedList equipped={character.equipped} /></CarvedSlab>
 
         <!-- Your data: backup reassurance. The keepsake export moved to Settings

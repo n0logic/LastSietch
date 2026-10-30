@@ -110,7 +110,9 @@ export const STATUS_TEXT = {
 // /api/dune/bands -> enum-only. Anything that is not a known enum string is dropped;
 // numbers, nested objects and unknown keys never become marks. No derivation, ever.
 const BAND_MARKS = { quiet: 0, normal: 1, busy: 2, surging: 3 };
-const AMTAL_MARKS = { quiet: 0, active: 1 };
+// An untracked instance (map-instance config `tracked: false`) publishes only
+// quiet / active, never a busy-ness band that would read as a head count.
+const UNTRACKED_MARKS = { quiet: 0, active: 1 };
 const BAND_LABEL = { quiet: 'Quiet', normal: 'Normal', busy: 'Busy', surging: 'Surging', active: 'Active' };
 
 export function bandKey(stoneKey, facetKey) {
@@ -118,21 +120,22 @@ export function bandKey(stoneKey, facetKey) {
 }
 
 // Returns { marks: 0..3, label } or null (draw nothing).
-export function bandFor(bands, stoneKey, facetKey) {
+// `untracked` is a Set of "map.inst" keys (mapInstances.js untrackedBandKeys).
+export function bandFor(bands, stoneKey, facetKey, untracked) {
   if (!bands || typeof bands !== 'object') return null;
   const src = bands.bands && typeof bands.bands === 'object' ? bands.bands : bands;
   const k = bandKey(stoneKey, facetKey);
   const v = src[k];
   if (typeof v !== 'string') return null;
-  const table = k === 'hagga.amtal' ? AMTAL_MARKS : BAND_MARKS;
+  const table = untracked && untracked.has(k) ? UNTRACKED_MARKS : BAND_MARKS;
   if (!Object.prototype.hasOwnProperty.call(table, v)) return null;
   return { marks: table[v], label: BAND_LABEL[v] };
 }
 
-export function stoneBands(stone, bands) {
+export function stoneBands(stone, bands, untracked) {
   if (!stone.live) return [];
   const targets = stone.facets.length ? stone.facets.map((f) => ({ facet: f.key, name: f.name })) : [{ facet: null, name: stone.name }];
-  return targets.map((t) => ({ ...t, band: bandFor(bands, stone.key, t.facet) }));
+  return targets.map((t) => ({ ...t, band: bandFor(bands, stone.key, t.facet, untracked) }));
 }
 
 export async function loadBands(fetchImpl) {
@@ -173,7 +176,7 @@ export function markArrived(storage) {
 }
 
 // Hover/focus card model, shared by the chart and the 3D scene.
-export function cardModel(stone, status, bands) {
+export function cardModel(stone, status, bands, untracked) {
   const st = stoneStatus(stone, status);
   return {
     id: stone.id,
@@ -181,8 +184,8 @@ export function cardModel(stone, status, bands) {
     kind: KIND_LABEL[stone.kind] || stone.kind,
     status: st,
     statusText: st ? STATUS_TEXT[st] : null,
-    facets: stone.facets.map((f) => ({ ...f, band: bandFor(bands, stone.key, f.key) })),
-    band: stone.live && !stone.facets.length ? bandFor(bands, stone.key, null) : null,
+    facets: stone.facets.map((f) => ({ ...f, band: bandFor(bands, stone.key, f.key, untracked) })),
+    band: stone.live && !stone.facets.length ? bandFor(bands, stone.key, null, untracked) : null,
     description: stone.description,
     live: stone.live,
   };

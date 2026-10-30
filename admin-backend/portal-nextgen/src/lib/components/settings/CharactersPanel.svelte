@@ -14,6 +14,8 @@
   import Notice from '$lib/components/Notice.svelte';
   import AccountManageDialog from '$lib/components/AccountManageDialog.svelte';
   import AddGameAccount from './AddGameAccount.svelte';
+  import RelinkAccount from './RelinkAccount.svelte';
+  import { shell } from '$lib/shellNext.svelte.js';
 
   let manageOpen = $state(false);
 
@@ -106,6 +108,9 @@
   {#if failed}<Notice tone="error" text={failed} />{/if}
 
   <AddGameAccount />
+  <!-- G1-a self-relink: new with the P3 shell, so it draws only behind the switch
+       (the layout reads it). The shipped shell keeps relink on Classic. -->
+  {#if shell.status === 'ready' && shell.next && auth.accounts.length > 0}<RelinkAccount />{/if}
 </CarvedSlab>
 
 {#if manageOpen}

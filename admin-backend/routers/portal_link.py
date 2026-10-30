@@ -440,7 +440,7 @@ async def portal_link_select(request: Request):
                 request, "portal/error_state_expired.html",
                 {"title": "Already linked",
                  "message": f"{character_name} is already linked to your Discord.",
-                 "back_url": "/portal/account"},
+                 "back_url": v2_home(request.headers.get("host", "").lower())},
                 status_code=400,
             )
         if owner:
@@ -448,7 +448,7 @@ async def portal_link_select(request: Request):
                 request, "portal/error_state_expired.html",
                 {"title": "Account already claimed",
                  "message": "That character is already linked to another Discord account.",
-                 "back_url": "/portal/account"},
+                 "back_url": v2_home(request.headers.get("host", "").lower())},
                 status_code=409,
             )
         _commit_add_link(discord_id, account_id, character_name, discord_handle)
@@ -764,10 +764,9 @@ async def portal_link_quiz_submit(request: Request):
 
     ip = client_ip(request)
     session_value = issue_session_cookie(discord_id, account_id, ip, authentication_time=flow.get('auth_at'))
-    # An alt-add returns to the V2 app it started from; a first link / relink lands
-    # on the classic account page as before.
-    resp = _redirect_response(v2_home(request.headers.get("host", "").lower())
-                              if flow.get("md") == "add" else "/portal/account")
+    # Every link lands in the V2 app: a first link, a relink and an alt-add alike
+    # (parity audit G1-b; Classic was the landing for the first two until P3).
+    resp = _redirect_response(v2_home(request.headers.get("host", "").lower()))
     set_cookie(resp, SESSION_COOKIE, session_value,
                max_age=PORTAL_SESSION_IDLE_MAX_AGE, httponly=True)
     set_cookie(resp, CSRF_COOKIE, csrf_for_session(session_value),
@@ -1092,7 +1091,7 @@ async def portal_link_add(request: Request):
     never the body. Gated by LASTSIETCH_MULTIACCOUNT_ENABLED.
     """
     if not config.MULTIACCOUNT_ENABLED:
-        return _redirect_response("/portal/account")
+        return _redirect_response(v2_home(request.headers.get("host", "").lower()))
     try:
         session = _require_portal_session(request)
     except HTTPException as exc:

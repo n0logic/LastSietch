@@ -119,8 +119,10 @@ _ADMIN_CSP = (
 # Portal CSP — stricter than admin (no inline script). Adds cdn.discordapp.com
 # to img-src for Discord avatars. (dune.layout.tools was removed 2026-06-12
 # with the embedded-gallery retirement; the public market is a link-out now.)
+# 'wasm-unsafe-eval' lets the gear viewer's meshopt decoder compile its bundled
+# WebAssembly (the garment GLBs are meshopt-compressed); it does not allow eval().
 _PORTAL_CSP = (
-    "default-src 'self'; script-src 'self'; "
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "img-src 'self' data: https://cdn.discordapp.com; "
     "font-src 'self' https://fonts.gstatic.com; connect-src 'self'"
@@ -298,6 +300,14 @@ app.include_router(v2_monitor.router)
 # the path param swallows "grants" and raises 400 "account_id must be a
 # positive integer".
 app.include_router(v2_players.router)
+# Player requests queue (admin plan F7). /v2/players/requests must register before
+# the v2_player catch-all; it sits above the Events block, which the live patcher
+# (ops/events-manager/patch_main.py) places directly before that catch-all.
+try:
+    from routers import v2_requests
+    app.include_router(v2_requests.router)
+except ImportError:
+    logging.getLogger(__name__).warning("routers.v2_requests absent; /v2/players/requests not registered")
 # Events Manager (ADMIN-02): the admin-panel door onto the same event store.
 # /v2/players/events must also register before the v2_player catch-all.
 try:
@@ -386,6 +396,13 @@ try:
     app.include_router(portal_events.router)
 except ImportError:
     logging.getLogger(__name__).warning("routers.portal_events absent; /portal/events/* not registered")
+# Player requests (portal plan D3) under /portal/requests: file one, read your own.
+# Reads LASTSIETCH_PORTAL_REQUESTS_ENABLED (default off) per request.
+try:
+    from routers import portal_requests
+    app.include_router(portal_requests.router)
+except ImportError:
+    logging.getLogger(__name__).warning("routers.portal_requests absent; /portal/requests not registered")
 # Dated public report editions; collection and publishing use restricted routes.
 from routers import portal_reports
 app.include_router(portal_reports.router)

@@ -260,7 +260,7 @@ async def _run_update(game_id: str, game: dict, user: dict, ip: str, job: dict):
         job["status"] = "failed"
         job["finished_at"] = _utc_now_iso()
         job["error"] = str(e)[:500]
-        # Best-effort failure announcement (bot-logs only; players don't see operational noise).
+        # Best-effort failure announcement (staff log channel only; players don't see operational noise).
         # Do NOT include the raw exception text — upstream errors (relay HTTPException, SteamCMD
         # output, qm guest exec stderr) can contain sudo prompts, API keys, or other secrets.
         # The full error lives in the admin panel's update status modal + audit log; admins

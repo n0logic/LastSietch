@@ -1,0 +1,127 @@
+{% extends "v2/base.html" %}
+{% block title %}Requests · Players{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="/admin/static/css/v2/requests.css?v=20261030a">
+{% endblock %}
+{% block content %}
+<main class="v2-main rq" id="v2-requests">
+
+  <header class="rq__header">
+    <div>
+      <h1 class="rq__title">Player requests</h1>
+      <p class="rq__copy">
+        What players asked staff to do: base relocations, Deep Desert bases, CHOAM terminals,
+        inactive-base reports and vehicle recovery. Triage here, then fulfil with the tool each
+        request links to. The player sees the status and the player note only, never the
+        assignee or the staff note.
+      </p>
+    </div>
+    <button class="btn btn-accent btn-sm" type="button" id="rq-new">Log a request</button>
+  </header>
+
+  <div class="rq__bar">
+    <div class="rq__pills" role="group" aria-label="Status">
+      <button type="button" class="rq__pill rq__pill--on" data-status="open">Open <b data-count="open"></b></button>
+      {% for s in statuses %}<button type="button" class="rq__pill" data-status="{{ s }}">{{ s|capitalize }} <b data-count="{{ s }}"></b></button>{% endfor %}
+      <button type="button" class="rq__pill" data-status="all">All</button>
+    </div>
+    <div class="rq__filters">
+      <label class="rq__f"><span>Type</span>
+        <select id="rq-type">
+          <option value="">Any type</option>
+          {% for key, label, ref in types %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="rq__f"><span>Assignee</span>
+        <select id="rq-assignee">
+          <option value="">Anyone</option>
+          <option value="-">Unassigned</option>
+          <option value="{{ user.username }}">Me</option>
+        </select>
+      </label>
+      <label class="rq__f rq__f--grow"><span>Search</span>
+        <input type="search" id="rq-q" placeholder="Player, totem, vehicle or #id" maxlength="{{ limits.name }}" autocomplete="off">
+      </label>
+    </div>
+  </div>
+
+  <div class="rq__tablewrap">
+    <table class="rq__table">
+      <thead><tr><th>#</th><th>Type</th><th>Player</th><th>About</th><th>Status</th><th>Assignee</th><th>Filed</th></tr></thead>
+      <tbody id="rq-rows" aria-live="polite"><tr><td colspan="7" class="rq__empty">Loading requests</td></tr></tbody>
+    </table>
+  </div>
+
+  <aside class="rq-drawer" id="rq-drawer" aria-hidden="true">
+    <div class="rq-drawer__panel" role="dialog" aria-modal="true" aria-labelledby="rq-drawer-title">
+      <header class="rq-drawer__head">
+        <h2 class="rq-drawer__title" id="rq-drawer-title">Request</h2>
+        <button type="button" class="rq-drawer__close" id="rq-drawer-close" aria-label="Close">&times;</button>
+      </header>
+
+      <div class="rq-drawer__body" id="rq-detail" hidden>
+        <dl class="rq__meta" id="rq-meta"></dl>
+        <p class="rq__route" id="rq-route"></p>
+
+        <form id="rq-form" novalidate>
+          <div class="rq__row2">
+            <div class="form-group">
+              <label for="rq-status">Status</label>
+              <select id="rq-status">{% for s in statuses %}<option value="{{ s }}">{{ s|capitalize }}</option>{% endfor %}</select>
+            </div>
+            <div class="form-group">
+              <label for="rq-assign">Assignee</label>
+              <select id="rq-assign"><option value="">Nobody</option></select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="rq-staff-note">Staff note <span class="rq__tag">staff only</span></label>
+            <textarea id="rq-staff-note" rows="4" maxlength="{{ limits.note }}"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="rq-player-note">Player note <span class="rq__tag rq__tag--public">shown to the player</span></label>
+            <textarea id="rq-player-note" rows="3" maxlength="{{ limits.note }}"></textarea>
+            <span class="form-hint">Handles only, never a real name. Required to decline.</span>
+          </div>
+          <div class="rq__actions">
+            <button class="btn btn-accent btn-sm" type="submit" id="rq-save">Save</button>
+          </div>
+          <p class="rq__msg" id="rq-msg" role="status"></p>
+        </form>
+
+        <h3 class="rq__h3">History</h3>
+        <ol class="rq__history" id="rq-history"></ol>
+      </div>
+
+      <div class="rq-drawer__body" id="rq-create" hidden>
+        <p class="rq__copy">For an ask that came in by Discord DM. It is staff-only: the player does not see a logged request on the portal.</p>
+        <form id="rq-create-form" novalidate>
+          <div class="form-group">
+            <label for="rq-c-type">Type</label>
+            <select id="rq-c-type">{% for key, label, ref in types %}<option value="{{ key }}" data-ref="{{ ref }}">{{ label }}</option>{% endfor %}</select>
+          </div>
+          <div class="form-group">
+            <label for="rq-c-name">Player (character name)</label>
+            <input type="text" id="rq-c-name" maxlength="{{ limits.name }}" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label for="rq-c-ref" id="rq-c-ref-label">Base (totem)</label>
+            <input type="text" id="rq-c-ref" maxlength="{{ limits.ref }}" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label for="rq-c-details">Details</label>
+            <textarea id="rq-c-details" rows="4" maxlength="{{ limits.details }}"></textarea>
+          </div>
+          <div class="rq__actions">
+            <button class="btn btn-accent btn-sm" type="submit">Log request</button>
+          </div>
+          <p class="rq__msg" id="rq-c-msg" role="status"></p>
+        </form>
+      </div>
+    </div>
+  </aside>
+</main>
+{% endblock %}
+{% block scripts %}
+<script src="/admin/static/js/v2/requests.js?v=20261030a" defer></script>
+{% endblock %}

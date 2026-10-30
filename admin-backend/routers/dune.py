@@ -11,6 +11,8 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+import map_instances
+import map_model
 from auth import get_current_user, require_admin
 from cache import ttl_cache
 from config import RELAY_API_KEY, RELAY_URL
@@ -546,6 +548,22 @@ def _count_by_map(points) -> dict:
     return out
 
 
+# Untracked map instances (map instance config `tracked: false`) stay off every
+# public position and vehicle feed: by partition, and by (engine map, dimension)
+# for rows that carry no partition tag. A row with no map is a Hagga row.
+UNTRACKED_PARTITIONS = map_instances.untracked_partitions()
+UNTRACKED_MAP_DIMS = frozenset(
+    (map_model.MAPS[r["map"]]["engine_map"], r["dim"])
+    for r in map_instances.instances()
+    if not r["tracked"] and r["dim"] is not None and r["map"] in map_model.MAPS)
+
+
+def _publicly_tracked(row) -> bool:
+    if row.get("p") in UNTRACKED_PARTITIONS:
+        return False
+    return ((row.get("m") or "HaggaBasin"), row.get("d")) not in UNTRACKED_MAP_DIMS
+
+
 async def positions_payload() -> dict:
     """The public positions payload WITHOUT the per-IP rate check. The admin
     Live Map used to call this directly: an admin session is already gated by
@@ -561,9 +579,9 @@ async def positions_payload() -> dict:
 
     # Coords + partition tag only. Defensively strip anything that is not
     # x/y/p (partition_id) from each entry so a future relay change can never
-    # leak PII through here. `p` is the Hagga sietch partition (1=Habbanya;
-    # 33=Amtal is dropped below; 32 was Kulon until it closed 2026-10-28) and is
-    # a non-identifying world id.
+    # leak PII through here. `p` is the Hagga sietch partition (the map instance
+    # config's `partition`; untracked ones are dropped below) and is a
+    # non-identifying world id.
     # The strip is now load-bearing rather than defensive: since 2026-09-04 the
     # game-host feed DOES carry `a` (account id) and `n` (character name), for
     # the admin Live Map. This allowlist is what keeps them off the public wire.
@@ -572,9 +590,9 @@ async def positions_payload() -> dict:
     # 3 of 5 online players were invisible to it. Both are world ids, not
     # identifiers of a person, so the PII posture is unchanged — the defensive
     # strip below still drops anything not on this allowlist.
-    # AMTAL EXCLUSION (owner, 2026-08-27): partition 33 is the full-PvP sietch —
-    # public live positions there are a free hunting tool, so Amtal players are
-    # never emitted. This is the choke point for every POLLED public read (the
+    # UNTRACKED EXCLUSION (owner, 2026-08-27): an untracked sietch (by default the
+    # full-PvP one) gets no public live positions, which would be a free hunting
+    # tool, so its players are never emitted. This is the choke point for every POLLED public read (the
     # /dune page poll, the V1 portal map, the nextgen map). The /dune page's
     # PRIMARY path is the SSE proxy below, which is fed by the telemetry sweep,
     # not by this payload: it applies the same policy per frame in
@@ -584,8 +602,7 @@ async def positions_payload() -> dict:
         {"x": p.get("x"), "y": p.get("y"), "p": p.get("p"),
          "m": p.get("m"), "d": p.get("d")}
         for p in (raw.get("players") or [])
-        if p.get("p") != 33
-        and not ((p.get("m") or "HaggaBasin") == "HaggaBasin" and p.get("d") == 2)
+        if _publicly_tracked(p)
     ]
     # `count` and `by_map` are REBUILT from the filtered list (review of PR #131,
     # 2026-09-30): the collector computes both before any filter, so passing them
@@ -619,14 +636,13 @@ async def vehicles_payload() -> dict:
 
     AMTAL EXCLUSION (owner ruling 2026-08-27, extended 2026-09-30): a vehicle
     usually has its driver in it, so Amtal vehicles on the public map track
-    players as well as the positions feed would. Drop partition 33, and on Hagga
-    also dimension 2 (Amtal's dim, map_model.py): vehicles with no partition tag
-    carry only `d`, and the /dune page draws untagged ones on Habbanya."""
+    players as well as the positions feed would. Drop untracked partitions, and
+    on their map also their dimensions: vehicles with no partition tag carry only
+    `d`, and the /dune page draws untagged ones on the first Hagga sietch."""
     raw = await vehicles_raw_payload()
     public = [
         v for v in raw.get("vehicles") or []
-        if v.get("p") != 33
-        and not ((v.get("m") or "HaggaBasin") == "HaggaBasin" and v.get("d") == 2)
+        if _publicly_tracked(v)
     ]
     return {**raw, "vehicles": public, "count": len(public), "by_map": _count_by_map(public)}
 
@@ -681,8 +697,8 @@ def public_stream_frame(frame: str):
     partition, so this is the public choke point for the live path (the polled
     path is positions_payload). Rules: comment / keepalive frames pass through
     untouched; a data frame is parsed, every point is rebuilt from the
-    x/y/p allowlist (never copied), partition 33 (Amtal, owner ruling
-    2026-08-27) is dropped and `count` is recomputed; a data frame that does
+    x/y/p allowlist (never copied), untracked partitions (owner ruling
+    2026-08-27) are dropped and `count` is recomputed; a data frame that does
     not parse as a JSON object is DROPPED (fail closed), never forwarded raw."""
     if not frame.strip():
         return None
@@ -706,7 +722,7 @@ def public_stream_frame(frame: str):
     players = [
         {k: pt.get(k) for k in _STREAM_POINT_KEYS}
         for pt in (payload.get("players") or [])
-        if isinstance(pt, dict) and pt.get("p") != 33 and pt.get("p") is not None
+        if isinstance(pt, dict) and pt.get("p") not in UNTRACKED_PARTITIONS and pt.get("p") is not None
     ]
     payload["players"] = players
     payload["count"] = len(players)
@@ -883,7 +899,7 @@ async def dune_progression_levelups(request: Request, limit: int = 50):
 # Amtal), level-ups anonymous, no positions, no names. Every list below is
 # REBUILT from an allowlist, never copied from the relay.
 
-# Character names hidden from the public standings (your staff), comma-separated, case-insensitive.
+# Character names hidden from the public standings and the PvP board (staff), comma-separated, case-insensitive.
 STANDINGS_EXCLUDE = {n.strip().lower() for n in os.environ.get("LASTSIETCH_STANDINGS_EXCLUDE", "").split(",")
                      if n.strip()}
 LEVEL_BUCKETS = 20      # 10 levels each, 1..200
@@ -1286,24 +1302,32 @@ WARM_REPORT_MAX_AGE_S = 600
 # Canonical board rows. `src` locates the row in the payload:
 #   ("dim", <engine map>, <dimensionIndex>)   dimension maps, always on
 #   ("instanced", <engine map>)               instanced maps, scale on demand
-# Names and modes track admin-backend/map_model.py MAPS[..]["instances"]: Deep
-# Desert labels its two instances by mode, Hagga by sietch name.
-_TRAFFIC_ROWS = (
-    {"key": "deep-desert:pve", "map_key": "deep-desert", "inst": "pve",
-     "name": "Deep Desert", "mode": "PvE", "src": ("dim", "DeepDesert_1", 0)},
-    {"key": "deep-desert:pvp", "map_key": "deep-desert", "inst": "pvp",
-     "name": "Deep Desert", "mode": "PvP", "src": ("dim", "DeepDesert_1", 1)},
-    {"key": "hagga:habbanya", "map_key": "hagga", "inst": "habbanya",
-     "name": "Habbanya", "mode": "PvE", "src": ("dim", "Survival_1", 0)},
-    # Kulon (Survival_1 dim 1) closed 2026-10-28: no row. Should a dim 1 server
-    # ever report again, it is not on the board and its rules block keys as
-    # "Survival_1:1" (_canonical_row_key's fallback).
-    # Owner ruling 891b8aa: Amtal stays public-count-free. players / in_game /
-    # queue are all player counts, so all three are withheld, not just the first
-    # -- publishing "0 in game" would answer the question the ruling closes.
-    {"key": "hagga:amtal", "map_key": "hagga", "inst": "amtal",
-     "name": "Amtal", "mode": "Full PvP", "tracked": False,
-     "src": ("dim", "Survival_1", 2)},
+# The dimension maps' rows come from the map instance config, the same list
+# map_model.py MAPS[..]["instances"] is built from. Open instances only: a
+# closed sietch has no row, and should its dimension ever report again it is not
+# on the board and its rules block keys as "<map>:<dim>" (_canonical_row_key's
+# fallback). Owner ruling 891b8aa: an untracked instance stays public-count-free.
+# players / in_game / queue are all player counts, so all three are withheld, not
+# just the first -- publishing "0 in game" would answer the question the ruling
+# closes.
+_DIM_MAP_SOURCES = (("deep-desert", "DeepDesert_1"), ("hagga", "Survival_1"))
+
+
+def _instance_traffic_rows():
+    rows = []
+    for map_key, source in _DIM_MAP_SOURCES:
+        for r in map_instances.open_instances(map_key):
+            if r["dim"] is None:
+                continue
+            row = {"key": "%s:%s" % (map_key, r["inst"]), "map_key": map_key, "inst": r["inst"],
+                   "name": r["name"], "mode": r["mode"], "src": ("dim", source, r["dim"])}
+            if not r["tracked"]:
+                row["tracked"] = False
+            rows.append(row)
+    return tuple(rows)
+
+
+_TRAFFIC_ROWS = _instance_traffic_rows() + (
     {"key": "arrakeen:main", "map_key": "arrakeen", "inst": "main",
      "name": "Arrakeen", "mode": "Social hub", "src": ("instanced", "SH_Arrakeen")},
     {"key": "harko-village:main", "map_key": "harko-village", "inst": "main",

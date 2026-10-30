@@ -17,23 +17,25 @@
   import LandsraadStanding from '$lib/components/LandsraadStanding.svelte';
   import TrafficBoard from '$lib/components/desert/TrafficBoard.svelte';
   import { api } from '$lib/api.js';
+  import { mapInstances, loadMapInstances } from '$lib/mapInstances.svelte.js';
+  import { boardOrder } from '$lib/mapInstances.js';
 
-  // KEEP IN SYNC with routes/maps/+page.svelte BOARDS. The maps hub owns the
-  // cards (art, blurbs, live counts); this is the link row, so only what a link
-  // needs is here.
-  const BOARDS = [
-    { key: 'deep-desert', inst: 'pve', name: 'Deep Desert', chip: 'PvE' },
-    { key: 'deep-desert', inst: 'pvp', name: 'Deep Desert', chip: 'PvP' },
-    { key: 'hagga', inst: 'habbanya', name: 'Habbanya', chip: 'PvE' },
-    { key: 'hagga', inst: 'amtal', name: 'Amtal', chip: 'Full PvP' },
+  // The link row: one per open map instance (GET /portal/features, in board
+  // order), then the social hubs, the same set the maps hub carries.
+  const HUBS = [
     { key: 'arrakeen', inst: null, name: 'Arrakeen', chip: 'Social hub' },
     { key: 'harko-village', inst: null, name: 'Harko Village', chip: 'Social hub' },
   ];
+  let BOARDS = $derived([
+    ...boardOrder(mapInstances.list).map((i) => ({ key: i.map, inst: i.inst, name: i.name, chip: i.mode })),
+    ...HUBS,
+  ]);
 
   let overview = $state(null);
   let standings = $state(null);
 
   onMount(() => {
+    loadMapInstances();
     loadOverview();
     loadStandings();
     const a = setInterval(loadOverview, 30_000);

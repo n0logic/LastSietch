@@ -19,18 +19,35 @@ tracking + dune.gaming.tools cross-check 2026-06-09):
     Large spice candidate sites are auto-discovered per cycle from the RAM
     reader and injected by the /data route (fallback list below).
   Hagga Basin: HAGGA_CAL origin -457200 span 812800 (matches the live 8K image);
-    real static terrain image HaggaBasin.webp as the backdrop. One terrain, two
-    sietch instances (Habbanya / Amtal) split by partition.
+    real static terrain image HaggaBasin.webp as the backdrop. One terrain, the
+    sietch instances of the map instance config split by partition.
 """
 import json
 import logging
 import re
 from pathlib import Path
 
+import map_instances
+
 logger = logging.getLogger(__name__)
 
 _DATA = Path(__file__).parent / "data"
 VIEW = 1000.0           # normalized viewBox the JS engine renders into
+
+
+def _config_instances(map_key):
+    """A map's open instances from the map instance config, in the registry's
+    shape. A partitioned instance (a sietch) is named for itself and carries its
+    partition; an unpartitioned one (Deep Desert) is labelled by its mode."""
+    out = []
+    for r in map_instances.open_instances(map_key):
+        if r["partition"] is not None:
+            out.append({"key": r["inst"], "label": r["name"], "mode": r["mode"],
+                        "dim": r["dim"], "part": r["partition"]})
+        else:
+            out.append({"key": r["inst"], "label": r["mode"], "dim": r["dim"]})
+    return out
+
 
 # --- per-map registry --------------------------------------------------------
 MAPS = {
@@ -55,8 +72,7 @@ MAPS = {
         # layout id is known (matcher or owner override). Bump ?v= on every re-bake.
         "backdrop_layouts": {"template": "/admin/static/img/maps/dd-islands/dd-layout-{id}.webp?v=20260902a"},
         "card_image": "/admin/static/img/dd-map-card.webp",  # hub card art
-        "instances": [{"key": "pve", "label": "PvE", "dim": 0},
-                      {"key": "pvp", "label": "PvP", "dim": 1}],
+        "instances": _config_instances("deep-desert"),
         "has_spice": True,
         # `has_storms` is deliberately SEPARATE from has_spice: sandstorms and
         # spice are unrelated systems that merely happened to coexist on DD only.
@@ -80,29 +96,22 @@ MAPS = {
         "grid": None,                  # open world, no survey grid
         "backdrop": {"type": "image", "src": "/assets/HaggaBasin.webp",
                      "w": 8192, "h": 8192},
-        # Two live Hagga sietches share the same terrain + static markers
-        # (dimension_index=-1), split by partition_id: 1=Habbanya (PvE),
-        # 33=Amtal (full PvP; browser name "Amtal-Full-PvP"). Kulon (partition
-        # 32, dim 1) closed 2026-10-28 and its bases moved to Amtal; its
-        # leftover rows sit on partition NULL / dim 1, which no instance here
-        # matches, so they route nowhere instead of onto a live tab.
+        # The Hagga sietches share the same terrain + static markers
+        # (dimension_index=-1), split by partition_id; the list comes from the
+        # map instance config (map_instances.py). Closed sietches are left out:
+        # their leftover rows match no instance here, so they route nowhere
+        # instead of onto a live tab.
         # `part` is the discriminator the /me self-marker and the public
         # /api/dune/positions player layer filter on (positions carries only
         # `p`=partition, so partition is the ground truth). `dim` is the real
-        # dune.actors.dimension_index, not a token: verified live 2026-08-27,
-        # partition 1 -> dim 0, 33 -> dim 2, with no row breaking the pairing
-        # (the Kulon close kept Amtal on dim 2, leaving a gap at 1). The V1 map
-        # JS has no `part` and filters its me-layer on `dim` alone, so that
-        # correspondence is what keeps V1 correct.
-        "instances": [
-            {"key": "habbanya", "label": "Habbanya", "mode": "PvE",
-             "dim": 0, "part": 1},
-            {"key": "amtal", "label": "Amtal", "mode": "Full PvP",
-             "dim": 2, "part": 33},
-        ],
+        # dune.actors.dimension_index, not a token: each partition runs on one
+        # dimension (verified live 2026-08-27). The V1 map JS has no `part` and
+        # filters its me-layer on `dim` alone, so that correspondence is what
+        # keeps V1 correct.
+        "instances": _config_instances("hagga"),
         "has_spice": False,
-        # Both sietches storm independently (Amtal's autospawn is off today,
-        # so its layer stays empty until it is re-enabled -- no code change needed).
+        # Each sietch storms independently (one with autospawn off has an empty
+        # layer until it is re-enabled -- no code change needed).
         "has_storms": True,
         "spice_candidates": [],
     },

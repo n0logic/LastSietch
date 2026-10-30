@@ -10,7 +10,7 @@
   import { base } from '$app/paths';
   import EffectChip from '$lib/components/events/EffectChip.svelte';
   import LiveCountdown from '$lib/components/LiveCountdown.svelte';
-  import { heroState, weekendAction } from '$lib/shellHome.js';
+  import { heroState, weekendAction, weekendArt, WEEKEND_ART_VERSION } from '$lib/shellHome.js';
   import { timePair } from '$lib/weekend.js';
 
   let { slot = null, rotation = [], appearance, now = Date.now() } = $props();
@@ -28,6 +28,9 @@
   let st = $derived(heroState(slot));
   let action = $derived(weekendAction(slot?.effect || null, base));
   let plate = $derived(`/img/v3/plates/${appearance.map}-${appearance.band}-${appearance.weather}`);
+  // The weekend's own art when it has an effect; an open weekend keeps the map plate.
+  let art = $derived(weekendArt(slot?.effect || null));
+  const av = `?v=${WEEKEND_ART_VERSION}`;
   let target = $derived(slot && st.countdown ? new Date(st.countdown === 'end' ? slot.endMs : slot.startMs).toISOString() : null);
   let endPair = $derived(slot ? timePair(slot.endMs, zone) : { et: '', local: '' });
   let startPair = $derived(slot ? timePair(slot.startMs, zone) : { et: '', local: '' });
@@ -35,10 +38,21 @@
 </script>
 
 <section class="hero" class:arrival aria-labelledby="wk-title" data-state={st.kind}>
-  <picture>
-    <source media="(max-width: 759px)" srcset={`${plate}-small.jpg`} />
-    <img class="plate" src={`${plate}.jpg`} alt="" fetchpriority="high" width="1280" height="720" />
-  </picture>
+  {#if art}
+    <picture>
+      <source media="(max-width: 759px)" type="image/avif" srcset={`${art}-mobile.avif${av}`} />
+      <source media="(max-width: 759px)" type="image/webp" srcset={`${art}-mobile.webp${av}`} />
+      <source media="(max-width: 759px)" srcset={`${art}-mobile.jpg${av}`} />
+      <source type="image/avif" srcset={`${art}-hero.avif${av}`} />
+      <source type="image/webp" srcset={`${art}-hero.webp${av}`} />
+      <img class="plate" src={`${art}-hero.jpg${av}`} alt="" fetchpriority="high" width="2560" height="1100" />
+    </picture>
+  {:else}
+    <picture>
+      <source media="(max-width: 759px)" srcset={`${plate}-small.jpg`} />
+      <img class="plate" src={`${plate}.jpg`} alt="" fetchpriority="high" width="1280" height="720" />
+    </picture>
+  {/if}
   <div class="sun" aria-hidden="true"></div>
 
   <div class="copy">

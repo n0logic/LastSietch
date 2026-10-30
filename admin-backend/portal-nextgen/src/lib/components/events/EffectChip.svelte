@@ -6,14 +6,18 @@
   // Ibad blue only on `running`: that is the one state the runner read back on
   // the servers. A missed or failed effect wears red and never reads as live. A
   // title-derived or planned effect has no state and shows none, because nothing
-  // measured it.
+  // measured it. A scoped effect names its instance from the shared map-instance
+  // list (GET /portal/features).
+  import { onMount } from 'svelte';
   import { EFFECTS, scopeText, stateText } from '$lib/weekend.js';
+  import { mapInstances, loadMapInstances } from '$lib/mapInstances.svelte.js';
 
   let { effect = null, state = null, scope = null, open = false, detail = false } = $props();
 
   let info = $derived(EFFECTS[effect] || null);
   let label = $derived(stateText(state, open));
-  let where = $derived(scopeText(scope));
+  onMount(loadMapInstances);
+  let where = $derived(scopeText(scope, mapInstances.list));
 </script>
 
 {#if info}

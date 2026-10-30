@@ -1,4 +1,4 @@
-const NAMES = { habbanya: 'Habbanya', amtal: 'Amtal', 'dd-pve': 'Deep Desert', 'dd-pvp': 'Deep Desert' };
+import { instanceFor } from '../mapInstances.js';
 
 export function timeBand(hour) {
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) return 'dusk';
@@ -8,17 +8,16 @@ export function timeBand(hour) {
   return 'night';
 }
 
-export function homeAppearance(signals, clock) {
+export function homeAppearance(signals, clock, instances) {
   const s = signals || {};
-  const map = (s.mapKey === 'hagga'
-    // Hagga dims: 0 Habbanya, 2 Amtal. Dim 1 was Kulon (closed 2026-10-28); a
-    // stale 1 falls back to Habbanya like any other unknown dim.
-    ? { 0: 'habbanya', 2: 'amtal' }[s.dim] || 'habbanya'
-    : s.dim === 1 ? 'dd-pvp' : 'dd-pve');
-  const inst = map === 'amtal' ? 'Full PvP' : map === 'dd-pvp' ? 'PvP' : 'PvE';
+  // The board's instance at the selected dim; an unknown or closed dim falls back
+  // to that map's first open instance, never a dead plate. No instances read yet
+  // (or none configured) leaves the stand blank.
+  const inst = instanceFor(instances, s.mapKey === 'hagga' ? 'hagga' : 'deep-desert', s.dim);
   return {
-    map, label: NAMES[map], mode: inst, band: timeBand(clock?.local_hour),
-    weather: s.stormActive ? 'storm' : 'clear', untracked: map === 'amtal',
+    map: inst ? inst.key : null, label: inst ? inst.name : '', mode: inst ? inst.mode : '',
+    band: timeBand(clock?.local_hour),
+    weather: s.stormActive ? 'storm' : 'clear', untracked: inst ? !inst.tracked : false,
     href: '/world',
   };
 }

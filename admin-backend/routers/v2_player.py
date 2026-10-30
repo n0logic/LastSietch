@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+import map_instances
 import map_model
 import mirror
 from auth import audit_log, get_current_user, require_admin
@@ -467,16 +468,16 @@ async def _load_bb_sources() -> dict:
 
 def _bases_maps() -> list:
     """Map views for the Bases page. Calibration comes from map_model so markers
-    land where the Claims map and the portal put them. Hagga keeps the closed
-    Kulon dimension so its held leftovers stay visible to admins."""
+    land where the Claims map and the portal put them. Hagga lists every sietch
+    in the map instance config, closed ones too, so a closed sietch's held
+    leftovers stay visible to admins."""
     hagga = map_model.MAPS["hagga"]
     dd = map_model.MAPS["deep-desert"]
     return [
         {"key": "hagga", "label": "Hagga Basin", "engine_map": hagga["engine_map"], "cal": hagga["cal"],
          "img": "/admin/static/img/maps/hagga-map.webp?v=1",
-         "dims": [{"dim": 0, "label": "Habbanya \u00b7 PvE"},
-                  {"dim": 1, "label": "Kulon \u00b7 closed"},
-                  {"dim": 2, "label": "Amtal \u00b7 Full PvP"}]},
+         "dims": [{"dim": r["dim"], "label": r["name"] + " \u00b7 " + ("closed" if r["closed"] else r["mode"])}
+                  for r in map_instances.instances() if r["map"] == "hagga" and r["dim"] is not None]},
         {"key": "deep-desert", "label": "Deep Desert", "engine_map": dd["engine_map"], "cal": dd["cal"],
          "img": None,
          "dims": [{"dim": i["dim"], "label": "Deep Desert \u00b7 " + i["label"]} for i in dd["instances"]]},

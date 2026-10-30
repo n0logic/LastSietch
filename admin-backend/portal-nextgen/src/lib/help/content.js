@@ -22,6 +22,15 @@ export const FEATURE_KEYS = ['chat', 'refinery', 'storage_move', 'market_sell_ba
 // Newest first. The page marks the entry whose version equals the running build.
 export const WHATS_NEW = [
   {
+    version: '2.29.0',
+    date: '2026-10-30',
+    title: 'Weekend art',
+    items: [
+      { text: 'Each weekend event (Double XP, Double Landsraad, Crafting and Harvest) now has its own banner art on the Events page.' },
+      { text: 'Linking or relinking a character now takes you straight to Home.' },
+    ],
+  },
+  {
     version: '2.28.25',
     date: '2026-10-30',
     title: 'New gear in the Token Stall',

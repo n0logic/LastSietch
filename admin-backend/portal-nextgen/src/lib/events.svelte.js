@@ -46,6 +46,10 @@ export const EVENT_BANNERS = [
   'spoils-of-kanly',
   'storm-season',
   'war-of-assassins',
+  'weekend-crafting',
+  'weekend-harvest',
+  'weekend-landsraad',
+  'weekend-xp',
 ];
 
 // Two minutes. The list is served from a 60s server cache behind a rate limiter,

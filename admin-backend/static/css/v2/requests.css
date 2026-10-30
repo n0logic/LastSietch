@@ -1,0 +1,65 @@
+/* Player requests queue (F7). Amber is chrome, as everywhere in the panel. The
+   drawer follows the Backups drawer (player-tools.css) so the two feel the same. */
+
+body.admin-page .rq__header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); }
+body.admin-page .rq__title { margin: 0 0 var(--space-2); }
+body.admin-page .rq__copy { max-width: 74ch; margin: 0; font-size: var(--text-sm); line-height: 1.6; color: var(--text-muted); }
+body.admin-page .rq__h3 { margin: var(--space-6) 0 var(--space-3); font-size: var(--text-sm); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+
+body.admin-page .rq__bar { display: flex; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-4); }
+body.admin-page .rq__pills { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+body.admin-page .rq__pill { padding: var(--space-1) var(--space-3); background: var(--bg-card); color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; font: inherit; font-size: var(--text-sm); cursor: pointer; }
+body.admin-page .rq__pill b { font-weight: 600; color: var(--text); margin-left: 2px; }
+body.admin-page .rq__pill b:empty { display: none; }
+body.admin-page .rq__pill--on { color: var(--text); border-color: var(--accent); }
+body.admin-page .rq__filters { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: end; }
+body.admin-page .rq__f { display: flex; flex-direction: column; gap: 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+body.admin-page .rq__f--grow { flex: 1 1 220px; }
+body.admin-page .rq__f input, body.admin-page .rq__f select { width: 100%; box-sizing: border-box; text-transform: none; letter-spacing: normal; }
+
+body.admin-page .rq__tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 4px; }
+body.admin-page .rq__table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+body.admin-page .rq__table th { text-align: left; padding: var(--space-2) var(--space-3); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); background: var(--bg-card); border-bottom: 1px solid var(--border); white-space: nowrap; }
+body.admin-page .rq__table td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); vertical-align: top; }
+body.admin-page .rq__table tbody tr[data-id] { cursor: pointer; }
+body.admin-page .rq__table tbody tr[data-id]:hover td { background: var(--bg-card); }
+body.admin-page .rq__table tbody tr.rq__row--on td { background: var(--bg-card); }
+body.admin-page .rq__table tbody tr.rq__row--on td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+body.admin-page .rq__table tbody tr:last-child td { border-bottom: 0; }
+body.admin-page .rq__id { font-family: var(--font-mono); color: var(--text-muted); }
+body.admin-page .rq__muted { color: var(--text-muted); }
+body.admin-page .rq__empty { color: var(--text-muted); padding: var(--space-4) var(--space-3); }
+
+body.admin-page .rq__status { display: inline-block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+body.admin-page .rq__status--new { color: var(--accent-bright); }
+body.admin-page .rq__status--scheduled { color: var(--text); }
+body.admin-page .rq__status--done { color: var(--green); }
+body.admin-page .rq__status--declined { color: var(--red); }
+
+body.admin-page .rq-drawer { position: fixed; inset: 0; z-index: 200; display: none; background: rgba(0, 0, 0, 0.55); }
+body.admin-page .rq-drawer--open { display: block; }
+body.admin-page .rq-drawer__panel { position: absolute; top: 0; right: 0; height: 100%; width: min(520px, 100vw); display: flex; flex-direction: column; background: var(--bg-card); border-left: 1px solid var(--border-strong); box-shadow: -8px 0 32px rgba(0, 0, 0, 0.45); overflow-y: auto; box-sizing: border-box; }
+body.admin-page .rq-drawer__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-4); border-bottom: 1px solid var(--border); }
+body.admin-page .rq-drawer__title { font-family: var(--font-mono); font-size: var(--text-lg); margin: 0; }
+body.admin-page .rq-drawer__close { background: none; border: none; color: var(--text-muted); font-size: var(--text-2xl); line-height: 1; cursor: pointer; padding: 0 var(--space-2); }
+body.admin-page .rq-drawer__close:hover { color: var(--text); }
+body.admin-page .rq-drawer__body { padding: var(--space-4); }
+body.admin-page .rq-drawer__body input, body.admin-page .rq-drawer__body select, body.admin-page .rq-drawer__body textarea { width: 100%; box-sizing: border-box; }
+
+body.admin-page .rq__meta { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-2) var(--space-4); margin: 0 0 var(--space-4); font-size: var(--text-sm); }
+body.admin-page .rq__meta dt { color: var(--text-muted); }
+body.admin-page .rq__meta dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+body.admin-page .rq__route { margin: 0 0 var(--space-5); padding: var(--space-3); font-size: var(--text-sm); background: var(--bg-deep); border: 1px solid var(--border); border-left: 2px solid var(--accent); border-radius: 4px; }
+body.admin-page .rq__row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+@media (max-width: 600px) { body.admin-page .rq__row2 { grid-template-columns: 1fr; } }
+body.admin-page .rq__tag { margin-left: var(--space-2); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+body.admin-page .rq__tag--public { color: var(--accent-bright); }
+body.admin-page .rq__actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
+body.admin-page .rq__msg { min-height: 1.4em; margin: var(--space-3) 0 0; font-size: var(--text-sm); color: var(--text-muted); }
+body.admin-page .rq__msg--bad { color: var(--red); }
+body.admin-page .rq__history { margin: 0; padding-left: var(--space-5); font-size: var(--text-sm); display: flex; flex-direction: column; gap: var(--space-3); }
+body.admin-page .rq__history-change { color: var(--text-muted); overflow-wrap: anywhere; }
+
+@media (max-width: 700px) {
+  body.admin-page .rq__header { flex-direction: column; }
+}

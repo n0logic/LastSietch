@@ -37,7 +37,7 @@
   }
   // Cache-bust the dynamic import — /admin/static/ ships no Cache-Control, so
   // an un-queried module URL gets heuristically pinned by the browser.
-  var ASSET_V = '20261030g';
+  var ASSET_V = '20261031a';
   var _viewerModule = null;
 
   function getViewerModule() {

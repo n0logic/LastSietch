@@ -15,12 +15,15 @@
   import { useAuthGate } from '$lib/authGate.svelte.js';
   import { home, subscribe, setDim, loadHomeOverview } from '$lib/home.svelte.js';
   import { homeAppearance } from '$lib/home/appearance.js';
+  import { mapInstances } from '$lib/mapInstances.svelte.js';
+  import { sietches, modeLine } from '$lib/mapInstances.js';
   import { api } from '$lib/api.js';
   import { EVENT_BANNERS } from '$lib/events.svelte.js';
 
   const gate = useAuthGate();
   onMount(subscribe);
   // The redesigned Home is dark behind LASTSIETCH_PORTAL_SHELL_NEXT_ENABLED (or ?shell=next).
+  // The same read brings the map-instance list the stand and map links draw from.
   onMount(loadShell);
   let nextEvent = $state(null);
   let eventLive = $state(false);
@@ -42,7 +45,7 @@
   $effect(() => { if (gate.authed) loadHomeOverview(); });
 
   let s = $derived(home.signals);
-  let appearance = $derived(homeAppearance(s, home.raw.overview?.clock));
+  let appearance = $derived(homeAppearance(s, home.raw.overview?.clock, mapInstances.list));
   let instances = $derived(home.raw.data?.instances ?? [{ key: 'pve', label: 'PvE', dim: 0 }, { key: 'pvp', label: 'PvP', dim: 1 }]);
   let freshSec = $derived(home.lastReadAt ? Math.max(0, Math.round((s.now - home.lastReadAt) / 1000)) : null);
   let fresh = $derived(home.raw.live != null && home.raw.live.available !== false && freshSec != null && freshSec <= 30);
@@ -96,10 +99,10 @@
     <section class="desert" aria-label="Explore the desert">
       <div class="section-head"><h2>Your desert</h2><a href={`${base}/desert`}>World pulse <span aria-hidden="true">↗</span></a></div>
       <div class="map-links">
-        {#each [{ name: 'Habbanya', slug: 'habbanya', mode: 'PvE' }, { name: 'Amtal', slug: 'amtal', mode: 'Full PvP · untracked' }] as map}
-          <a class="map-link" href={`${base}/maps/hagga?inst=${map.slug}`}>
-            <img src={`/img/v3/plates/${map.slug}-dusk-clear-small.jpg`} alt="" loading="lazy" width="640" height="360" />
-            <span><b>{map.name}</b><small>{map.mode}</small></span>
+        {#each sietches(mapInstances.list) as map}
+          <a class="map-link" href={`${base}/maps/${map.map}?inst=${map.inst}`}>
+            <img src={`/img/v3/plates/${map.key}-dusk-clear-small.jpg`} alt="" loading="lazy" width="640" height="360" />
+            <span><b>{map.name}</b><small>{modeLine(map)}</small></span>
           </a>
         {/each}
       </div>

@@ -5,6 +5,8 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+import map_instances
+import map_model
 from auth import audit_log, require_admin, require_csrf
 from relay import call_relay
 
@@ -17,6 +19,12 @@ _players_cache: dict = {"data": None, "fetched_at": 0.0}
 # FuncomId is Display#tag (display before '#', numeric tag after).
 FUNCOM_ID_RE = re.compile(r"^[^\s#]{1,32}#[0-9]{1,10}$")
 
+def _sietch_label(r):
+    """'<name> (Hagga Basin, partition 1)', plus the mode for a PvP sietch."""
+    mode = ", " + map_instances.mode_phrase(r["mode"]) if r["pvp"] else ""
+    return "%s (%s, partition %d%s)" % (r["name"], map_model.MAPS[r["map"]]["name"], r["partition"], mode)
+
+
 # Instance -> chat.map routing key (<map>.<dim>). The dim values are UNVERIFIED:
 # only HaggaBasin.0 has rendered in a live test, and even its partition scoping
 # is unconfirmed (chat dimension != m_PartitionId). Until a per-partition capture
@@ -24,13 +32,14 @@ FUNCOM_ID_RE = re.compile(r"^[^\s#]{1,32}#[0-9]{1,10}$")
 # server send is forced to dry-run so a wrong guess can never publish to players.
 # Flip "verified" to True per row once the real <map>.<dim> is captured.
 CHAT_INSTANCES = {
-    "habbanya": {"label": "Habbanya (Hagga Basin, partition 1)", "map": "HaggaBasin", "dim": 0, "verified": False},
-    # Kulon (partition 32) closed 2026-10-28; its row is gone, so a stale "kulon"
-    # instance is refused by the 400 below rather than routed anywhere.
-    # dim from the DB dimension_index pairing verified 2026-08-27 (1->0, 33->2);
-    # whether chat routing keys follow dimension_index is still uncaptured, so this row
-    # stays verified: False (dry-run-forced) like its siblings.
-    "amtal": {"label": "Amtal (Hagga Basin, partition 33, full PvP)", "map": "HaggaBasin", "dim": 2, "verified": False},
+    # One row per open sietch in the map instance config. A closed one has no
+    # row, so a stale instance key is refused by the 400 below rather than routed
+    # anywhere. dim is the DB dimension_index (pairing verified 2026-08-27); whether
+    # chat routing keys follow dimension_index is still uncaptured, so these rows
+    # stay verified: False (dry-run-forced) like their siblings.
+    **{r["key"]: {"label": _sietch_label(r), "map": map_model.MAPS[r["map"]]["engine_map"],
+                  "dim": r["dim"], "verified": False}
+       for r in map_instances.sietches()},
     "dd_pvp": {"label": "Deep Desert PvP (partition 8)", "map": "DeepDesert", "dim": 0, "verified": False},
     "dd_pve": {"label": "Deep Desert PvE (partition 31)", "map": "DeepDesert", "dim": 0, "verified": False},
 }

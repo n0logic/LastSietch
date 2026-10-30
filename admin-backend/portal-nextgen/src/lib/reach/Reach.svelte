@@ -1,10 +1,11 @@
 <script>
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { goto } from '$app/navigation';
   import { auth } from '$lib/auth.svelte.js';
   import { api } from '$lib/api.js';
   import { getPref, setPref } from '$lib/prefs.svelte.js';
   import Modal from '$lib/components/Modal.svelte';
+  import { mapInstances, loadMapInstances } from '$lib/mapInstances.svelte.js';
   import { routeIndex, searchIndex, rememberPath } from './index.js';
 
   let { sections = [] } = $props();
@@ -18,7 +19,8 @@
   let help = $state(false);
   let generation = 0;
   let owner = '';
-  let routes = $derived(routeIndex(sections));
+  onMount(loadMapInstances);
+  let routes = $derived(routeIndex(sections, mapInstances.list));
   let pins = $derived(getPref('reach_pins') || []);
   let recent = $derived(getPref('reach_recent') || []);
   let all = $derived([...routes, ...extra]);

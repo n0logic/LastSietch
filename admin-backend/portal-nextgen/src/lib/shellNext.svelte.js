@@ -1,7 +1,8 @@
 // The Home switch for the redesign (P1). One read of /portal/features per page
-// view (the server caches it for a minute), plus the owner's ?shell= override.
+// view (the server caches it for a minute; the map-instance list rides the same
+// read), plus the owner's ?shell= override.
 // See shellFlag.js for the rules; this file only does the I/O.
-import { api } from './api.js';
+import { readFeatures } from './mapInstances.svelte.js';
 import { SHELL_FLAG_KEY, SHELL_KEY, resolveShell, shellChoice, shellGuess } from './shellFlag.js';
 
 export const shell = $state({
@@ -31,13 +32,21 @@ function remember(choice) {
   try { localStorage.setItem(SHELL_KEY, choice); } catch (e) {}
 }
 
+// The shell (P3) and a page can both ask on the same load; they share one read.
+let inflight = null;
+
 /** Resolve the switch. Never throws; a failed read leaves the shipped Home. */
-export async function loadShell() {
+export function loadShell() {
+  if (!inflight) inflight = readShell().finally(() => { inflight = null; });
+  return inflight;
+}
+
+async function readShell() {
   const query = readQuery();
   if (shellChoice(query)) remember(query);
   let flag = false;
   try {
-    const data = await api.server.features();
+    const data = await readFeatures();
     flag = data?.features?.shell_next === true;
   } catch (e) {
     flag = false;

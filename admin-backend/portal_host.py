@@ -134,7 +134,7 @@ def safe_return_to(value, host) -> str:
     protocol-relative `//evil.test` is a redirect off-site that starts with a
     slash, a backslash is one that several browsers normalise into one, and
     whitespace or a control character is how a header is smuggled apart."""
-    default = "/" if is_root_host(host) else "/portal/account"
+    default = v2_home(host)
     if not isinstance(value, str) or not value or len(value) > RETURN_TO_MAX:
         return default
     if not value.startswith("/") or value.startswith("//"):

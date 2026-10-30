@@ -335,7 +335,7 @@ async def alert_inbound_if_over(*, recipient_identity: str, sender_identity: str
                                 ip: str) -> Optional[int]:
     """Fan-in ALERT (never a block). If this identity's 30-day inbound total is
     over the threshold, write a durable audit_log row and post to the ops
-    bot-logs channel — the same signal path update_orchestrator uses.
+    staff log channel: the same signal path update_orchestrator uses.
 
     Deduped to one alert per recipient identity per 24h off the audit_log row
     itself, so the durable record is also the dedupe key and the two cannot
@@ -344,7 +344,7 @@ async def alert_inbound_if_over(*, recipient_identity: str, sender_identity: str
     Best-effort throughout: a Discord outage must never fail a gift.
 
     OPSEC: discord ids and character-facing amounts only. No real names ever
-    reach a channel, and bot-logs is admin-only regardless."""
+    reach a channel, and the staff log channel is admin-only regardless."""
     try:
         total = inbound_30d_total(recipient_identity)
         if total < GIFT_INBOUND_ALERT_30D:

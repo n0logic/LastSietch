@@ -4,9 +4,12 @@
   // underlay placed by the blueprint transform only (overmap-art.json worldRectCm).
   import { worldUrl, stoneStatus, STATUS_TEXT, cardModel, cycle, stoneBands } from './data.js';
   import { base } from '$app/paths';
+  import { mapInstances } from '$lib/mapInstances.svelte.js';
+  import { untrackedBandKeys } from '$lib/mapInstances.js';
   import InstrumentCard from './InstrumentCard.svelte';
 
   let { world, status = null, bands = null, anchorId = null, selectedId = $bindable(null), onopen } = $props();
+  let untracked = $derived(untrackedBandKeys(mapInstances.list));
 
   // Content bounds from the contours + stones, padded; the art rect is mostly empty sky.
   let box = $derived.by(() => {
@@ -40,7 +43,7 @@
 
   let model = $derived.by(() => {
     const s = world.stones.find((x) => x.id === selectedId);
-    return s ? cardModel(s, status, bands) : null;
+    return s ? cardModel(s, status, bands, untracked) : null;
   });
 
   function select(id, el) {
@@ -92,7 +95,7 @@
           <circle r={rr * (s.live ? .62 : .42)} class="core" />
         {/if}
         {#if stoneStatus(s, status) === 'blocked'}<path class="bar" d="M{-rr * 1.5} 0H{rr * 1.5}" vector-effect="non-scaling-stroke" />{/if}
-        {#each stoneBands(s, bands).filter((b) => b.band) as b, bi}
+        {#each stoneBands(s, bands, untracked).filter((b) => b.band) as b, bi}
           {#each [0, 1, 2] as k}
             {@const n = s.facets.length || 1}
             {@const a = (-90 + (360 / n) * bi + (k - 1) * (n > 1 ? 22 : 40)) * Math.PI / 180}

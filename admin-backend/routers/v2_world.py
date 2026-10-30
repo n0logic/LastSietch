@@ -20,11 +20,13 @@ them are always briefly unreachable. Each layer is built inside its own guard an
 degrades to {"available": false, "error": ...}, so a cold relay costs one legend
 row rather than the whole map. The page itself must never 500.
 
-AMTAL: /api/dune/positions filters partition 33 at the single public choke point
+UNTRACKED: /api/dune/positions drops untracked sietches (map instance config,
+Amtal by default) at the single public choke point
 (owner ruling 2026-08-27). That ruling is about the PUBLIC feed -- the portal must
 never be a hunting tool -- and it was never about the operators. The players layer
 therefore reads routers.dune.positions_raw_payload(), the unprojected side of the
-same cache and the same relay call, and draws Amtal like every other instance.
+same cache and the same relay call, and draws untracked sietches like every
+other instance.
 The public projection keeps its filter untouched; this page is require_admin.
 """
 import asyncio
@@ -316,8 +318,8 @@ async def _players_layer(request: Request, map_key: str, m: dict, inst: dict) ->
     positions_raw_payload, not the public projection and not the dune_positions
     ROUTE. The route spends the public per-IP bucket an admin session must not
     share (2026-09-03); the projection strips the account id and the character
-    name and drops partition 33, which left this map drawing anonymous dots and
-    an empty Amtal. Same cache, same relay call, one layer earlier."""
+    name and drops untracked partitions, which left this map drawing anonymous
+    dots and an empty untracked sietch. Same cache, same relay call, one layer earlier."""
     from routers.dune import positions_raw_payload
     payload = await positions_raw_payload()
     if not isinstance(payload, dict):

@@ -17,7 +17,16 @@
   import SendSolariDialog from '$lib/components/SendSolariDialog.svelte';
   import TabBar from '$lib/components/TabBar.svelte';
   import Reach from '$lib/reach/Reach.svelte';
+  import NextShell from '$lib/components/shell/NextShell.svelte';
+  import { shell, loadShell, shellExpectedNext } from '$lib/shellNext.svelte.js';
   let { children } = $props();
+
+  // P3: the redesigned shell (rail, topbar utilities, section tabs) draws only when
+  // the shell switch is on. Until the switch is read, the new shell draws only when
+  // the override or the last read says it is on, so a flag-off viewer gets the
+  // shipped shell below at once and never sees the new one.
+  const expectNext = shellExpectedNext();
+  let nextShell = $derived(shell.status === 'ready' ? shell.next : expectNext);
 
   // Primary nav, grouped into the five IA clusters (wave 4). The grouping is the
   // only change: every route keeps its URL and its place in the bar. `v2:true` =
@@ -132,6 +141,7 @@
 
   onMount(() => {
     applyStoredAppearance();
+    loadShell();
     api.server.features().then((data) => { navFeatures = (data && data.features) || {}; }).catch(() => { navFeatures = {}; });
     // Preferences read after the session is known: the mirror paints first,
     // the account doc replaces it once /portal/me has answered.
@@ -179,6 +189,12 @@
 {#if import.meta.env.VITE_REVIEW_PREVIEW === 'true'}
   <aside class="review-banner"><b>Local preview</b><span>Sample data. Actions stay local.</span><a href="/?preview=habbanya" data-sveltekit-reload>Habbanya</a><a href="/?preview=amtal" data-sveltekit-reload>Amtal</a><a href="/?preview=anon" data-sveltekit-reload>Signed out</a><a href="/start?preview=unlinked" data-sveltekit-reload>Unlinked</a><a href="http://localhost:4174/dune/">Joining page</a></aside>
 {/if}
+{#if nextShell}
+<NextShell features={navFeatures} {serverStatus} {firedAlerts} {showChat} {chatUnread} mailUnread={mailbox.unread} {activeChar}>
+  {@render children?.()}
+</NextShell>
+{/if}
+{#if !nextShell}
 <header class="topbar">
   <div class="topbar-inner">
     <a class="brand" href={`${base}/`}>
@@ -299,6 +315,7 @@
     </span>
   </div>
 </footer>
+{/if}
 
 {#if sendSolari.open}
   <SendSolariDialog onClose={closeSendSolari} />

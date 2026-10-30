@@ -1,7 +1,6 @@
 <script>
-  // Maps hub: five planning-board cards. There is no JSON endpoint listing maps
-  // (V1's hub is server-rendered), so the board set is a static descriptor kept
-  // in step with map_model.MAPS. Owner ruling 2026-09-30: total population only,
+  // Maps hub: one planning-board card per open map instance, then the social hubs.
+  // Owner ruling 2026-09-30: total population only,
   // so the cards carry no per-world count; one server-wide figure sits on top.
   import { onMount } from 'svelte';
   import { base } from '$app/paths';
@@ -9,33 +8,24 @@
   import PageHeader from '$lib/components/PageHeader.svelte';
   import ServerSchedule from '$lib/components/ServerSchedule.svelte';
   import { api } from '$lib/api.js';
+  import { mapInstances, loadMapInstances } from '$lib/mapInstances.svelte.js';
+  import { MAP_NAMES, boardOrder, sharesName } from '$lib/mapInstances.js';
 
-  // KEEP IN SYNC with admin-backend/map_model.py MAPS (keys, names, card art).
-  // All four registry maps are listed (retention contract: no feature loss vs
-  // the V1 hub); Deep Desert gets one card per instance.
-  const BOARDS = [
-    {
-      key: 'deep-desert', inst: 'pve', name: 'Deep Desert', chip: 'PvE', dim: 0,
-      blurb: 'Survey grid, live spice, worm tracker.',
-      art: '/img/v3/plates/dd-pve-dusk-clear-small.jpg', spice: true,
-    },
-    {
-      key: 'deep-desert', inst: 'pvp', name: 'Deep Desert', chip: 'PvP', dim: 1,
-      blurb: 'The contested sand. Same board, harder rules.',
-      art: '/img/v3/plates/dd-pvp-dusk-clear-small.jpg', spice: true,
-    },
-    // Two live Hagga sietches share the terrain, split by partition.
-    {
-      key: 'hagga', inst: 'habbanya', name: 'Habbanya', region: 'Hagga Basin', chip: 'PvE', part: 1,
-      blurb: 'Habbanya, home turf. Every cave and wreck at true position.',
-      art: '/img/v3/plates/habbanya-dusk-clear-small.jpg', spice: false,
-    },
-    {
-      key: 'hagga', inst: 'amtal', name: 'Amtal', region: 'Hagga Basin', chip: 'Full PvP', part: 33, untracked: true,
+  // Instance boards come from the map-instance config (GET /portal/features, in
+  // board order); the social hubs are game maps with one instance each. Card copy
+  // is keyed by instance key; an instance without any gets its plate and no blurb.
+  const COPY = {
+    'dd-pve': { blurb: 'Survey grid, live spice, worm tracker.' },
+    'dd-pvp': { blurb: 'The contested sand. Same board, harder rules.' },
+    habbanya: { blurb: 'Habbanya, home turf. Every cave and wreck at true position.' },
+    amtal: {
       blurb: 'Amtal, no sanctuary. PvP everywhere, tradeposts included, and no map tracks you. The Riftwatch and Helius Gate settlements are the only safe areas. Storms never drop shields here: you are safe at home while yours holds, so keep the generators fed.',
       warn: 'Tradepost banners can flicker to Guild Peace. Tradeposts are still PvP.',
-      art: '/img/v3/plates/amtal-dusk-clear-small.jpg', spice: false,
     },
+  };
+  // Map-level facts (map_model.MAPS has_spice), not per-server config.
+  const SPICE_MAPS = ['deep-desert'];
+  const HUBS = [
     {
       key: 'arrakeen', inst: null, name: 'Arrakeen', chip: 'Social hub',
       blurb: 'The capital. Services, vendors, representatives.',
@@ -48,6 +38,19 @@
     },
   ];
 
+  function instanceBoard(i, all) {
+    const copy = COPY[i.key] || {};
+    return {
+      key: i.map, inst: i.inst, name: i.name, chip: i.mode,
+      region: sharesName(all, i) ? null : MAP_NAMES[i.map] || null,
+      part: i.partition, dim: i.dim, untracked: !i.tracked,
+      blurb: copy.blurb || '', warn: copy.warn || null,
+      art: `/img/v3/plates/${i.key}-dusk-clear-small.jpg`, spice: SPICE_MAPS.includes(i.map),
+    };
+  }
+
+  let BOARDS = $derived([...boardOrder(mapInstances.list).map((i) => instanceBoard(i, mapInstances.list)), ...HUBS]);
+
   let online = $state(null); // server-wide total, the only live count shown
   let artFailed = $state({});
 
@@ -59,6 +62,7 @@
   }
 
   onMount(() => {
+    loadMapInstances();
     poll();
     const t = setInterval(poll, 45_000);
     return () => clearInterval(t);

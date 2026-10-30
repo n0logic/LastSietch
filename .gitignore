@@ -111,7 +111,10 @@ admin-backend/data/dune-map-icons.json
 admin-backend/data/*-markers-snapshot.json
 admin-backend/data/feature_flags.json
 admin-backend/static/img/stats/
-admin-backend/static/js/vendor/three/
+# the three.js core and the meshopt decoder are fetched by the builder; the text helper modules beside them ship
+admin-backend/static/js/vendor/three/three.module.min.js
+admin-backend/static/js/vendor/three/.three.module.min.js.part
+admin-backend/static/js/vendor/three/meshopt_decoder.module.js
 admin-backend/portal-nextgen/static/fonts/
 admin-backend/portal-nextgen/static/*.png
 admin-backend/portal-nextgen/build/

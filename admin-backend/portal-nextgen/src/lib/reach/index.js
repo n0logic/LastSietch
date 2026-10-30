@@ -1,11 +1,28 @@
-export const MAPS = [
-  { label: 'Habbanya', detail: 'Hagga Basin · PvE', href: '/maps/hagga?inst=habbanya', plate: 'habbanya' },
-  { label: 'Amtal', detail: 'Full PvP · untracked', href: '/maps/hagga?inst=amtal', plate: 'amtal' },
-  { label: 'Deep Desert · PvE', detail: 'Spice, storms and the survey grid', href: '/maps/deep-desert?inst=pve', plate: 'dd-pve' },
-  { label: 'Deep Desert · PvP', detail: 'The contested sand', href: '/maps/deep-desert?inst=pvp', plate: 'dd-pvp' },
+import { MAP_NAMES, boardHref, modeLine, sharesName } from '../mapInstances.js';
+
+// Per-instance search detail lines (copy, keyed by instance key). An instance
+// without one reads "<map> · <mode>", or "<mode> · untracked".
+const MAP_DETAIL = { 'dd-pve': 'Spice, storms and the survey grid', 'dd-pvp': 'The contested sand' };
+
+/** One Reach row per open map instance, in config order. */
+export function instanceMaps(instances) {
+  return (instances || []).map((inst) => ({
+    label: sharesName(instances, inst) ? `${inst.name} · ${inst.mode}` : inst.name,
+    detail: MAP_DETAIL[inst.key] || (inst.tracked ? `${MAP_NAMES[inst.map] || inst.name} · ${inst.mode}` : modeLine(inst)),
+    href: boardHref(inst),
+    plate: inst.key,
+  }));
+}
+
+// The social hubs are game maps with one instance each, not server config.
+const HUBS = [
   { label: 'Arrakeen', detail: 'Social hub', href: '/maps/arrakeen' },
   { label: 'Harko Village', detail: 'Social hub', href: '/maps/harko-village' },
-].map((map) => ({ ...map, kind: 'Map' }));
+];
+
+export function mapRows(instances) {
+  return [...instanceMaps(instances), ...HUBS].map((map) => ({ ...map, kind: 'Map' }));
+}
 
 // Sand Table stones the Reach can jump to by name (ids = overmap-places.json locations).
 export const STONES = [
@@ -19,7 +36,7 @@ export const STONES = [
   ['testing-station-no-152', 'Testing Station No. 152'], ['testing-station-no-195', 'Testing Station No. 195'], ['the-old-quarry', 'The Old Quarry'],
 ].map(([id, label]) => ({ label, detail: 'Sand Table', href: `/world?stone=${id}`, kind: 'Map' }));
 
-export function routeIndex(sections) {
+export function routeIndex(sections, instances) {
   const seen = new Set();
   return sections.flatMap((section) => [
     ...(section.hub ? [{ label: section.group, href: section.hub }] : []),
@@ -31,7 +48,7 @@ export function routeIndex(sections) {
       { label: 'Mailbox', href: '/mailbox', kind: 'Page', detail: 'Messages and deliveries' },
       { label: 'Help', href: '/help', kind: 'Page', detail: 'Guides and changelog' },
       { label: 'Server rules', href: '/rules', kind: 'Page', detail: 'Community rules' },
-      ...MAPS,
+      ...mapRows(instances),
       ...STONES,
     ]).filter((item) => !seen.has(item.href) && seen.add(item.href));
 }

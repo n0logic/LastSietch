@@ -15,6 +15,8 @@
   import { serverTime, subscribeServerTime } from '$lib/server-time.svelte.js';
   import { resolveHour, MODES } from '$lib/world/tod.js';
   import * as worldData from '$lib/world/data.js';
+  import { mapInstances, loadMapInstances } from '$lib/mapInstances.svelte.js';
+  import { untrackedBandKeys } from '$lib/mapInstances.js';
   import GuildChart from '$lib/world/GuildChart.svelte';
   import InstrumentCard from '$lib/world/InstrumentCard.svelte';
   import {
@@ -26,6 +28,7 @@
   let loadError = $state(false);
   let status = $state(null);
   let bands = $state(null);
+  let untracked = $derived(untrackedBandKeys(mapInstances.list));
   let anchorId = $state(null);
   let selectedId = $state(null);
   let mode = $state(null);            // '3d' | 'chart' once chosen
@@ -77,6 +80,7 @@
     const q = $page.url.searchParams.get('view');
     forced = q === '3d' || q === 'chart' ? q : null;
     mode = chooseView({ quality, webgl2: probeWebGL2(), forced });
+    loadMapInstances();
     pollStatus(); pollBands();
     const t1 = setInterval(pollStatus, 45_000);
     const t2 = setInterval(() => { pollBands(); pollStorm(); }, 60_000);
@@ -96,10 +100,10 @@
 
   // ---- derived live state -----------------------------------------------------------
   let statusMap = $derived(world ? Object.fromEntries(world.stones.map((s) => [s.id, stoneStatus(s, status)])) : {});
-  let bandMap = $derived(world ? Object.fromEntries(world.stones.map((s) => [s.id, stoneBands(s, bands)])) : {});
+  let bandMap = $derived(world ? Object.fromEntries(world.stones.map((s) => [s.id, stoneBands(s, bands, untracked)])) : {});
   let focusId = $derived(hover.id || selectedId);
   let focusStone = $derived(world && focusId ? world.stones.find((s) => s.id === focusId) : null);
-  let model = $derived(focusStone ? cardModel(focusStone, status, bands) : null);
+  let model = $derived(focusStone ? cardModel(focusStone, status, bands, untracked) : null);
   let anchorStone = $derived(world && anchorId ? world.stones.find((s) => s.id === anchorId) : null);
 
   $effect(() => { if (ctl && sceneReady) ctl.setStatus(statusMap); });

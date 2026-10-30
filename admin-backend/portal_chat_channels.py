@@ -35,6 +35,7 @@ import logging
 import re
 import time
 
+import map_instances
 import map_model
 from database import get_db
 
@@ -50,22 +51,24 @@ FACTION_LABELS = {"faction:atreides": "House Atreides",
                   "faction:harkonnen": "House Harkonnen"}
 
 # Owner ruling 2026-09-04: the Hagga sietches and the two Deep Desert modes,
-# nothing else. Amtal is off the PUBLIC map list but a linked-only room
-# for it is allowed; the instanced worlds and the social hubs get no room this
-# wave. The ids are FIXED strings and the labels track map_model, so a rename of
-# a sietch lands in one place and does not move anybody's channel id.
-_MAP_CHANNEL_SPECS = (
-    ("map:hagga:habbanya", "hagga", "habbanya"),
-    ("map:hagga:amtal", "hagga", "amtal"),
-    ("map:deep-desert:pve", "deep-desert", "pve"),
-    ("map:deep-desert:pvp", "deep-desert", "pvp"),
-)
+# nothing else. An untracked sietch is off the PUBLIC map list but a linked-only
+# room for it is allowed; the instanced worlds and the social hubs get no room
+# this wave. The list is the map instance config (map_instances.py); an id is
+# "map:<map>:<inst>", built from config KEYS and never from a name, so renaming
+# a sietch relabels its room without moving anybody's channel id.
+CHAT_MAPS = ("hagga", "deep-desert")
+_MAP_CHANNEL_SPECS = tuple(
+    ("map:%s:%s" % (r["map"], r["inst"]), r["map"], r["inst"])
+    for r in map_instances.open_instances() if r["map"] in CHAT_MAPS)
 
-# Owner ruling 2026-10-27: Kulon closed 2026-10-28 and its room stays READ-ONLY.
-# It is still a map channel (readable, moderatable, history intact) but the rail
-# marks it can_post False and portal_chat's send route refuses it. The label is
-# fixed here because map_model no longer carries the instance.
-CLOSED_MAP_CHANNELS = (("map:hagga:kulon", "Hagga Basin (Kulon, closed)"),)
+# Owner ruling 2026-10-27: a closed sietch's room stays READ-ONLY. It is still a
+# map channel (readable, moderatable, history intact) but the rail marks it
+# can_post False and portal_chat's send route refuses it. map_model no longer
+# carries the instance, so the label is built from the config row here.
+CLOSED_MAP_CHANNELS = tuple(
+    ("map:%s:%s" % (r["map"], r["inst"]),
+     "%s (%s, closed)" % ((map_model.MAPS.get(r["map"]) or {}).get("name") or r["map"], r["name"]))
+    for r in map_instances.instances() if r["closed"] and r["map"] in CHAT_MAPS)
 CLOSED_CHANNEL_IDS = frozenset(cid for cid, _label in CLOSED_MAP_CHANNELS)
 
 # How long one character's resolved house is trusted. Faction is a relay read on
@@ -80,7 +83,7 @@ CHANNEL_RE = re.compile(r"[a-z0-9:_-]{1,64}")
 
 
 def _map_label(map_key: str, instance_key: str) -> str:
-    """'Hagga Basin (Habbanya)'. Falls back to the raw keys if map_model ever
+    """'Hagga Basin (<sietch name>)'. Falls back to the raw keys if map_model ever
     stops carrying the instance, so a channel is never labelled with nothing."""
     board = map_model.MAPS.get(map_key) or {}
     name = board.get("name") or map_key

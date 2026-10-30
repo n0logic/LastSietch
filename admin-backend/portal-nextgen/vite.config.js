@@ -31,8 +31,18 @@ for (const p of API_PREFIXES) {
   proxy[p] = { target: 'https://lastsietch.com', changeOrigin: true, secure: true };
 }
 
+// The review preview server is dev-only and not published, so it is loaded only when asked for: a tree without
+// scripts/review-preview.mjs still builds. The specifier is a URL, not a literal, so the config bundler does not
+// try to resolve the file.
+const preview = process.env.LASTSIETCH_PREVIEW === '1';
+const plugins = [sveltekit()];
+if (preview) {
+  const { reviewPreview } = await import(new URL('./scripts/review-preview.mjs', import.meta.url).href);
+  plugins.push(reviewPreview());
+}
+
 export default defineConfig({
-  define: { 'import.meta.env.VITE_REVIEW_PREVIEW': JSON.stringify(process.env.LASTSIETCH_PREVIEW === '1' ? 'true' : 'false') },
-  plugins: [sveltekit()],
-  server: { proxy: process.env.LASTSIETCH_PREVIEW === '1' ? {} : proxy },
+  define: { 'import.meta.env.VITE_REVIEW_PREVIEW': JSON.stringify(preview ? 'true' : 'false') },
+  plugins,
+  server: { proxy: preview ? {} : proxy },
 });

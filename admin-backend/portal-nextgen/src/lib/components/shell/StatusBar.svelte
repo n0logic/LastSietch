@@ -7,13 +7,14 @@
   // figures that update live (players online). Map NAME only, never a position.
   import { base } from '$app/paths';
   import { initials, mapNameOnly } from '$lib/shellHome.js';
+  import { mapInstances } from '$lib/mapInstances.svelte.js';
 
   let { signals = {}, loginUrl = '' } = $props();
   const SOLARI_ICON = '/admin/static/img/dune-icons/T_UI_IconResourceSolarisCoin_D.png';
 
   let s = $derived(signals || {});
   let bank = $derived(typeof s.bankSolari === 'number' && Number.isFinite(s.bankSolari) ? Math.floor(s.bankSolari).toLocaleString() : null);
-  let mapName = $derived(mapNameOnly(s.charMap));
+  let mapName = $derived(mapNameOnly(s.charMap, mapInstances.list));
   let presence = $derived(s.charOnline === true ? `Online${mapName ? ` · ${mapName}` : ''}` : s.charOnline === false ? 'Offline' : null);
   let rewardReady = $derived(s.rewardsEnabled !== false && ((s.claimableTotal || 0) > 0 || s.weeklyClaimable === true || s.monthlyClaimable === true));
 </script>

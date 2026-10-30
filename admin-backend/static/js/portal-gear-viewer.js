@@ -10,9 +10,10 @@
  *   tearing the viewer down. dispose() releases everything.
  *
  * Lookup chain for each templateId:
- *   1. Fetch /admin/static/data/glb-manifest.json (module-memoised).
- *   2. If manifest.gear[templateId] has a file entry → load GLB from
- *      /admin/static/glb/gear/<file>.
+ *   1. Fetch /portal/gear/glb/manifest.json (session-gated, module-memoised).
+ *   2. If manifest.templates[templateId] names a baked set → load that set's
+ *      female mesh (male when the set has no female body) from
+ *      /portal/gear/glb/<file>?v=<hash>. Garments only: weapons have no mesh.
  *   3. Otherwise → reject (caller shows icon fallback).
  *
  * Render:
@@ -24,6 +25,7 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
 import { GLTFLoader } from './vendor/three/GLTFLoader.js';
+import { MeshoptDecoder } from './vendor/three/meshopt_decoder.module.js';
 
 // Cache-bust the JSON data sidecars. The portal service worker uses
 // stale-while-revalidate for /admin/static/, so an UN-queried data URL gets the
@@ -37,9 +39,11 @@ let _tintsPromise = null;
 let _swatchLutPromise = null;
 const _glbCache = new Map();
 
+// Gear models are served to signed-in players only; a signed-out or failed
+// read resolves null and every item falls back to its icon.
 function fetchManifest() {
   if (!_manifestPromise) {
-    _manifestPromise = fetch('/admin/static/data/glb-manifest.json?v=' + DATA_V,
+    _manifestPromise = fetch('/portal/gear/glb/manifest.json',
       { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .catch(function () { return null; });
@@ -180,7 +184,8 @@ function poseArmsToSides(root) {
 function loadGlb(url) {
   if (_glbCache.has(url)) return _glbCache.get(url);
   const p = new Promise(function (resolve, reject) {
-    new GLTFLoader().load(url, function (g) { resolve(g.scene); }, undefined, reject);
+    new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)
+      .load(url, function (g) { resolve(g.scene); }, undefined, reject);
   });
   _glbCache.set(url, p);
   return p;
@@ -193,12 +198,13 @@ function loadGlb(url) {
 // absent or when the dye LUT has no matching entry).
 function resolveModel(templateId, swatchId) {
   return fetchManifest().then(function (manifest) {
-    const gearMap = (manifest && manifest.gear) || {};
-    const entry = gearMap[templateId];
-    if (!entry || !entry.file) {
+    const tpl = manifest && manifest.templates ? manifest.templates[templateId] : null;
+    const set = tpl && manifest.sets ? manifest.sets[tpl.set] : null;
+    const mesh = set && (set.female || set.male);
+    if (!mesh || !mesh.file) {
       return Promise.reject(new Error('no GLB for ' + templateId));
     }
-    const url = '/admin/static/glb/gear/' + entry.file;
+    const url = '/portal/gear/glb/' + mesh.file + '?v=' + mesh.hash;
     return Promise.all([loadGlb(url), fetchTints(), fetchSwatchLut()]);
   }).then(function (res) {
     applyTints(res[0], res[1], dyeRgbFor(swatchId, res[2]));

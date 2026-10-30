@@ -21,6 +21,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 import feature_flags
+import map_instances
 
 logger = logging.getLogger("portal")
 router = APIRouter()
@@ -42,6 +43,15 @@ FEATURE_GATES = (
     ("weekend_remind", "LASTSIETCH_WEEKEND_REMIND_ENABLED"),
 )
 
+# What the portal may know about each open map instance. Never the pod, the
+# ticket label or the aliases: those are operator detail, not page content.
+PUBLIC_INSTANCE_FIELDS = ("key", "name", "map", "inst", "partition", "dim", "mode", "pvp", "tracked")
+
+
+def public_instances():
+    return [{f: r[f] for f in PUBLIC_INSTANCE_FIELDS} for r in map_instances.open_instances()]
+
+
 # --- routes ------------------------------------------------------------------
 
 
@@ -49,7 +59,9 @@ FEATURE_GATES = (
 async def portal_features():
     """{ok: true, features: {name: bool}} over the five gates above. Every gate
     defaults to OFF ("0"), the same coded default its own feature carries, so a
-    feature whose environment says nothing reads closed here too."""
+    feature whose environment says nothing reads closed here too. `instances` is
+    the open map instance list (map_instances.py), so the portal names no sietch
+    of its own."""
     features = {name: bool(feature_flags.enabled(flag, "0"))
                 for name, flag in FEATURE_GATES}
     # The Amtal page (and its nav link) is shown with its PvP board.
@@ -70,5 +82,5 @@ async def portal_features():
             conn.close()
     except Exception:
         pass
-    return JSONResponse({"ok": True, "features": features},
+    return JSONResponse({"ok": True, "features": features, "instances": public_instances()},
                         headers={"Cache-Control": "public, max-age=60"})

@@ -5,7 +5,7 @@
 // network-first with an offline fallback to the cached shell, and the app's own
 // static files are network-first with a cache fallback.
 // Minimal + self-hosted (CSP script-src 'self'); not a full offline app.
-const CACHE = 'ls-v2-shell-v194';
+const CACHE = 'ls-v2-shell-v195';
 const SHELL_URL = '/';
 
 // Paths this worker must NEVER answer for. Under the old /portal/v2 scope the

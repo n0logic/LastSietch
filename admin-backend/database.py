@@ -1097,6 +1097,38 @@ CREATE TABLE IF NOT EXISTS portal_sn_knocks (
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_sn_knocks_profile ON portal_sn_knocks(profile_id, night, id);
+
+-- Player requests queue (admin plan F7, player_requests.py). One row per thing a
+-- player asked staff to do: the portal POSTs it, staff triage and route it to the
+-- tool that fulfils it. Lives in admin.db, never dune.*, so handles stay out of
+-- git. staff_note and assignee are staff-only and never leave the admin panel;
+-- player_note is the one line the player sees (a decline must carry one). Every
+-- change is an audit_log row targeted 'player_request:<id>', which is the history.
+-- discord_id is the portal identity that filed it (NULL when staff logged it).
+-- New table: CREATE TABLE IF NOT EXISTS is itself the migration and this wave
+-- adds nothing to _PORTAL_ALTERS.
+CREATE TABLE IF NOT EXISTS player_requests (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    type         TEXT    NOT NULL CHECK (type IN ('brt_relocate','dd_base','choam_terminal',
+                                                  'inactive_base_report','vehicle_recovery')),
+    status       TEXT    NOT NULL DEFAULT 'new'
+                         CHECK (status IN ('new','triaged','scheduled','done','declined')),
+    source       TEXT    NOT NULL DEFAULT 'portal' CHECK (source IN ('portal','staff')),
+    discord_id   TEXT,
+    account_id   INTEGER,
+    char_name    TEXT,
+    totem_ref    TEXT,
+    vehicle_ref  TEXT,
+    details      TEXT,
+    staff_note   TEXT,
+    player_note  TEXT,
+    assignee     TEXT,
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    closed_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_player_requests_status ON player_requests(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_player_requests_owner ON player_requests(discord_id, created_at);
 """
 
 # Idempotent ALTER paths for in-place upgrade of an admin.db that pre-dates the

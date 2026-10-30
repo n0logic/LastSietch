@@ -27,7 +27,9 @@ import re
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
 
-log = logging.getLogger("sietch_nights")
+import map_instances
+
+log =logging.getLogger("sietch_nights")
 
 EVENT = "sn2026"
 NIGHT_KEYS = ("2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29",
@@ -62,7 +64,9 @@ SEEK_BANDS = ((30000.0, "scorching"), (150000.0, "warm"), (400000.0, "cool"))
 # Extra points that also count as a spot. The game ships two "Wreck of the Tartarus"
 # map markers ~2.25 km apart; players following the in-game label stand at the second.
 SPOT_ALIASES = {"n1-wreck-tartarus": ((-392417.0, 308351.0),)}
-HAGGA_EVENT_PARTITIONS = (1, 33)  # Habbanya, Amtal (Kulon, 32, closed 2026-10-28)
+# Every open Hagga sietch (map instance config); a closed one is off the event.
+HAGGA_EVENT_PARTITIONS = tuple(r["partition"] for r in map_instances.open_instances("hagga")
+                               if r["partition"] is not None)
 HIDDEN_CAP_SHOWN = 20   # the activity cap shown for a night's hidden spots, whatever they hold
 KNOCK_COOLDOWN_S = 30
 KNOCKS_PER_NIGHT = 60
@@ -708,8 +712,8 @@ def _int_or_none(v):
 
 
 def off_event_hagga(pos):
-    """Fail closed: on Hagga, a position that is not provably on Habbanya or
-    Amtal (partition 1 or 33) gets no doors and no hint."""
+    """Fail closed: on Hagga, a position that is not provably on an open sietch
+    (HAGGA_EVENT_PARTITIONS) gets no doors and no hint."""
     if (pos.get("map") or "HaggaBasin") != "HaggaBasin":
         return False
     return _int_or_none(pos.get("part")) not in HAGGA_EVENT_PARTITIONS
@@ -733,7 +737,8 @@ def _knock_txn(conn, profile_id, account_id, key, pos, now, spot_id, storm_live,
         _log_knock(conn, profile_id, account_id, key, "offline", now=now)
         return {"result": "offline"}
     if off_event_hagga(pos):
-        # The "amtal" token is kept for the portal copy ("No doors out here.").
+        # "amtal" is the result token the portal keys its copy on ("No doors out
+        # here."), not an instance key: it stays fixed whatever the config holds.
         _log_knock(conn, profile_id, account_id, key, "amtal", now=now)
         return {"result": "amtal"}
 

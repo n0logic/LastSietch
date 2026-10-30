@@ -34,18 +34,18 @@ WINDOW_LABELS = {72: "Friday 00:00 to Sunday 24:00 ET", 96: "With a Monday holid
 ROTATION = {1: "xp", 2: "spec_xp", 3: "crafting", 4: "harvest", 5: "spec_xp"}
 
 COPY = {
-    "xp": ("Double XP weekend", "monthly-reward",
+    "xp": ("Double XP weekend", "weekend-xp",
            "Double XP on every map all weekend, Friday 00:00 to Sunday 24:00 ET. "
            "All maps restart for about 20 minutes at the start and again at the end, "
            "with in-game warnings 10 minutes and 1 minute before."),
-    "spec_xp": ("Double Landsraad weekend", "landsraad-term",
+    "spec_xp": ("Double Landsraad weekend", "weekend-landsraad",
                 "Double specialization XP from Landsraad mission rewards on every map, "
                 "Friday 00:00 to Sunday 24:00 ET. No restart."),
-    "crafting": ("Crafting weekend", "sietch-almanac",
+    "crafting": ("Crafting weekend", "weekend-crafting",
                  "Crafting costs 20% less on every map, Friday 00:00 to Sunday 24:00 ET. "
                  "All maps restart for about 20 minutes at the start and again at the end, "
                  "with in-game warnings 10 minutes and 1 minute before."),
-    "harvest": ("Harvest weekend", "spoils-of-kanly",
+    "harvest": ("Harvest weekend", "weekend-harvest",
                 "Double cutteray and vehicle mining output on every map, Friday 00:00 to "
                 "Sunday 24:00 ET. It stacks with the PvP zone bonus on Amtal. No restart."),
 }

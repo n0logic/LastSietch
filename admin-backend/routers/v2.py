@@ -113,6 +113,10 @@ AUDIT_ACTION_GROUPS = (
     ("Portal: QA harness", (
         "portal_qa_session",
     )),
+    # Player requests queue (F7): the portal files, staff log and update.
+    ("Player requests", (
+        "player_request_create", "player_request_log", "player_request_update",
+    )),
     ("Seven Nights", (
         "sietch_award", "sietch_contest_award", "sietch_spots",
         "sietch_order_redrive", "sietch_order_refund",

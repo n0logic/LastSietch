@@ -18,12 +18,21 @@ A single grant gives a new player:
 
 Items land in the player's MAIN backpack and HOTBAR (see the slot-collision gotcha below for why placement matters).
 
+### What we grant now (v1.8)
+
+The pack has been revised several times; the version tag in the tracking table tells them apart. v1.8, current at
+this snapshot, is 27 backpack items and 4 hotbar tools: a scout armour set, a sword, a pistol with darts, Mk3 shield,
+power pack and filter extractor, a blood sack, a full Scout Ornithopter kit, the pre-filled canteen, 100k Solari,
+100k Scrip, 100 Intel and seven base-construction recipes. v1.8 stepped the fight gear **down** to Mk3 for new
+players, so it never upgrades an account that already holds an earlier pack: those keep what they got. The v1.8
+grant script ships under `ops/welcome-pack/`.
+
 ## Schema map (the grant surface)
 
 | Goal | Table | Notes |
 |---|---|---|
 | Grant items (armor, tools, vehicle parts, fuel, currency stack) | `dune.items` | Insert into the player's MAIN backpack (`inventory_type=0`) and HOTBAR (`inventory_type=15`). Template_ids are case-insensitive in practice. |
-| Grant currency | `dune.player_virtual_currency_balances` | PK `(player_controller_id, currency_id)`, `balance bigint`. `currency_id=1` is House Scrip, a Landsraad virtual currency (confirmed). Keyed by the player's controller actor, not the account. |
+| Grant currency | `dune.player_virtual_currency_balances` | PK `(player_controller_id, currency_id)`, `balance bigint`. Keyed by the player's controller actor, not the account. Before 1.5.3 `currency_id=1` was House Scrip. **Since 1.5.3 `currency_id` is the enum `dune.virtualwallettype`** (for example `'HouseCredit'::dune.virtualwallettype`): a writer still passing `1` aborts, and the transaction rolls back so cleanly that the only symptom is the missing grant. |
 | Flip base-construction research to Purchased | `dune.actors` (`properties` jsonb) | Research lives as a jsonb array at `properties#>'{TechKnowledgePlayerComponent,m_TechKnowledge,m_TechKnowledgeData}'`. The grant rebuilds the array, setting `UnlockedState=Purchased` on the named recipe keys. |
 | Idempotency tracking | `dune.welcome_pack_grants` | Created once by the operator. One row per `account_id`; the `notes` column carries a version tag. |
 

@@ -1,4 +1,4 @@
-# Persistent maps and safe maintenance
+# 09 - Persistent maps and safe maintenance
 
 Player-facing sietch names are not server map identifiers. Several sietches can
 use the same map family with separate dimensions and partitions. Always discover

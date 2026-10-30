@@ -24,7 +24,7 @@ Start with [configuration changes](docs/19-configuration-changes.md) when upgrad
 | [docs/14-known-funcom-issues.md](docs/14-known-funcom-issues.md) | Symptoms and detection for problems we have hit, so you can identify them in minutes instead of an evening |
 | [docs/15-control-plane-architecture.md](docs/15-control-plane-architecture.md) | How a web app safely drives a live game server it must never touch directly. The one idea here most worth copying |
 | [docs/20-player-portal.md](docs/20-player-portal.md) | The player portal: what it does, the safety model, install, configuration, and the asset step that regenerates icons and maps from public sources |
-| [docs/16-persistent-map-maintenance.md](docs/16-persistent-map-maintenance.md) | Sietch instances versus map families, empty-state checks, backup and recovery boundaries |
+| [docs/09-persistent-map-maintenance.md](docs/09-persistent-map-maintenance.md) | Sietch instances versus map families, empty-state checks, backup and recovery boundaries |
 | [docs/17-server-time.md](docs/17-server-time.md) | Read-only server clock and explicitly configured recurrence display, with Python and JavaScript helpers |
 | [docs/18-publication-checks.md](docs/18-publication-checks.md) | Local staged-content, privacy, secret and provenance checks before publication |
 | [references/](references/) | Canonical item ids, community-sourced field notes |

@@ -105,6 +105,16 @@ class PublicationTests(unittest.TestCase):
         for value in ('rva', 'Canvas', 'nirvana', 'RVAL'):
             self.assertFalse(gate.inspect('notes.md', value.encode(), []), value)
 
+    def test_broadcast_tool_retired_mode_blocks(self):
+        name = 'scripts/dune-service-broadcast.py'
+        builder = 'def build_cheat' + '_script_inner(fls_id, script_name):'
+        payload = '        "ServerCommand": "Cheat' + 'Script",'
+        for value in (builder, payload, '{"ServerCommand":"Cheat' + 'Script"}'):
+            findings = gate.inspect(name, value.encode(), [])
+            self.assertIn('retired ungated command mode', [hit['reason'] for hit in findings], value)
+        self.assertFalse(gate.inspect(name, b'"ServerCommand": "ServiceBroadcast",', []))
+        self.assertFalse(gate.inspect('scripts/other.py', builder.encode(), []))
+
     def test_private_details_are_detected_even_in_checker_source(self):
         value = 'vp' + 'tr = pointer'
         self.assertTrue(gate.inspect('scripts/public-preflight.py', value.encode(), []))

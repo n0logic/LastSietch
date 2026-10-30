@@ -44,6 +44,10 @@ IPV4 = re.compile(r'(?<![\w.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![\w.])')
 IP_CONTEXT = re.compile(r'(?i)https?://|\b(?:ssh|scp|ping|curl)\s|\b[a-z_]*(?:ip|ips|host|hosts|hostname|address|addr)(?:_[a-z0-9_]+)?\s*[:=]')
 OPT_PREFIX = re.compile(r'/opt/[a-z0-9][a-z0-9._-]*')
 OPT_ALLOWED = re.compile(r'^/opt/(?:lastsietch[a-z0-9-]*|cielago|backups?|rabbitmq|erlang|hol[a-z0-9-]*)$')
+# The broadcast tool's old ungated script-execution mode must not survive into a release (v0.8 replaces the file).
+# Character classes keep this rule from matching its own source.
+RETIRED_MODE_FILE = 'scripts/dune-service-broadcast.py'
+RETIRED_MODE = re.compile(r'build_chea[t]_script_inner|"ServerCommand"\s*:\s*"Chea[t]Script"')
 DOC_NETWORKS = tuple(ipaddress.ip_network(value) for value in ('192.0.2.0/24', '198.51.100.0/24', '203.0.113.0/24'))
 
 
@@ -180,6 +184,8 @@ def inspect(name, raw, patterns):
         for label, pattern in CONTENT:
             if pattern.search(line):
                 block(label, number)
+        if name == RETIRED_MODE_FILE and RETIRED_MODE.search(line):
+            block('retired ungated command mode', number)
         for match in SNOWFLAKE.finditer(line):
             entity_floor = (name in ('scripts/dune-grant-schema.sql', 'scripts/dune-grant.sh')
                             and match.group() == '5' + '0' * 18

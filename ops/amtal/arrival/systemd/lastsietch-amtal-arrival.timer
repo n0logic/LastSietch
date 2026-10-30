@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Amtal arrival placer every 3 s
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

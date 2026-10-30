@@ -1,0 +1,7 @@
+[Unit]
+Description=Re-apply the Amtal PvP rules flag after an Amtal restart (BUG-027)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lastsietch-amtal-pvp-flag/amtal-pvp-flag.sh
+TimeoutStartSec=90

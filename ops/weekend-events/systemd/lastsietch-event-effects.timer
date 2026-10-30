@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekend effect runner, every minute
+
+[Timer]
+# OnCalendar, not OnBootSec + OnUnitActiveSec: a calendar timer keeps a valid
+# anchor across stop/start (AGENTS.md: a timer that reads active can still be
+# dormant). Verify it by watching LastTriggerUSec advance.
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

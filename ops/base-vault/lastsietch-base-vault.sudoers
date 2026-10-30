@@ -1,0 +1,1 @@
+lastsietch-admin ALL=(root) NOPASSWD:NOSETENV: /usr/bin/python3 -I /opt/lastsietch-base-vault/current/admin-helper.py

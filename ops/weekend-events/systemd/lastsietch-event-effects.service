@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekend effect runner: start, end and poll published effect events (<web-host>)
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=LASTSIETCH_DB_PATH=/var/lib/lastsietch-admin/admin.db
+# One tick at a time: a slow ssh must not let two ticks launch the same job.
+ExecStart=/usr/bin/flock -n /run/lastsietch-event-effects.lock /usr/bin/python3 -B /opt/lastsietch-event-effects/event-effects.py
+TimeoutStartSec=300

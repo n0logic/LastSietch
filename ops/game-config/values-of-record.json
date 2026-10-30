@@ -1,0 +1,371 @@
+{
+  "files": {
+    "UserEngine.ini": {
+      "ConsoleVariables": {
+        "Ai.InvestigationRadius": [
+          "1000"
+        ],
+        "Bgd.ServerDisplayName": [
+          "\"Sietch Tabr-complete\""
+        ],
+        "Dune.GiveDoubleDifficultyLoot": [
+          "true"
+        ],
+        "Dune.GlobalMiningOutputMultiplier": [
+          "1.0"
+        ],
+        "Dune.GlobalVehicleMiningOutputMultiplier": [
+          "1.0"
+        ],
+        "NPC.AttackLimitOverride": [
+          "0"
+        ],
+        "NPC.EnableNpcAttackLimits": [
+          "0"
+        ],
+        "Sandstorm.Enabled": [
+          "1"
+        ],
+        "Sandstorm.Treasure.Enabled": [
+          "1"
+        ],
+        "Sandworm.SandwormDangerZonesEnabled": [
+          "true"
+        ],
+        "SecurityZones.PvpResourceMultiplier": [
+          "2.5"
+        ],
+        "Vehicle.SandwormCollisionInteraction": [
+          "false"
+        ],
+        "Vehicle.SandwormInvulnerabilitySecondsOnExit": [
+          "900.0"
+        ],
+        "Vehicle.SandwormInvulnerabilitySecondsOnServerRestart": [
+          "7200.0"
+        ],
+        "Weapon.AiOverrideHitChance": [
+          "-1"
+        ],
+        "dw.OverrideBaseBackupToolTimeRestrictionInSeconds": [
+          "10"
+        ],
+        "dw.VehicleDurabilityDamageMultiplier": [
+          "0.5"
+        ],
+        "sandworm.dune.Enabled": [
+          "1"
+        ]
+      },
+      "URL": {
+        "IGWPort": [
+          "7888"
+        ],
+        "Port": [
+          "7777"
+        ]
+      }
+    },
+    "UserGame.ini": {
+      "/DeteriorationSystem.ItemDeteriorationConstants": {
+        "UpdateRateInSeconds": [
+          "0.0"
+        ]
+      },
+      "/Script/DuneSandbox.BuildingSettings": {
+        "-m_StakingUnitExtensionDefaultTimes": [
+          "120.000000",
+          "15360.000000",
+          "1920.000000",
+          "240.000000",
+          "30720.000000",
+          "3840.000000",
+          "480.000000",
+          "60.000000",
+          "7680.000000",
+          "960.000000"
+        ],
+        "-m_StakingUnitVerticalExtensionDefaultTimes": [
+          "120.000000",
+          "15360.000000",
+          "1920.000000",
+          "240.000000",
+          "30720.000000",
+          "3840.000000",
+          "480.000000",
+          "60.000000",
+          "7680.000000",
+          "960.000000"
+        ],
+        "m_BaseBackupMaxExtensions": [
+          "8"
+        ],
+        "m_BaseBackupToolTimeRestrictionInSeconds": [
+          "10"
+        ],
+        "m_BuildingBlueprintMaxExtensions": [
+          "4"
+        ],
+        "m_MaxNumLandclaimSegments": [
+          "6"
+        ],
+        "m_PickupTotalDurabilityPercentageReduction": [
+          "0.0"
+        ],
+        "m_StakingUnitExtensionDefaultTimes": [
+          "1"
+        ],
+        "m_StakingUnitVerticalExtensionDefaultTimes": [
+          "1"
+        ],
+        "m_bBuildingRestrictionLimitsEnabled": [
+          "True"
+        ]
+      },
+      "/Script/DuneSandbox.ContractsSubsystem": {
+        "m_MaxGlobalContractsNumberPerServer": [
+          "20"
+        ]
+      },
+      "/Script/DuneSandbox.CoriolisSubsystem": {
+        "m_CycleDurationInDays": [
+          "14"
+        ]
+      },
+      "/Script/DuneSandbox.CraftingSettings": {
+        "m_RecyclerOutputWeight": [
+          "0.500000"
+        ]
+      },
+      "/Script/DuneSandbox.DewHarvestSettings": {
+        "m_DewRefreshTime": [
+          "6.000000"
+        ]
+      },
+      "/Script/DuneSandbox.DuneGameMode": {
+        "m_GlobalHarvestAmountMultiplier": [
+          "3.000000"
+        ]
+      },
+      "/Script/DuneSandbox.DunePlayerCharacter": {
+        "s_RepeatedKillCooldown": [
+          "600.0"
+        ]
+      },
+      "/Script/DuneSandbox.InventorySystemSettings": {
+        "PlayerInventoryStartingSize": [
+          "50"
+        ],
+        "PlayerInventoryStartingVolumeCapacity": [
+          "250.000000"
+        ],
+        "InventoryHardCapPerItemMap": [
+          "(((Name=\"BuildingBlueprint_CopyDevice\"), (HardCapPerInventoryHardCapType=((PlayerInventory, 100),(BaseStorage, 2000),(Bank, 200),(VehicleStorage, 100)))))"
+        ]
+      },
+      "/Script/DuneSandbox.LandsraadSettings": {
+        "DedicatedServerData": [
+          "(m_NumberOfWeeksTermRetention=4,m_NumberOfDecreesToNominate=3,m_bDecreeRerollingEnabled=True,m_DecreeRerollCost=1000,m_MaxRerollAttemptsPerTerm=5,m_NumberOfGuildsInHighscoreList=5,m_TermStartedMessage=(Name=\"LandsraadTermStarted\"),m_VotingStartedMessage=(Name=\"LandsraadVotingStarted\"),m_TaskProgressedMessage=(Name=\"LandsraadProgressNotification\"),m_DecreeActivatedMessage=(Name=\"LandsraadDecreeActivated\"),LandsraadBoardLimitedAccessMessage=LOCTABLE(\"/Game/Dune/Localization/ST_Localization_UI.ST_Localization_UI\", \"UI/Landsraad_BoardMenu_LimitedAccessMessage\"),LandsraadVotingWarningMessage=LOCTABLE(\"/Game/Dune/Localization/ST_Localization_UI.ST_Localization_UI\", \"UI/Landsraad_DecreeMenu_VotingWarningMessage\"),m_bIsPlayerVotingEnabled=True,m_bIsTerritoryControlEnabled=True,m_BoardLayouts=(/Script/DuneSandbox.BoardLayoutDataAsset'\"/Game/Dune/Systems/Landsraad/BoardLayouts/DefaultLandsraadBoardLayout.DefaultLandsraadBoardLayout\"'),m_LandsraadVotingPeriodDurationInSec=118500,m_LandsraadCycleDurationInSeconds=604800,m_LandsraadSuspendedPeriodDurationInSeconds=300,m_FirstTaskRevealDelayFromCompetitionStartInSeconds=0.000000,m_LandsraadRevealedTaskTimestampMinuteDifference=1,m_LandsraadTaskProgressUpdateFrequency=15.000000,m_LandsraadTaskDailyRevealFrequency=25.000000,m_LandsraadProgressFactionBalanceCurve=/Script/Engine.CurveFloat'\"/Game/Dune/Systems/Landsraad/Curve_LandsraadProgressFactionBalanceCurve.Curve_LandsraadProgressFactionBalanceCurve\"',m_LandsraadContractsPerVotingBlock=6,m_LandsraadContractsRepeatCooldownSeconds=900,m_LandsraadContractsMaxActiveAmount=6,m_LandsraadContractsAbandonCooldownSeconds=10,m_bLandsraadContractsShouldLimitDailyBonus=True,m_LandsraadContractsDailyBonusPerDay=35,m_LandsraadContractsDailyBonusMax=140,m_LandsraadContractsDailyBonusRefreshCycleLength=86400,m_LandsraadContractsTimeToShowRewardInteractiveNotification=30.000000,m_LandsraadContractsTimeToShowErrorNotification=70.000000,m_LandsraadContractsTimeToShowPendingClaimRewardTutorial=300,m_LandsraadTaskRewardsData=\"/Game/Dune/Systems/Landsraad/DA_TaskRewardsDataAsset.DA_TaskRewardsDataAsset\",m_LandsraadHouseSelectContractDialogContentWidget=\"/Game/Dune/GUI/Widgets/Menus/Gameplay/PlayerMenu/Landsraad/W_LandsraadHouseSelectContractDialog.W_LandsraadHouseSelectContractDialog_C\",m_LandsraadContractReportDialogContentWidget=\"/Game/Dune/GUI/Widgets/Menus/Gameplay/PlayerMenu/Landsraad/W_LandsraadContractReportDialog.W_LandsraadContractReportDialog_C\",m_LandsraadClaimHouseRewardDialogWidget=\"/Game/Dune/GUI/Widgets/Menus/Gameplay/PlayerMenu/Landsraad/W_LandsraadHouseRewardClaimDialog.W_LandsraadHouseRewardClaimDialog_C\",m_TaskGoalAmount=20000,m_ControlPointsPerCycle=2,m_LandsraadContractsUnlockGameplayTag=(TagName=\"Journey.LandsraadContractsUnlocked\"),m_LandsraadContractsNewMarkerGameplayTags=(GameplayTags=((TagName=\"DialogueFlags.Factions.LandsraadOnboardingActive\"))),m_ControlPointAreaMaterial=\"/Game/Dune/Systems/Landsraad/Materials/M_LandsRaadControlPointCapsule.M_LandsRaadControlPointCapsule\",bIsLandsraadEnabled=True,m_LandsraadContractsDailyBonusReferenceTimestamp=1760572800,LandsraadMinimumTermDurationInSeconds=172800,LandsraadStartYear=2026,LandsraadStartMonth=3,LandsraadStartDay=3,LandsraadStartHour=4,LandsraadStartMinute=55,bUseCoriolisReferenceDate=True,m_LandsraadControlPointClassForCheats=\"/Game/Dune/Systems/Landsraad/BP_LandsraadControlPoint.BP_LandsraadControlPoint_C\")"
+        ]
+      },
+      "/Script/DuneSandbox.PlayerOnlineStateSettings": {
+        "m_DefaultReconnectGracePeriodSeconds": [
+          "30"
+        ]
+      },
+      "/Script/DuneSandbox.PvpPveSettings": {
+        "+m_PveEnabledPartitions": [
+          "1",
+          "8"
+        ],
+        "+m_PvpEnabledPartitions": [
+          "31",
+          "32",
+          "33"
+        ],
+        "m_bShouldForceEnablePvpOnAllPartitions": [
+          "False"
+        ]
+      },
+      "/Script/DuneSandbox.SandStormConfig": {
+        "m_LargeSandStormDamageConfig": [
+          "(Player=7.000000,Building=3.500000,Placeable=3.500000,Vehicle=3.500000)"
+        ],
+        "m_SmallSandStormDamageConfig": [
+          "(Player=5.000000,Building=2.500000,Placeable=2.500000,Vehicle=2.500000)"
+        ],
+        "m_bCoriolisAutoSpawnEnabled": [
+          "True"
+        ]
+      },
+      "/Script/DuneSandbox.SecurityZonesSubsystem": {
+        "m_bSecurityZonesForceEnablePvp": [
+          "False"
+        ]
+      },
+      "/Script/DuneSandbox.SpiceHarvestingSystem": {
+        "m_NodeValueToSpiceResourceRatio": [
+          "12.000000"
+        ],
+        "m_PerMapSystemSettings": [
+          "((\"Editor_Default\", (m_SpiceFieldTypeSettings=(((Name=\"Small\"), (MaxGloballyPrimed=10,MaxGloballyActive=6)),((Name=\"Medium\"), (MaxGloballyPrimed=6,MaxGloballyActive=3)),((Name=\"Large\"), (MaxGloballyPrimed=6,MaxGloballyActive=3))))),(\"DeepDesert_1\", (m_SpiceFieldTypeSettings=(((Name=\"Small\"), (MaxGloballyPrimed=60,MaxGloballyActive=60)),((Name=\"Medium\"), (MaxGloballyPrimed=12,MaxGloballyActive=12)),((Name=\"Large\"), (MaxGloballyPrimed=1,MaxGloballyActive=1))))),(\"Survival_1\", (m_SpiceFieldTypeSettings=(((Name=\"Small\"), (MaxGloballyPrimed=10,MaxGloballyActive=8)),((Name=\"Medium\"), (MaxGloballyPrimed=4,MaxGloballyActive=2))))))"
+        ],
+        "m_PrimeRateInSeconds": [
+          "20.000000"
+        ]
+      },
+      "AdminSetting.Global": {
+        "Password_Admin": {
+          "secret": true
+        }
+      },
+      "ConsoleVariables": {
+        "dw.VehicleDurabilityDamageMultiplier": [
+          "0.5"
+        ]
+      }
+    },
+    "UserOverrides.ini": {
+      "/Script/DuneSandbox.BuildingSettings": {
+        "m_bBuildingRestrictionLimitsEnabled": [
+          "False"
+        ]
+      },
+      "ConsoleVariables": {
+        "dw.VehicleDurabilityDamageMultiplier": [
+          "0.5"
+        ]
+      }
+    },
+    "UserServerCustomSettings.ini": {
+      "/Script/DuneSandbox.UserServerCustomSettings": {
+        "BaseBackupToolTimeRestriction": [
+          "0.003000"
+        ],
+        "BuildingCostMultiplier": [
+          "1.000000"
+        ],
+        "BuildingPieceLimitMultiplier": [
+          "1.500000"
+        ],
+        "CombatXp": [
+          "1.000000"
+        ],
+        "CraftingCost": [
+          "1.000000"
+        ],
+        "CraftingTimeMultiplier": [
+          "1.000000"
+        ],
+        "DifficultyLevel": [
+          "Custom"
+        ],
+        "DropEquipmentOnDeath": [
+          "Default"
+        ],
+        "FiefdomLimit": [
+          "5"
+        ],
+        "FuelBurnTimeMultiplier": [
+          "2.000000"
+        ],
+        "GatheringAmount": [
+          "1.000000"
+        ],
+        "GatheringXp": [
+          "1.000000"
+        ],
+        "GlobalXpMultiplier": [
+          "1.000000"
+        ],
+        "HeatBuildupRate": [
+          "1.000000"
+        ],
+        "IntelPointsGainMultiplier": [
+          "1.000000"
+        ],
+        "InventoryVolumeMultiplier": [
+          "2.000000"
+        ],
+        "ItemDurabilityDrainMultiplier": [
+          "1.000000"
+        ],
+        "LandsraadContributionMultiplier": [
+          "1.000000"
+        ],
+        "LandsraadFactionStandingMultiplier": [
+          "1.000000"
+        ],
+        "LandsraadSpecializationXpMultiplier": [
+          "1.000000"
+        ],
+        "LootRespawnSpeed": [
+          "1.000000"
+        ],
+        "MissionXp": [
+          "1.000000"
+        ],
+        "NPCDamageToNPC": [
+          "1.000000"
+        ],
+        "NPCDamageToPlayer": [
+          "1.000000"
+        ],
+        "NPCHealth": [
+          "1.000000"
+        ],
+        "NPCRespawnMultiplier": [
+          "1.000000"
+        ],
+        "NPCShieldDamageAbsorptionMultiplier": [
+          "1.000000"
+        ],
+        "PVPDamageStructures": [
+          "1.000000"
+        ],
+        "PlayerDamageToNPC": [
+          "1.000000"
+        ],
+        "PlayerDamageToPlayer": [
+          "1.000000"
+        ],
+        "PlayerDamageToVehicle": [
+          "1.000000"
+        ],
+        "PlayerDeathLootRule": [
+          "DependsOnSecurityZone"
+        ],
+        "PlayerShieldDamageAbsorptionMultiplier": [
+          "1.000000"
+        ],
+        "PlayerStaminaDrain": [
+          "1.000000"
+        ],
+        "ResourceRespawnSpeed": [
+          "1.000000"
+        ],
+        "SandwormConsequences": [
+          "All"
+        ],
+        "ThirstMultiplier": [
+          "1.000000"
+        ],
+        "WaterExtractionRate": [
+          "1.250000"
+        ],
+        "bAllowDynamicBuildingDamage": [
+          "True"
+        ],
+        "bBuildingInfiniteStability": [
+          "False"
+        ],
+        "bEnableItemMaxDurabilityLoss": [
+          "True"
+        ],
+        "bIsBuildingRestrictionsEnabled": [
+          "True"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+[Unit]
+Description=<web-host> disk-stall watch (IO pressure + portal local check), alerts via Cielago
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lastsietch/io-watch.sh
+Nice=-5
+IOSchedulingClass=realtime

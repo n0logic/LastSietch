@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the eps tombstone sweep every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,22 @@
+[Unit]
+Description=Last Sietch persisted base snapshot %i
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 -I /opt/lastsietch-base-vault/current/admin-helper.py --worker %i
+TimeoutStartSec=300
+KillMode=control-group
+MemoryMax=768M
+CPUQuota=50%
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/backups/dune/base-vault
+ProtectHome=read-only
+StandardOutput=null
+StandardError=null

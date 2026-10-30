@@ -1,0 +1,7 @@
+[Unit]
+Description=Weekend effects: re-assert open live windows, end any <web-host> never ended (<game-host>)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flock -n /run/lastsietch-event-effect-assert.lock /usr/bin/python3 -B /opt/lastsietch-event-effects/event-effect-worker.py assert
+TimeoutStartSec=600

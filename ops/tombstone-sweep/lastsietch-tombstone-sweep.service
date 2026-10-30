@@ -1,0 +1,7 @@
+[Unit]
+Description=Flip stuck Deleted/Online tombstones to Offline in dune.encrypted_player_state
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/dune-tombstone-sweep.sh

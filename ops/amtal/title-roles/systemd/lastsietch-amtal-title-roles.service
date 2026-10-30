@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync Amtal PvP titles to Discord roles via Cielago
+After=network-online.target lastsietch-admin.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/lastsietch-admin
+EnvironmentFile=/opt/lastsietch-admin/.env
+EnvironmentFile=-/opt/lastsietch/.env
+Environment=PYTHONPATH=/opt/lastsietch-admin PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/lastsietch-admin/venv/bin/python /opt/lastsietch-amtal-title-roles/amtal-title-roles.py --apply
+TimeoutStartSec=180

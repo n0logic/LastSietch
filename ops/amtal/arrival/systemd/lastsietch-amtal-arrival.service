@@ -1,0 +1,9 @@
+[Unit]
+Description=Place characters arriving on Amtal at their base or faction safe area (dry run unless /etc/lastsietch/amtal-arrival-live)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /opt/lastsietch-amtal-arrival/amtal-arrival.py
+TimeoutStartSec=60

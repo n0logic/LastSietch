@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync Amtal PvP title roles every 15 min
+
+[Timer]
+# OnActiveSec anchors the first run to the timer's own activation (AGENTS.md: OnBootSec +
+# OnUnitActiveSec alone stays dormant after a stop/start without a reboot).
+OnActiveSec=2min
+OnBootSec=5min
+OnUnitActiveSec=15min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

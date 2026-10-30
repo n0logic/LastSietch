@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the Amtal kill-streak payout every 60 s
+
+[Timer]
+# OnActiveSec anchors the first run to the timer's own activation (AGENTS.md: OnBootSec +
+# OnUnitActiveSec alone stays dormant after a stop/start without a reboot).
+OnActiveSec=1min
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

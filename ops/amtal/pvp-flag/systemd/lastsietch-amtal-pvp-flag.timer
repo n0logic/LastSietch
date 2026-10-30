@@ -1,0 +1,10 @@
+[Unit]
+Description=Check every minute whether Amtal needs its PvP rules flag re-applied
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

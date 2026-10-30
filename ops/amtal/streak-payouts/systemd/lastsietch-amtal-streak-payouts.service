@@ -1,0 +1,9 @@
+[Unit]
+Description=Pay Amtal kill-streak bounties (dry run unless /etc/lastsietch/amtal-streak-payouts-live)
+After=network-online.target lastsietch-telemetry-api.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /opt/lastsietch-amtal-streak-payouts/amtal-streak-payouts.py
+TimeoutStartSec=120

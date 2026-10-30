@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekend effects re-assert, every 5 minutes
+
+[Timer]
+# A game pod that restarts mid-weekend comes back at the file value; this puts the
+# effect back within 5 minutes. Calendar-anchored for the same reason as the runner.
+OnCalendar=*-*-* *:00/5:30
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

@@ -113,7 +113,9 @@ class PublicationTests(unittest.TestCase):
             findings = gate.inspect(name, value.encode(), [])
             self.assertIn('retired ungated command mode', [hit['reason'] for hit in findings], value)
         self.assertFalse(gate.inspect(name, b'"ServerCommand": "ServiceBroadcast",', []))
-        self.assertFalse(gate.inspect('scripts/other.py', builder.encode(), []))
+        # The rule covers every file: the server-command verb builds the same payload.
+        hits = gate.inspect('scripts/dune-server-command.py', payload.encode(), [])
+        self.assertIn('retired ungated command mode', [hit['reason'] for hit in hits])
 
     def test_private_details_are_detected_even_in_checker_source(self):
         value = 'vp' + 'tr = pointer'

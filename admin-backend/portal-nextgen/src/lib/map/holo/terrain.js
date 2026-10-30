@@ -12,6 +12,11 @@
 //     mask so out-of-bounds cells drop out (the desert reads as a floating
 //     landmass), and swap heightAt to sample the real raster so overlay markers
 //     stay flush.
+//   - HAGGA (2.26.0): the same REAL path fed from the static basin bake in its
+//     own directory (/terrain/hagga/, id 0) at true vertical scale, plus an
+//     optional normal map and the map-art drape (applied by index/material).
+//     terrainSourceFor() picks the source per map key; the raster cache keys on
+//     base + id so DD layout 0 and Hagga layout 0 never collide.
 //
 // The 0..1000 normalized world maps 1:1 onto the plane's X/Z extent so overlays
 // project straight onto it. THREE is injected; this module never imports 'three'
@@ -29,15 +34,23 @@ const AMP_FRAC = 0.038;   // height amplitude as a fraction of extent
 // raster (bake_islands.py --holo) fell between vertices. Capped at REAL_SEG_MAX.
 // Seeded 95 on reduced-motion/low. heightAt precision comes from the baked raster
 // regardless of mesh density.
+// The 1024 rasters (Hagga, DD 2.26.0) may go to REAL_SEG_HI on the high tier
+// (512^2 verts, still one draw; Uint32 indices).
 const REAL_SEG_MAX = 383;
+const REAL_SEG_HI = 511;
 const REAL_SEG_LOW = 95;
 
-// Real-terrain relief exaggeration ON TOP of the baked heightScale. The baked
-// rasters peak around 16 board units where the seeded relief spans +-38, so the
-// real desert reads flat next to the placeholder; 2x lands the peaks in the same
-// visual band. Owner-tunable per load via ?holoRelief=X (opts.reliefBoost).
+// Real-terrain relief exaggeration ON TOP of the baked heightScale. DD 2.26.0 is
+// baked at true scale (heightScale 1.0) and draped like Hagga. True scale keeps
+// slopes true, but the 24.4 km board is framed ~3x wider than Hagga's 8.1 km, so
+// the same slopes read ~3x flatter on screen; 2x makes the Shield Wall read as a
+// cliff and the dunes as relief (1.0 and 1.5 compared on the drape, 2026-10-06).
+// Owner-tunable per load via ?holoRelief=X (opts.reliefBoost).
 // Seeded path never sees this.
 const RELIEF_BOOST = 2.0;
+// Hagga is baked at true scale (heightScale 1.0 over an 8.1 km span, peaks
+// ~80 board units), already in DD's boosted visual band, so no extra boost.
+const HAGGA_RELIEF_BOOST = 1.0;
 
 function hash(ix, iy) {
   let h = (ix | 0) * 374761393 + (iy | 0) * 668265263 + SEED * 362437;
@@ -71,13 +84,93 @@ function fbm(x, y) {
   return sum / norm;   // 0..1
 }
 
-// createTerrain(THREE, opts) -> { mesh, heightAt, dispose, applyLayout }.
-// opts: { view, material, reducedMotion?, layoutBase? }.
+// terrainSourceFor(scene, opts) -> source | null (null = stay on seeded relief).
+// opts: { base, forcedLayout?, forcedRelief?, tier? }. base is the SvelteKit
+// $app/paths base ('' at the root). forcedLayout is already DD-gated by
+// debug.js; it is gated again here so the rule holds for any caller.
+//   hagga        static basin bake at <base>/terrain/hagga/, layout id 0
+//   deep-desert  scene.layout (or ?holoLayout) from <base>/terrain/; drapes the
+//                bake's own map art (meta.drape) like Hagga, never the 2D backdrop;
+//                a bake without meta.drape keeps the hologram. 511 seg on high
+//   anything else  null
+// Maps with a static true-scale bake in <base>/terrain/<key>/ (layout id 0) and a
+// draped backdrop. smallVariant: the backdrop ships a -2048 sibling for weak tiers
+// (Hagga's 8192 art); the hub renders are 4096 and are used as-is.
+const STATIC_BAKES = {
+  'hagga': { smallVariant: true },          // ops/hagga-terrain-bake
+  'arrakeen': { smallVariant: false },      // ops/hub-terrain-bake (game cartography diorama)
+  'harko-village': { smallVariant: false },
+};
+
+export function terrainSourceFor(scene, opts) {
+  opts = opts || {};
+  const key = scene && scene.key;
+  const root = (opts.base || '') + '/terrain/';
+  const relief = num(opts.forcedRelief, null);
+  if (Object.prototype.hasOwnProperty.call(STATIC_BAKES, key)) {
+    return {
+      key: key,
+      base: root + key + '/',
+      layout: { id: 0, source: 'static' },
+      reliefBoost: relief != null ? relief : HAGGA_RELIEF_BOOST,
+      segMax: opts.tier === 'high' ? REAL_SEG_HI : REAL_SEG_MAX,
+      lowDensity: opts.tier === 'low',
+      drape: true,
+      smallVariant: STATIC_BAKES[key].smallVariant,
+    };
+  }
+  if (key === 'deep-desert') {
+    const forced = Number.isInteger(opts.forcedLayout) ? opts.forcedLayout : null;
+    const layout = forced != null ? { id: forced, source: 'debug' } : scene.layout;
+    if (!layout) return null;
+    return {
+      key: key,
+      base: root,
+      layout: layout,
+      reliefBoost: relief != null ? relief : RELIEF_BOOST,
+      segMax: opts.tier === 'high' ? REAL_SEG_HI : REAL_SEG_MAX,
+      lowDensity: opts.tier === 'low',
+      drape: true,
+      bakeDrapeOnly: true,   // the DD backdrop is the flat 2D islands image: never drape it
+    };
+  }
+  return null;
+}
+
+// surfaceFor(src, active, backdrop, small) -> { normalUrl, drapeUrl }.
+// active is terrain.active() (the bake actually rendered, null while seeded).
+// The normal map only when the rendered meta names one; the drape only for a
+// drape source with an image backdrop, and only once the real relief is up
+// (the seeded fallback keeps the plain hologram). small picks the backdrop's
+// -2048 variant (touch / weak GPUs; the 8192 original is ~256 MB decoded).
+export function surfaceFor(src, active, backdrop, small) {
+  const out = { normalUrl: null, drapeUrl: null, drapeGain: 1 };
+  if (!src || !active) return out;
+  const meta = active.meta || {};
+  if (typeof meta.drapeGain === 'number' && isFinite(meta.drapeGain) && meta.drapeGain > 0) out.drapeGain = meta.drapeGain;
+  if (typeof meta.normalMap === 'string' && meta.normalMap) {
+    out.normalUrl = active.base + meta.normalMap + active.v;
+  }
+  if (src.drape && typeof meta.drape === 'string' && meta.drape) {
+    // the bake ships its own drape (hub lit renders): same framing as the bake raster
+    // weak tiers take the bake's small sibling when it ships one (DD: layout_N_drape-2048.webp)
+    const name = small && typeof meta.drapeSmall === 'string' && meta.drapeSmall ? meta.drapeSmall : meta.drape;
+    out.drapeUrl = active.base + name + active.v;
+  } else if (src.drape && !src.bakeDrapeOnly && backdrop && backdrop.type === 'image' &&
+             typeof backdrop.src === 'string' && backdrop.src) {
+    out.drapeUrl = small && src.smallVariant !== false
+      ? backdrop.src.replace(/\.webp(\?|$)/, '-2048.webp$1') : backdrop.src;
+  }
+  return out;
+}
+
+// createTerrain(THREE, opts) -> { mesh, heightAt, dispose, applyLayout, active }.
+// opts: { view, material, reducedMotion?, layoutBase?, reliefBoost? }.
 //   view       normalized world extent (1000).
 //   material   shared amber holo material (owned + disposed by index).
 //   reducedMotion  low-density real mesh + no assumptions of animation.
-//   layoutBase base URL for the baked artifacts (e.g. '/terrain/');
-//              index.js supplies it from $app/paths. Defaults sensibly so the
+//   layoutBase default base URL for the baked artifacts (e.g. '/terrain/') when
+//              applyLayout is called without a source. Defaults sensibly so the
 //              module is testable standalone.
 // mesh is an InstancedMesh(count 1) because the tree-shaken import list omits
 // plain Mesh; a single instance at identity is one draw call, same result.
@@ -129,13 +222,16 @@ export function createTerrain(THREE, opts) {
 
   let destroyed = false;
   let loadToken = 0;           // stale-guard for out-of-order async loads
-  let currentLayoutId = null;  // the layout currently rendered (null = seeded)
+  let currentKey = null;       // base + id currently rendered (null = seeded)
+  let pendingKey = null;       // base + id in flight (repeat scenes don't restart it)
+  let current = null;          // { key, base, meta, v } of the rendered bake
+  const failed = new Set();    // keys that failed once: warn once, no retry storm
 
   // Build a real-terrain geometry from a decoded raster + meta. Sets Y per vert
   // from the raster and drops faces whose centre cell is out of coverage so the
   // desert floats as a shaped landmass.
-  function buildRealGeo(sampler, covered, W, H) {
-    const seg = reducedMotion ? REAL_SEG_LOW : Math.min(Math.max(W, H) - 1, REAL_SEG_MAX);
+  function buildRealGeo(sampler, covered, W, H, segMax, lowDensity) {
+    const seg = (reducedMotion || lowDensity) ? REAL_SEG_LOW : Math.min(Math.max(W, H) - 1, segMax);
     const g = new THREE.PlaneGeometry(view, view, seg, seg);
     g.rotateX(-Math.PI / 2);
     const pos = g.attributes.position;
@@ -178,42 +274,71 @@ export function createTerrain(THREE, opts) {
 
   // Revert to the seeded relief (fresh build is byte-identical to construction).
   function revertToSeeded() {
-    if (currentLayoutId === null) return;
+    if (currentKey === null) return;
     activeHeight = seededHeight;
-    currentLayoutId = null;
+    currentKey = null;
+    current = null;
     swapGeo(buildSeededGeo());
   }
 
-  // applyLayout(layout) -> Promise<boolean> (true if the rendered relief changed).
-  // layout = { id, confidence, source } from the /data payload. Absent / fallback
-  // / same-id are no-ops that leave the current relief untouched.
-  async function applyLayout(layout) {
+  // applyLayout(layout, src?) -> Promise<boolean> (true if the rendered relief changed).
+  // layout = { id, confidence, source } from the /data payload (or a static
+  // source's fixed layout). src = terrainSourceFor() output: { base,
+  // reliefBoost, segMax, lowDensity }; absent = the createTerrain defaults (DD).
+  // Absent / fallback / same-key / in-flight / already-failed are no-ops that
+  // leave the current relief untouched.
+  async function applyLayout(layout, src) {
     if (destroyed) return false;
     const id = layout && Number.isInteger(layout.id) ? layout.id : null;
     const usable = id !== null && layout.source !== 'fallback';
     if (!usable) {
-      if (currentLayoutId !== null) { revertToSeeded(); return true; }
+      if (currentKey !== null) { revertToSeeded(); return true; }
       return false;
     }
-    if (id === currentLayoutId) return false;
+    const base = src && src.base ? normalizeBase(src.base) : layoutBase;
+    const boost = src && typeof src.reliefBoost === 'number' ? src.reliefBoost : reliefBoost;
+    const segMax = src && src.segMax ? src.segMax : REAL_SEG_MAX;
+    const lowDensity = !!(src && src.lowDensity);
+    const key = base + '#' + id;
+    if (key === currentKey || key === pendingKey || failed.has(key)) return false;
 
     const token = ++loadToken;
+    pendingKey = key;
     try {
-      const built = await loadLayoutRaster(layoutBase, id, reliefBoost);
+      const decoded = await loadLayoutRaster(base, id);
       if (destroyed || token !== loadToken) { return false; }
-      const { sampler, covered, W, H } = built;
-      swapGeo(buildRealGeo(sampler, covered, W, H));
-      activeHeight = sampler;
-      currentLayoutId = id;
+      const sampler = makeSampler(decoded, boost);
+      const { covered, W, H } = decoded;
+      const nextGeo = buildRealGeo(sampler, covered, W, H, segMax, lowDensity);
+      swapGeo(nextGeo);
+      // Overlays and the hit-test sample the RENDERED surface, not the raster:
+      // between vertices the mesh is flat triangles, and on the 95-seg tier the
+      // raster sits up to ~9 units (p99) off it, so anchors would float or sink.
+      activeHeight = meshSampler(nextGeo, view);
+      currentKey = key;
+      // relief = total vertical exaggeration (baked heightScale x boost), for
+      // scaling the true-scale normal map's slopes to match the mesh.
+      current = {
+        key: key, base: base, meta: decoded.meta, v: decoded.v,
+        relief: num(decoded.meta.heightScale, 1) * boost,
+      };
       return true;
     } catch (err) {
       // Any failure keeps the current relief (seeded on first load). Never throws
       // into the render loop; the board just stays on the fallback it already has.
+      if (token === loadToken) failed.add(key);
       if (typeof console !== 'undefined') {
-        console.warn('[holo] layout ' + id + ' load failed; keeping fallback relief', err);
+        console.warn('[holo] layout ' + key + ' load failed; keeping fallback relief', err);
       }
       return false;
+    } finally {
+      if (token === loadToken) pendingKey = null;
     }
+  }
+
+  // The bake currently rendered ({ key, base, meta, v, relief }) or null.
+  function active() {
+    return current;
   }
 
   function dispose() {
@@ -222,7 +347,7 @@ export function createTerrain(THREE, opts) {
     // material is owned + disposed by index (shared amber material).
   }
 
-  return { mesh, heightAt, dispose, applyLayout };
+  return { mesh, heightAt, dispose, applyLayout, active };
 }
 
 // --- raster loading (plain fetch + DataView, no GLTFLoader) ------------------
@@ -232,10 +357,26 @@ function normalizeBase(b) {
   return b.charAt(b.length - 1) === '/' ? b : b + '/';
 }
 
+// Decoded rasters keyed by base + id, shared across viewer instances so a map
+// switch back does not refetch or re-decode. Base is part of the key: DD
+// /terrain/ layout 0 and Hagga /terrain/hagga/ layout 0 are different bakes.
+// Failed loads are evicted so a later viewer can retry.
+const rasterCache = new Map();
+
+function loadLayoutRaster(base, id) {
+  const key = base + '#' + id;
+  let p = rasterCache.get(key);
+  if (!p) {
+    p = fetchLayoutRaster(base, id);
+    rasterCache.set(key, p);
+    p.catch(function () { if (rasterCache.get(key) === p) rasterCache.delete(key); });
+  }
+  return p;
+}
+
 // Fetch the manifest, resolve the one layout's bin+meta (versioned by bakeStamp),
-// decode the little-endian Uint16 heightfield + optional coverage mask, and
-// return a world-Y sampler over 0..view plus the coverage grid.
-async function loadLayoutRaster(base, id, reliefBoost) {
+// decode the little-endian Uint16 heightfield + optional coverage mask.
+async function fetchLayoutRaster(base, id) {
   const manRes = await fetch(base + 'manifest.json', { cache: 'no-cache' });
   if (!manRes.ok) throw new Error('manifest ' + manRes.status);
   const man = await manRes.json();
@@ -265,7 +406,37 @@ async function loadLayoutRaster(base, id, reliefBoost) {
   for (let i = 0; i < W * H; i++) raster[i] = dv.getUint16(i * 2, true);
 
   const covered = await loadCoverage(base, meta, v, W, H);
+  return { raster, covered, W, H, meta, v };
+}
 
+// heightAt(nx, ny) on the rendered relief: the vertex heights of a rotated
+// PlaneGeometry(view, view, seg, seg) interpolated over the same two triangles
+// per cell that PlaneGeometry indexes (a,b,d) and (b,c,d), so a point placed at
+// heightAt lies exactly on the drawn surface. Reads Y before the coverage cull
+// (which drops faces, never vertices).
+function meshSampler(geo, view) {
+  const pos = geo.attributes.position;
+  const seg = Math.round(Math.sqrt(pos.count)) - 1;
+  const step = view / seg;
+  const row = seg + 1;
+  const ys = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) ys[i] = pos.getY(i);
+  return function (nx, ny) {
+    const gx = clamp(nx / step, 0, seg), gy = clamp(ny / step, 0, seg);
+    const ix = Math.min(Math.floor(gx), seg - 1), iy = Math.min(Math.floor(gy), seg - 1);
+    const fx = gx - ix, fy = gy - iy;
+    const a = ys[iy * row + ix], d = ys[iy * row + ix + 1];
+    const b = ys[(iy + 1) * row + ix], c = ys[(iy + 1) * row + ix + 1];
+    if (fx + fy <= 1) return a + (d - a) * fx + (b - a) * fy;
+    return c + (b - c) * (1 - fx) + (d - c) * (1 - fy);
+  };
+}
+
+// heightAt(nx, ny) over 0..view for a decoded raster: bilinear-sample, rebuild
+// world Z (cm), then to board units at the same scale as X/Z (worldSpan[0] cm
+// across 1000 units), exaggerated by the baked heightScale times reliefBoost.
+function makeSampler(decoded, reliefBoost) {
+  const { raster, W, H, meta } = decoded;
   const zMin = num(meta.zMinCm, 0);
   const zMax = num(meta.zMaxCm, 65535);
   const floor = num(meta.floorCm, zMin);
@@ -275,10 +446,7 @@ async function loadLayoutRaster(base, id, reliefBoost) {
   const cmPerBoard = span / view;           // horizontal cm per board unit
   const zRange = zMax - zMin;
 
-  // heightAt(nx, ny): bilinear-sample the raster, reconstruct world Z (cm), then
-  // to board units at the same scale as X/Z, exaggerated by the baked heightScale
-  // times the runtime reliefBoost.
-  function sampler(nx, ny) {
+  return function sampler(nx, ny) {
     const gx = clamp((nx / view) * (W - 1), 0, W - 1);
     const gy = clamp((ny / view) * (H - 1), 0, H - 1);
     const x0 = Math.floor(gx), y0 = Math.floor(gy);
@@ -291,9 +459,7 @@ async function loadLayoutRaster(base, id, reliefBoost) {
     const u16 = top + (bot - top) * fy;
     const zc = zMin + (u16 / 65535) * zRange;
     return ((zc - floor) / cmPerBoard) * heightScale;
-  }
-
-  return { sampler, covered, W, H };
+  };
 }
 
 // Coverage mask: meta.coverage is a filename (1-bit floating-landmass mask baked

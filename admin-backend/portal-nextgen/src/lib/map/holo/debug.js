@@ -4,9 +4,12 @@
 
 // ?holoLayout=N (0-11) forces the holo to render baked layout N, bypassing the
 // backend matcher, so we can compare each real DD terrain to the in-game map.
-// Returns null when absent or out of range (normal path). Guarded for SSR.
-export function forcedLayout() {
+// Deep Desert only: given a mapKey other than 'deep-desert' it returns null
+// (Hagga's layout 0 is a different bake). Without a mapKey it just parses the
+// URL. Returns null when absent or out of range (normal path). Guarded for SSR.
+export function forcedLayout(mapKey) {
   if (typeof window === 'undefined') return null;
+  if (mapKey != null && mapKey !== 'deep-desert') return null;
   try {
     // Regex the raw URL so a malformed query still works: the maps route already
     // carries ?inst=pve, so a hand-appended ?holoLayout=2 becomes ?inst=pve?holoLayout=2

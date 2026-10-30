@@ -14,6 +14,11 @@ def validate_totem(totem):
         raise HTTPException(400, 'Invalid base ID')
 
 
+def validate_backup(backup):
+    if type(backup) is not int or not 0 < backup < 2 ** 63:
+        raise HTTPException(400, 'Invalid backup ID')
+
+
 def validate_capture(body):
     try:
         if (not isinstance(body, dict) or set(body) != {'request_id'}
@@ -44,6 +49,8 @@ async def call(request):
             raise HTTPException(404, 'Restore plan not found')
         if error in ('capture_busy', 'request_conflict', 'capture_disabled'):
             raise HTTPException(409, error)
+        if error == 'native_restore_unavailable':
+            raise HTTPException(409, 'Packed backup snapshots cannot be staged for this restore yet.')
         if error:
             raise ValueError()
         return result

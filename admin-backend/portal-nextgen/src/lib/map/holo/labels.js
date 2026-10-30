@@ -24,16 +24,20 @@ const CELL_H = 48;
 
 const LABEL_VERT = `
   attribute vec2 aUv;
-  uniform vec2 uCell; uniform float uW; uniform float uH;
+  uniform vec2 uCell; uniform float uW; uniform float uH; uniform vec3 uDiag;
   varying vec2 vUv;
   void main() {
     vUv = aUv + uv * uCell;
-    // Camera-facing billboard: offset the instance center in view space so the
-    // label stays upright and readable under the fixed lean (apparent size
-    // scales with depth naturally).
+    // Camera-facing billboard anchored ON the relief at the cell's north-west
+    // corner and extending from it toward the cell centre (in screen terms, at
+    // any heading), so the label covers ground inside its own cell (an I-row
+    // label no longer rises past the far edge) and has no lift to swim under
+    // tilt/pan.
     vec4 mv = viewMatrix * modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-    mv.x += position.x * uW;
-    mv.y += position.y * uH;
+    vec4 cc = viewMatrix * modelMatrix * instanceMatrix * vec4(uDiag, 1.0);
+    vec2 dir = vec2(cc.x >= mv.x ? 1.0 : -1.0, cc.y >= mv.y ? 1.0 : -1.0);
+    mv.x += (position.x + 0.5 * dir.x) * uW;
+    mv.y += (position.y + 0.5 * dir.y) * uH;
     gl_Position = projectionMatrix * mv;
   }
 `;
@@ -94,8 +98,8 @@ export function createLabels(THREE, opts) {
   const rows = (opts.grid && opts.grid.rows) || 9;
   const heightAt = opts.heightAt;
   const step = view / cols;
-  const inset = step * 0.14;
-  const lift = view * 0.012;
+  const inset = step * 0.06;
+  const lift = view * 0.0005;
   const count = cols * rows;
 
   const atlas = buildAtlas(THREE);
@@ -120,13 +124,16 @@ export function createLabels(THREE, opts) {
 
   const material = new THREE.ShaderMaterial({
     vertexShader: LABEL_VERT, fragmentShader: LABEL_FRAG,
-    transparent: true, depthWrite: false,
+    // no depth test: the label lies on the ground it labels and hangs toward the
+    // camera, so near relief would otherwise bite it; overlays draw after it
+    transparent: true, depthWrite: false, depthTest: false,
     uniforms: {
       uAtlas: { value: atlas },
       uColor: { value: opts.tokens.accent.clone() },
       uOpacity: { value: 0.55 },
       uCell: { value: new THREE.Vector2(1 / AX, 1 / AY) },
       uW: { value: view * 0.055 }, uH: { value: view * 0.028 },
+      uDiag: { value: new THREE.Vector3(step * 0.5, 0, step * 0.5) },   // corner -> cell centre
     },
   });
 

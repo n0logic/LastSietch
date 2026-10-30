@@ -5,7 +5,7 @@
 // network-first with an offline fallback to the cached shell, and the app's own
 // static files are network-first with a cache fallback.
 // Minimal + self-hosted (CSP script-src 'self'); not a full offline app.
-const CACHE = 'ls-v2-shell-v128';
+const CACHE = 'ls-v2-shell-v194';
 const SHELL_URL = '/';
 
 // Paths this worker must NEVER answer for. Under the old /portal/v2 scope the
@@ -27,7 +27,7 @@ const isServerPath = (path) => NEVER.some((p) => path === p || path.startsWith(p
 // The app's own static files, served at the root by the same rewrite that serves
 // the shell. Prefixes, so /icon-192.png and /icon-512-maskable.png are one entry.
 const APP_STATIC = [
-  '/fonts/', '/img/', '/glb/', '/terrain/',
+  '/fonts/', '/img/', '/glb/', '/terrain/', '/world-data/',
   '/icon-', '/favicon.png', '/og-fremkit.jpg', '/manifest.webmanifest',
 ];
 

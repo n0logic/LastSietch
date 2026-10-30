@@ -1,6 +1,7 @@
 <script>
   // Your own Karum ledger. Every transient state keeps explicit copy because a row with
   // goods or Solari in flight must never look idle or failed.
+  import { base } from '$app/paths';
   import SealedPanel from '$lib/components/SealedPanel.svelte';
   import { karum, cancelListing, cancelRequest, uuidv4 } from '$lib/karum.svelte.js';
   import { tierGradeLabel, wantedGradeLabel } from './grade.js';
@@ -102,6 +103,7 @@
         status="empty" action="none" art="no-orders"
         emptyText="You have nothing for sale. Search your eligible bank stacks to list one."
       />
+      <a class="howto" href={`${base}/help#howto-selling`}>How selling works</a>
     {:else}
       <ul class="rows">
         {#each liveMine as row (row.listing_id)}
@@ -176,6 +178,7 @@
 </div>
 
 <style>
+  .howto { display: inline-block; margin-top: var(--space-2); font-size: var(--text-sm); color: var(--accent-text); }
   .mine { display: flex; flex-direction: column; gap: var(--space-3); }
   .mine-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
   .panel-kicker { margin: 0; color: var(--accent); text-transform: uppercase; letter-spacing: .18em; font-size: var(--text-xs); }

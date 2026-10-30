@@ -10,6 +10,7 @@
   // seals to an honest Connect-Discord panel.
   import { untrack } from 'svelte';
   import { page } from '$app/state';
+  import { base } from '$app/paths';
   import { useAuthGate } from '$lib/authGate.svelte.js';
   import { exchange, loadAll, loadMore, openItem } from '$lib/exchange.svelte.js';
   import PageHeader from '$lib/components/PageHeader.svelte';
@@ -107,6 +108,7 @@
               status="empty" action="none" art="nothing-found"
               emptyText="No listings match that. Try a different name or category."
             />
+            <a class="howto" href={`${base}/help#howto-selling`}>How selling works</a>
           {:else}
             <div class="rows" role="list">
               {#each rows as row (row.template_id)}
@@ -151,6 +153,7 @@
   .browse-head { display: flex; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-4); }
   .rows { display: flex; flex-direction: column; gap: var(--space-1); }
   .row-skel { height: 52px; width: 100%; border-radius: var(--radius-sm); }
+  .howto { display: inline-block; margin-top: var(--space-2); font-size: var(--text-sm); color: var(--accent-text); }
   .more-btn {
     margin-top: var(--space-3); align-self: center;
     font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: .12em; text-transform: uppercase;

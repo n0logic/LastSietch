@@ -66,6 +66,17 @@ EXPORT_ENABLED = os.environ.get("LASTSIETCH_EXPORT_ENABLED", "0") == "1"
 # account; with REQUIRE_QUIZ=0 an added account is only guaranteed to be UNCLAIMED,
 # not proven-owned (residual: a verified user could claim an unclaimed character).
 MULTIACCOUNT_ENABLED = os.environ.get("LASTSIETCH_MULTIACCOUNT_ENABLED", "0") == "1"
+# Landsraad portal claim (the design notes (not published)).
+# Ships DARK. This only shows the Claim panel and opens the route; the game-host writer
+# has its own gate file (/etc/lastsietch/landsraad-claim-enabled) and BOTH must agree.
+LANDSRAAD_CLAIM_ENABLED = os.environ.get("LASTSIETCH_LANDSRAAD_CLAIM_ENABLED", "0") == "1"
+# Who sees the panel and may use the route once the flag is on: dune account ids
+# (comma or space separated), or '*' for every linked player. Unset or empty =
+# nobody, the same fail-closed rule as the game-host gate file.
+LANDSRAAD_CLAIM_ACCOUNTS = frozenset(
+    t if t == "*" else int(t)
+    for t in os.environ.get("LASTSIETCH_LANDSRAAD_CLAIM_ACCOUNTS", "").replace(",", " ").split()
+    if t == "*" or t.isdigit())
 MULTIACCOUNT_REQUIRE_QUIZ = os.environ.get("LASTSIETCH_MULTIACCOUNT_REQUIRE_QUIZ", "0") == "1"
 # Requires the separately rehearsed profile schema and backfill before activation.
 PORTAL_PROFILES_ENABLED = os.environ.get("LASTSIETCH_PORTAL_PROFILES_ENABLED", "0") == "1"
@@ -122,12 +133,24 @@ MARKET_WATCH_INTERVAL = int(os.environ.get("LASTSIETCH_MARKET_WATCH_INTERVAL", "
 MARKET_WATCH_MAX_PER_ACCOUNT = int(os.environ.get("LASTSIETCH_MARKET_WATCH_MAX_PER_ACCOUNT", "25"))
 PORTAL_ALERT_POLL_KEY = os.environ.get("LASTSIETCH_PORTAL_ALERT_POLL_KEY", "")
 
+# Portal events -> Discord scheduled events (Cielago pulls /_internal/events/discord/*
+# with the same key). Default off: pending returns nothing until the owner-watched test.
+EVENT_DISCORD_ENABLED = os.environ.get("LASTSIETCH_EVENT_DISCORD_ENABLED", "0") == "1"
+
 # Event reminders (portal events, wave 9). An in-process loop mails a T-1h
 # mailbox notification for every due portal_event_reminders row. Default ON: the
 # feature is worthless without delivery, and a tick with no rows costs one
 # indexed SELECT. EVENT_REMINDERS_ENABLED is the kill switch.
 EVENT_REMINDERS_ENABLED = os.environ.get("LASTSIETCH_EVENT_REMINDERS_ENABLED", "1") == "1"
 EVENT_REMINDER_INTERVAL = int(os.environ.get("LASTSIETCH_EVENT_REMINDER_INTERVAL", "60"))
+
+# Transfer relink: re-points portal links from an account that left through a
+# Funcom character transfer to the player's new account (portal_transfer_relink).
+# Off by default; APPLY=0 is log-only. MAX caps how many links one tick may change.
+TRANSFER_RELINK_ENABLED = os.environ.get("LASTSIETCH_TRANSFER_RELINK_ENABLED", "0") == "1"
+TRANSFER_RELINK_APPLY = os.environ.get("LASTSIETCH_TRANSFER_RELINK_APPLY", "0") == "1"
+TRANSFER_RELINK_INTERVAL = int(os.environ.get("LASTSIETCH_TRANSFER_RELINK_INTERVAL", "300"))
+TRANSFER_RELINK_MAX = int(os.environ.get("LASTSIETCH_TRANSFER_RELINK_MAX", "3"))
 
 SAMPLE_INTERVAL_SEC = int(os.environ.get("LASTSIETCH_SAMPLE_INTERVAL_SEC", "60"))
 FAST_INTERVAL_SEC = int(os.environ.get("LASTSIETCH_FAST_INTERVAL_SEC", "10"))

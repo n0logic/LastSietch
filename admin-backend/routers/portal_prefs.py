@@ -150,6 +150,20 @@ def _valid_activity_seen(value):
         return False
 
 
+def _valid_bool(value):
+    return value is True or value is False
+
+
+def _valid_reading_size(value):
+    return isinstance(value, str) and value in ("s", "m", "l")
+
+
+def _valid_sietch_key(value):
+    # Shape only; ownership is checked against delivered Seven Nights orders in
+    # portal_prefs_set, which needs the session.
+    return isinstance(value, str) and bool(re.fullmatch(r"[a-z0-9_]{1,32}", value))
+
+
 # The ONLY keys the server stores, and the only value shapes it accepts. A key
 # the portal wants to save has to be added HERE first; there is no fallthrough.
 VALIDATORS = {
@@ -160,7 +174,20 @@ VALIDATORS = {
     "reach_recent": _valid_reach_paths,
     "market_searches": _valid_market_searches,
     "activity_seen": _valid_activity_seen,
+    # Seven Nights leaderboard opt-out: true shows the name as "A wanderer".
+    "sietch_board_hidden": _valid_bool,
+    "sietch_flair": _valid_sietch_key,
+    "sietch_mapdot": _valid_sietch_key,
+    # Settings > Display "Easier reading font"; the browser keeps its own copy too.
+    "reading_font": _valid_bool,
+    # Its body text size while on: Small, Medium (the default) or Large.
+    "reading_size": _valid_reading_size,
+    # Weekend reminders (plan B3): true = a mailbox notice before every weekend effect event.
+    "weekend_remind": _valid_bool,
 }
+
+# Prefs that must be OWNED (a delivered Seven Nights order) before they can be set.
+SIETCH_OWNED = {"sietch_flair": "flair", "sietch_mapdot": "mapdot"}
 
 
 def _now() -> str:
@@ -315,7 +342,7 @@ async def portal_prefs_set(request: Request):
     gate, early = _require_linked_session_json(request)
     if early is not None:
         return early
-    _, discord_id, _, _ = gate
+    session, discord_id, account_id, _ = gate
 
     body, csrf_ok = await _v2_body_and_csrf(request)
     if not csrf_ok:
@@ -332,6 +359,15 @@ async def portal_prefs_set(request: Request):
     if not isinstance(patch, dict):
         return _v2_err_field("bad_request", "Preferences must be an object.",
                              field="prefs")
+
+    # Owned prefs first; a value of the wrong shape is left to check_patch below.
+    for key, slot in SIETCH_OWNED.items():
+        if not isinstance(patch.get(key), str):
+            continue
+        from routers.portal_sietch import pref_owned
+        if scope != "" or not pref_owned(session, account_id, slot, patch[key]):
+            return _v2_err_field("not_owned", "You do not own that yet.", field="prefs",
+                                 key=key, status=403)
 
     token, key = check_patch(patch)
     if token == "unknown":

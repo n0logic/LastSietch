@@ -5,7 +5,7 @@ client-pak icon basename (e.g. `T_UI_IconResourceMagnetite_D`), served from
 /admin/static/img/dune-icons/<basename>.png.
 
 The sidecar data/dune-item-icons.json is built by
-scripts/build-item-icon-sidecar.py from the DunePakRE extraction. Lookup is
+scripts/build-item-icon-sidecar.py from the client pak extraction. Lookup is
 case-insensitive O(1), mirroring name_lookups.py. A missing/unreadable sidecar
 degrades to the unknown-item fallback so the portal never 500s on icons.
 """

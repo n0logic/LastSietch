@@ -1,4 +1,5 @@
 {% extends "v2/base.html" %}
+{% from "v2/_includes/guide.html" import how_panel with context %}
 {% block title %}Bans — Players{% endblock %}
 {% block extra_css %}
 <link rel="stylesheet" href="/admin/static/css/v2/player-tools.css">
@@ -14,9 +15,18 @@
     </p>
   </header>
 
+  {% set ls_side = request and (request.state|default(none)).admin_shell|default(none) %}
+  {% if ls_side %}<div class="ls-with-side"><div class="ls-with-side__main">{% endif %}
   <section id="v2-bans-body" aria-live="polite">
     {% include "v2/_fragments/bans_table.html" %}
   </section>
+  {% if ls_side %}</div>
+  {{ how_panel("How bans work", [
+      ["Keyed by FLS id.", "A ban follows the player to a fresh character."],
+      ["History.", "The full history lists every kick, ban and unban."],
+      ["Look first.", "Open the player page to see who they are before you act."]
+  ], "Closing this page changes nothing.") }}
+  </div>{% endif %}
 
 </main>
 {% endblock %}

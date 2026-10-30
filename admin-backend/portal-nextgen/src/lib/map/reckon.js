@@ -8,7 +8,9 @@
 //                two distinct fixes (fix-pair displacement is the direction
 //                source per team-lead ruling: measured beats the provisional
 //                heading sign), snap-correct on each real fix, FREEZE once the
-//                fix is older than staleMs. (storm center)
+//                fix is older than staleMs. (v1 storm center)
+//   follow       sample a caller-supplied position(wallMs) every frame until
+//                untilMs (reader v2 storm: exact route motion).
 // apply(x, y, estimated) receives every rendered position; estimated=true for
 // anything that is not a real fix, so chrome can render it amber, not Ibad.
 // reducedMotion: no rAF loop, positions jump on fix arrival (V1 behavior).
@@ -45,7 +47,11 @@ export function createReckoner(opts) {
     Object.keys(entities).forEach(function (id) {
       const e = entities[id];
       if (e.done) return;
-      if (e.mode === 'lerp') {
+      if (e.mode === 'follow') {
+        const q = e.position(wall);
+        e.apply(q.x, q.y, !!q.estimated);
+        if (wall >= e.untilMs) e.done = true; else moving = true;
+      } else if (e.mode === 'lerp') {
         let f = (now - e.t0) / e.intervalMs;
         if (f < 0) f = 0;
         if (f >= e.maxFactor) { f = e.maxFactor; e.done = true; }
@@ -143,6 +149,18 @@ export function createReckoner(opts) {
     schedule();
   }
 
+  // cfg: { position(wallMs) -> {x, y, estimated}, untilMs, apply }. For an entity whose
+  // motion is known exactly (the sandstorm's route + speed): the loop just samples it.
+  // Reduced motion: one placement at the current time, no loop.
+  function followFix(id, cfg) {
+    const e = entities[id] = { mode: 'follow', position: cfg.position, apply: cfg.apply,
+      untilMs: cfg.untilMs, done: false };
+    const q = e.position(Date.now());
+    e.apply(q.x, q.y, !!q.estimated);
+    if (reduce || !(Date.now() < e.untilMs)) { e.done = true; return; }
+    schedule();
+  }
+
   function remove(id) {
     delete entities[id];
   }
@@ -156,5 +174,5 @@ export function createReckoner(opts) {
     if (raf != null) { cancelAnimationFrame(raf); raf = null; }
   }
 
-  return { lerpFix, extrapolateFix, remove, clear, destroy };
+  return { lerpFix, extrapolateFix, followFix, remove, clear, destroy };
 }

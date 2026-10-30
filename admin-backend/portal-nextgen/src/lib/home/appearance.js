@@ -1,4 +1,4 @@
-const NAMES = { habbanya: 'Habbanya', kulon: 'Kulon', amtal: 'Amtal', 'dd-pve': 'Deep Desert', 'dd-pvp': 'Deep Desert' };
+const NAMES = { habbanya: 'Habbanya', amtal: 'Amtal', 'dd-pve': 'Deep Desert', 'dd-pvp': 'Deep Desert' };
 
 export function timeBand(hour) {
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) return 'dusk';
@@ -11,12 +11,14 @@ export function timeBand(hour) {
 export function homeAppearance(signals, clock) {
   const s = signals || {};
   const map = (s.mapKey === 'hagga'
-    ? ['habbanya', 'kulon', 'amtal'][s.dim] || 'habbanya'
+    // Hagga dims: 0 Habbanya, 2 Amtal. Dim 1 was Kulon (closed 2026-10-28); a
+    // stale 1 falls back to Habbanya like any other unknown dim.
+    ? { 0: 'habbanya', 2: 'amtal' }[s.dim] || 'habbanya'
     : s.dim === 1 ? 'dd-pvp' : 'dd-pve');
-  const inst = map === 'amtal' ? 'Full PvP' : map === 'kulon' || map === 'dd-pvp' ? 'PvP' : 'PvE';
+  const inst = map === 'amtal' ? 'Full PvP' : map === 'dd-pvp' ? 'PvP' : 'PvE';
   return {
     map, label: NAMES[map], mode: inst, band: timeBand(clock?.local_hour),
     weather: s.stormActive ? 'storm' : 'clear', untracked: map === 'amtal',
-    href: map.startsWith('dd-') ? `/maps/deep-desert?inst=${map.slice(3)}` : `/maps/hagga?inst=${map}`,
+    href: '/world',
   };
 }

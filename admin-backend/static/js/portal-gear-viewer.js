@@ -30,7 +30,7 @@ import { GLTFLoader } from './vendor/three/GLTFLoader.js';
 // previously-cached copy served first (the 2026-06-22 "new swatch-lut not picked
 // up" bug). A ?v= bump gives each deploy a distinct URL the SW has never cached,
 // so the new data lands immediately. Bump on any *-tints/swatch-lut/manifest change.
-const DATA_V = '20260622d';
+const DATA_V = '20261030g';
 
 let _manifestPromise = null;
 let _tintsPromise = null;

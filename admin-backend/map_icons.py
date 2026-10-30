@@ -7,7 +7,7 @@ served from /admin/static/img/dune-icons/<basename>.png (shared with item icons)
 These are the markers the game itself draws on its map, so they are the correct
 icon for every POI type -- unlike item icons, which only resolve the handful of
 marker types that happen to be items. The sidecar data/dune-map-icons.json is
-built by scripts/build-map-icon-sidecar.py from the DunePakRE extraction.
+built by scripts/build-map-icon-sidecar.py from the client pak extraction.
 
 Returns None when a type has no map glyph, so the caller can fall back to the
 item-icon sidecar and then to a colored dot.

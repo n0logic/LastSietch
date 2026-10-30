@@ -29,7 +29,7 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 
 from database import get_db
 from portal_auth import client_ip
@@ -46,6 +46,8 @@ router = APIRouter()
 
 
 # --- event model (stdlib only below; the test suite execs this section) ------
+
+import event_effects  # noqa: E402  stdlib only; imported here so the exec'd section carries it
 
 EVENT_KINDS = ("community", "faction_war", "maintenance", "other")
 # What a write may set. `cancelled` is reachable only through the cancel route,
@@ -77,10 +79,18 @@ REARM_MINUTES = 15
 PUBLIC_CACHE = "public, max-age=60"
 PRIVATE_CACHE = "private, no-store"
 
-# The eleven keys of the event contract (plan section 5). Everything that leaves
-# this module for a browser is built from exactly these, in this order.
+# The keys of the event contract (plan section 5). Everything that leaves this
+# module for a browser is built from exactly these, in this order. cancel_reason
+# (2026-09-28) is null unless the event is cancelled: the composer always told the
+# admin the reason is shown to players, and until then it never was.
+# The effect keys (2026-10-28) are read-only facts for the effect chip: what the
+# weekend does, where, and whether the runner has it live. effect_started_at is
+# when the runner read the effect back on the servers (the "confirmed live at"
+# time); it is null until the state is running or done. effect_error is an
+# operator's detail and stays in the admin view.
 PUBLIC_KEYS = ("id", "title", "kind", "banner", "starts_utc", "ends_utc", "map",
-               "description", "host", "status", "updated_at")
+               "description", "host", "status", "updated_at", "cancel_reason",
+               "effect", "effect_scope", "effect_state", "effect_started_at")
 
 TOGGLE_ACTION = "portal_event_remind_toggle"
 ADMIN_ACTIONS = ("portal_event_create", "portal_event_update", "portal_event_cancel")
@@ -184,23 +194,114 @@ def public_event(row) -> dict:
             "description": row["description"] or "",
             "host": row["host"] or None,
             "status": row["status"],
-            "updated_at": row["updated_at"]}
+            "updated_at": row["updated_at"],
+            "cancel_reason": (row["cancel_reason"] or None) if row["status"] == "cancelled" else None,
+            "effect": row["effect"] or "none",
+            "effect_scope": row["effect_scope"] if row["effect"] not in (None, "none") else None,
+            "effect_state": row["effect_state"] if row["effect"] not in (None, "none") else None,
+            "effect_started_at": (row["effect_started_at"]
+                                  if row["effect"] not in (None, "none")
+                                  and row["effect_state"] in ("running", "done") else None)}
 
 
 _EVENT_COLUMNS = ("id, title, kind, banner, starts_utc, ends_utc, map_name, "
-                  "description, host, status, published_at, created_at, updated_at")
+                  "description, host, status, published_at, created_at, updated_at, "
+                  "cancelled_at, cancel_reason, discord_sync, discord_event_id, "
+                  "discord_status, discord_state, discord_error, discord_synced_at, "
+                  "effect, effect_scope, effect_state, effect_error, effect_job, "
+                  "effect_job_at, effect_started_at, effect_ended_at")
+
+# Discord treats these as final: a synced event in either one gets a NEW Discord
+# event if it is published again.
+DISCORD_FINAL = ("completed", "canceled")
+
+# The calendar feed. Built from public_event dicts and nothing else, so it can
+# never carry a field the public list does not already carry. The deep link is
+# the same one the Discord cross-post uses (event_discord.PORTAL_EVENT_URL).
+PORTAL_EVENT_URL = "https://portal.lastsietch.com/events/%d"
+ICS_UID = "event-%d@" + os.environ.get("LASTSIETCH_ICS_UID_DOMAIN", "portal.example.org")
+ICS_PRODID = "-//Last Sietch//Portal Events//EN"
+ICS_NAME = "Last Sietch events"
+# RFC 5545 3.1: a content line is at most 75 octets before its CRLF.
+ICS_FOLD_OCTETS = 75
+_ICS_CONTROL_RE = re.compile("[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def ics_text(value) -> str:
+    """A TEXT value (RFC 5545 3.3.11): backslash first, then ; and , escaped,
+    every newline spelled \\n, and any other control byte dropped."""
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = _ICS_CONTROL_RE.sub("", text)
+    return (text.replace("\\", "\\\\").replace(";", "\\;")
+                .replace(",", "\\,").replace("\n", "\\n"))
+
+
+def ics_fold(line: str) -> str:
+    """One content line folded at 75 octets, continuation lines led by a single
+    space. Splits on character boundaries so a multi-byte UTF-8 character is
+    never cut in half."""
+    out, chunk, size = [], "", 0
+    for ch in line:
+        n = len(ch.encode("utf-8"))
+        if size + n > ICS_FOLD_OCTETS:
+            out.append(chunk)
+            chunk, size = " ", 1
+        chunk += ch
+        size += n
+    out.append(chunk)
+    return "\r\n".join(out)
+
+
+def ics_stamp(text):
+    """A stored 'YYYY-MM-DD HH:MM:SS' (UTC) as an iCalendar UTC DATE-TIME."""
+    stamp = _stamp(text)
+    return stamp.strftime("%Y%m%dT%H%M%SZ") if stamp else None
+
+
+def events_ics(events) -> str:
+    """A VCALENDAR of public_event dicts. DTSTAMP is the row's updated_at (with
+    no METHOD it means LAST-MODIFIED), so the same rows give the same bytes.
+    An event with no end time carries no DTEND rather than an invented one."""
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:" + ICS_PRODID,
+             "CALSCALE:GREGORIAN", "X-WR-CALNAME:" + ics_text(ICS_NAME)]
+    for ev in events:
+        start = ics_stamp(ev["starts_utc"])
+        if start is None:
+            continue
+        lines += ["BEGIN:VEVENT",
+                  "UID:" + ICS_UID % ev["id"],
+                  "DTSTAMP:" + (ics_stamp(ev["updated_at"]) or start),
+                  "DTSTART:" + start]
+        end = ics_stamp(ev["ends_utc"])
+        if end:
+            lines.append("DTEND:" + end)
+        lines.append("SUMMARY:" + ics_text(ev["title"]))
+        if ev["description"]:
+            lines.append("DESCRIPTION:" + ics_text(ev["description"]))
+        if ev["map"]:
+            lines.append("LOCATION:" + ics_text(ev["map"]))
+        lines += ["URL:" + PORTAL_EVENT_URL % ev["id"], "END:VEVENT"]
+    lines.append("END:VCALENDAR")
+    return "".join(ics_fold(line) + "\r\n" for line in lines)
 
 
 def list_events(window: str, limit: int) -> list:
-    """Published events only. `upcoming` is soonest first from now; `past` is
-    newest first inside the 90-day window, so the page never grows without
-    bound."""
+    """Published events only. `upcoming` is soonest first from now; `live` has
+    started and not yet ended, ending soonest first; `past` is newest first
+    inside the 90-day window, so the page never grows without bound. An event
+    with no end time is past once it starts."""
     now = _now()
     if window == "past":
         sql = ("SELECT %s FROM portal_events WHERE status = 'published'"
                " AND starts_utc < ? AND starts_utc >= ?"
+               " AND (ends_utc IS NULL OR ends_utc <= ?)"
                " ORDER BY starts_utc DESC LIMIT ?") % _EVENT_COLUMNS
-        args = (now, _since(PAST_WINDOW_DAYS * 86400), limit)
+        args = (now, _since(PAST_WINDOW_DAYS * 86400), now, limit)
+    elif window == "live":
+        sql = ("SELECT %s FROM portal_events WHERE status = 'published'"
+               " AND starts_utc < ? AND ends_utc > ?"
+               " ORDER BY ends_utc ASC LIMIT ?") % _EVENT_COLUMNS
+        args = (now, now, limit)
     else:
         sql = ("SELECT %s FROM portal_events WHERE status = 'published'"
                " AND starts_utc >= ? ORDER BY starts_utc ASC LIMIT ?") % _EVENT_COLUMNS
@@ -208,19 +309,6 @@ def list_events(window: str, limit: int) -> list:
     conn = get_db()
     try:
         return [public_event(r) for r in conn.execute(sql, args)]
-    finally:
-        conn.close()
-
-
-def admin_events(limit: int) -> list:
-    """Every event whatever its status, newest start first. Same projection as
-    the public list: the composer edits the contract object, and an admin has no
-    use for the author column either."""
-    conn = get_db()
-    try:
-        return [public_event(r) for r in conn.execute(
-            ("SELECT %s FROM portal_events ORDER BY starts_utc DESC LIMIT ?"
-             % _EVENT_COLUMNS), (limit,))]
     finally:
         conn.close()
 
@@ -445,32 +533,78 @@ def validate_event(body, existing=None):
     if status not in WRITABLE_STATUSES:
         return None, "invalid_status", "An event is either a draft or published."
 
+    effect, effect_scope, error, message = event_effects.validate(body, existing, starts_utc, ends_utc)
+    if error:
+        return None, error, message
+
+    discord_sync = _field(body, ("discord_sync",), existing, "discord_sync")
+    # Publishing an effect event syncs it to Discord unless the write says otherwise.
+    if "discord_sync" not in body and effect != "none" and status == "published":
+        discord_sync = 1
+    discord_sync = 1 if discord_sync in (True, 1, "1", "true", "on") else 0
+
     return ({"title": title, "kind": kind, "banner": banner or None,
              "starts_utc": starts_utc, "ends_utc": ends_utc,
              "map_name": map_name or None, "host": host or None,
-             "description": description or None, "status": status},
+             "description": description or None, "status": status,
+             "discord_sync": discord_sync, "effect": effect, "effect_scope": effect_scope,
+             "effect_rearm": body.get("effect_rearm") in (True, 1, "1", "true", "on")},
             None, None)
 
 
 def insert_event(fields, discord_id) -> int:
     now = _now()
+    effect = fields.get("effect") or "none"
+    effect_state, _error = event_effects.state_after_write(None, dict(fields, effect=effect))
     conn = get_db()
     try:
         cur = conn.execute(
             """INSERT INTO portal_events
                    (title, kind, banner, starts_utc, ends_utc, map_name, description,
                     host, status, created_by_discord_id, created_at, updated_at,
-                    published_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    published_at, discord_sync, discord_state, effect, effect_scope,
+                    effect_state)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (fields["title"], fields["kind"], fields["banner"], fields["starts_utc"],
              fields["ends_utc"], fields["map_name"], fields["description"],
              fields["host"], fields["status"], str(discord_id), now, now,
-             now if fields["status"] == "published" else None),
+             now if fields["status"] == "published" else None,
+             fields.get("discord_sync", 0),
+             "pending" if fields.get("discord_sync") else None,
+             effect, fields.get("effect_scope"), effect_state),
         )
         conn.commit()
         return int(cur.lastrowid)
     finally:
         conn.close()
+
+
+def _col(row, key):
+    try:
+        return row[key]
+    except (IndexError, KeyError):
+        return None
+
+
+def discord_after_write(row, fields):
+    """(discord_sync, discord_event_id, discord_status, discord_state) for an
+    edit. Any edit to an event that is synced, or that still has a live Discord
+    event (sync just switched off: that one gets cancelled), goes back to
+    pending. A publish after Discord's final status forgets the old Discord
+    event, so the sync creates a new one."""
+    sync = int(fields.get("discord_sync", _col(row, "discord_sync")) or 0)
+    event_id = _col(row, "discord_event_id")
+    status = _col(row, "discord_status")
+    if fields["status"] == "published" and status in DISCORD_FINAL:
+        event_id, status = None, None
+    state = _col(row, "discord_state")
+    if sync or event_id:
+        state = "pending"
+    return sync, event_id, status, state
+
+
+class EffectRaced(Exception):
+    pass
 
 
 def update_event(event_id, fields, row) -> None:
@@ -481,19 +615,33 @@ def update_event(event_id, fields, row) -> None:
     published_at = row["published_at"] or (
         now if fields["status"] == "published" else None)
     rearm = rearm_needed(row["starts_utc"], fields["starts_utc"])
+    discord_sync, discord_event_id, discord_status, discord_state = discord_after_write(row, fields)
+    effect = fields.get("effect") or "none"
+    effect_state, effect_error = event_effects.state_after_write(
+        row, dict(fields, effect=effect), rearm=fields.get("effect_rearm", False))
     conn = get_db()
     try:
         conn.execute("BEGIN IMMEDIATE")
-        conn.execute(
+        # The effect state is compared-and-set against what this write read: the
+        # runner moves it on its own clock, and an edit must not overwrite a
+        # transition it never saw (armed -> running a second ago stays running).
+        cur = conn.execute(
             """UPDATE portal_events
                   SET title = ?, kind = ?, banner = ?, starts_utc = ?, ends_utc = ?,
                       map_name = ?, description = ?, host = ?, status = ?,
-                      published_at = ?, updated_at = ?
-                WHERE id = ?""",
+                      published_at = ?, updated_at = ?, discord_sync = ?,
+                      discord_event_id = ?, discord_status = ?, discord_state = ?,
+                      effect = ?, effect_scope = ?, effect_state = ?, effect_error = ?
+                WHERE id = ? AND effect_state IS ? AND effect_job IS ?""",
             (fields["title"], fields["kind"], fields["banner"], fields["starts_utc"],
              fields["ends_utc"], fields["map_name"], fields["description"],
-             fields["host"], fields["status"], published_at, now, int(event_id)),
+             fields["host"], fields["status"], published_at, now, discord_sync,
+             discord_event_id, discord_status, discord_state,
+             effect, fields.get("effect_scope"), effect_state, effect_error,
+             int(event_id), _col(row, "effect_state"), _col(row, "effect_job")),
         )
+        if cur.rowcount != 1:
+            raise EffectRaced("The effect changed state while you were editing. Reload and try again.")
         if rearm:
             conn.execute(
                 "UPDATE portal_event_reminders SET notified_at = NULL WHERE event_id = ?",
@@ -527,7 +675,11 @@ def cancel_event(event_id, reason) -> list:
         conn.execute(
             """UPDATE portal_events
                   SET status = 'cancelled', cancelled_at = ?, cancel_reason = ?,
-                      updated_at = ?
+                      updated_at = ?,
+                      discord_state = CASE WHEN discord_sync = 1 OR discord_event_id IS NOT NULL
+                                           THEN 'pending' ELSE discord_state END,
+                      effect_state = CASE WHEN effect_state = 'armed' AND effect_job IS NULL
+                                          THEN NULL ELSE effect_state END
                 WHERE id = ?""",
             (now, reason or None, now, int(event_id)),
         )
@@ -612,7 +764,9 @@ async def portal_events_list(request: Request, window: str = "upcoming",
     """The public events list. Published only, never a draft. Anonymous, and
     cached for a minute at the edge: a cancel is up to 60 s stale here on
     purpose (lead ruling 5), because the mailbox notice is immediate."""
-    window = "past" if str(window or "").strip().lower() == "past" else "upcoming"
+    window = str(window or "").strip().lower()
+    if window not in ("past", "live"):
+        window = "upcoming"
     try:
         limit = int(limit)
     except (TypeError, ValueError):
@@ -620,6 +774,18 @@ async def portal_events_list(request: Request, window: str = "upcoming",
     limit = max(1, min(limit, LIST_LIMIT_MAX))
     resp = _v2_ok({"window": window, "events": list_events(window, limit)})
     resp.headers["Cache-Control"] = PUBLIC_CACHE
+    return resp
+
+
+@router.get("/portal/events.ics")
+async def portal_events_ics(request: Request):
+    """The public calendar feed: what is live now and what is upcoming, the
+    same published rows the list shows. Anonymous and edge-cached like the
+    list. Not under /portal/events/ so it can never meet the id route."""
+    events = list_events("live", LIST_LIMIT_MAX) + list_events("upcoming", LIST_LIMIT_MAX)
+    resp = Response(content=events_ics(events), media_type="text/calendar; charset=utf-8")
+    resp.headers["Cache-Control"] = PUBLIC_CACHE
+    resp.headers["Content-Disposition"] = 'inline; filename="last-sietch-events.ics"'
     return resp
 
 
@@ -633,18 +799,6 @@ async def portal_events_mine(request: Request):
         return early
     _session, _discord_id, account_id, _row = gate
     resp = _v2_ok({"reminders": reminder_event_ids(account_id)})
-    resp.headers["Cache-Control"] = PRIVATE_CACHE
-    return resp
-
-
-@router.get("/portal/events/admin/list")
-async def portal_events_admin_list(request: Request):
-    """Every event including drafts. Auth: linked session whose Discord id maps
-    to the admin role; anyone else gets the 404 a missing route would give."""
-    _gate, early = _require_admin(request)
-    if early is not None:
-        return early
-    resp = _v2_ok({"events": admin_events(ADMIN_LIST_LIMIT)})
     resp.headers["Cache-Control"] = PRIVATE_CACHE
     return resp
 
@@ -724,118 +878,10 @@ async def _toggle(request: Request, event_id: str, on: bool):
 def _require_admin(request: Request):
     """(gate, None) or (None, refusal). Every refusal is the SAME 404 a missing
     route gives (the solido.py admin-lane precedent): an anonymous caller and a
-    linked player who is not an admin must not be able to tell the composer's
+    linked player who is not an admin must not be able to tell the admin
     endpoints exist, and the role comes from the server-side users.role mapping,
     never from anything the browser sent."""
     gate, early = _require_linked_session_json(request)
     if early is not None or "admin" not in _roles_for_discord(gate[1]):
         return None, _v2_err("not_found", "Not found.", status=404)
     return gate, None
-
-
-async def _admin_write(request: Request):
-    """(gate, body, None) or (None, None, refusal): the gate, the CSRF check and
-    the per-admin debounce, in the one order every admin write uses."""
-    gate, early = _require_admin(request)
-    if early is not None:
-        return None, None, early
-    body, csrf_ok = await _v2_body_and_csrf(request)
-    if not csrf_ok:
-        return None, None, _v2_err("csrf", "Invalid CSRF token", status=403)
-    remaining = admin_debounce_remaining("self:%s" % gate[1])
-    if remaining > 0:
-        return None, None, _v2_err(
-            "debounce", "That was a moment ago. Try again in %d seconds." % remaining,
-            status=429)
-    return gate, body, None
-
-
-@router.post("/portal/events/admin/create")
-async def portal_events_admin_create(request: Request):
-    """Create an event, as a draft or published outright. Auth: linked session +
-    admin role + CSRF, debounced 10 s per admin."""
-    gate, body, early = await _admin_write(request)
-    if early is not None:
-        return early
-    _session, discord_id, _account_id, _row = gate
-
-    fields, error, message = validate_event(body)
-    if error:
-        return _v2_err(error, message, status=400)
-
-    event_id = insert_event(fields, discord_id)
-    _audit("self:%s" % discord_id, audit_action="portal_event_create", target=event_id,
-           ip=client_ip(request),
-           details={"event_id": event_id, "kind": fields["kind"], "status": fields["status"]})
-
-    event = public_event(event_row(event_id))
-    if fields["status"] == "published":
-        await cross_post(event)
-    return _v2_ok({"event": event})
-
-
-@router.post("/portal/events/admin/{event_id}/update")
-async def portal_events_admin_update(request: Request, event_id: str):
-    """Edit an event, publish a draft, or move it. A move of more than 15
-    minutes re-arms the reminder rows. Auth as create."""
-    gate, body, early = await _admin_write(request)
-    if early is not None:
-        return early
-    _session, discord_id, _account_id, _row = gate
-
-    eid = _event_id(event_id)
-    row = event_row(eid)
-    if row is None:
-        return _v2_err("not_found", "That event is not available.", status=404)
-    if row["status"] == "cancelled":
-        return _v2_err("event_cancelled", "That event was cancelled.", status=409)
-
-    fields, error, message = validate_event(body, existing=row)
-    if error:
-        return _v2_err(error, message, status=400)
-
-    rearmed = rearm_needed(row["starts_utc"], fields["starts_utc"])
-    update_event(eid, fields, row)
-    _audit("self:%s" % discord_id, audit_action="portal_event_update", target=eid,
-           ip=client_ip(request),
-           details={"event_id": eid, "status": fields["status"], "rearmed": rearmed})
-
-    event = public_event(event_row(eid))
-    if fields["status"] == "published" and row["status"] != "published":
-        await cross_post(event)
-    return _v2_ok({"event": event, "rearmed": rearmed})
-
-
-@router.post("/portal/events/admin/{event_id}/cancel")
-async def portal_events_admin_cancel(request: Request, event_id: str):
-    """Cancel an event and tell everyone who asked to be reminded. Body carries
-    the typed confirmation `{"confirm": "CANCEL", "reason": "..."}`: a cancel
-    mails every reminder holder, so it is not a button you can lean on."""
-    gate, body, early = await _admin_write(request)
-    if early is not None:
-        return early
-    _session, discord_id, _account_id, _row = gate
-
-    eid = _event_id(event_id)
-    row = event_row(eid)
-    if row is None:
-        return _v2_err("not_found", "That event is not available.", status=404)
-
-    if str((body or {}).get("confirm") or "").strip() != "CANCEL":
-        return _v2_err("confirm_required",
-                       "Type CANCEL to confirm. Everyone holding a reminder is told.",
-                       status=400)
-
-    if row["status"] == "cancelled":
-        # Already cancelled: the notices went out with the first cancel, and
-        # sending them twice is worse than doing nothing.
-        return _v2_ok({"event": public_event(row), "notified": 0})
-
-    reason = clean_text((body or {}).get("reason"))[:DESCRIPTION_MAX] or None
-    account_ids = cancel_event(eid, reason)
-    event = public_event(event_row(eid))
-    notified = notify_cancelled(account_ids, event)
-    _audit("self:%s" % discord_id, audit_action="portal_event_cancel", target=eid,
-           ip=client_ip(request),
-           details={"event_id": eid, "reminders": len(account_ids), "notified": notified})
-    return _v2_ok({"event": event, "notified": notified})

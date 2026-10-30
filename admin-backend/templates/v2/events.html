@@ -1,0 +1,158 @@
+{% extends "v2/base.html" %}
+{% block title %}Events · Players{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="/admin/static/css/v2/events.css?v=20261030a">
+{% endblock %}
+{% block content %}
+<main class="v2-main ev" id="v2-events">
+
+  <header class="ev__header">
+    <h1 class="ev__title">Events</h1>
+    <p class="ev__copy">
+      Events published here show on the portal Events board and Home, and players can ask
+      for a reminder an hour before. Times are entered in <strong>Eastern</strong>, the
+      server clock. A cancel is final and tells everyone holding a reminder.
+    </p>
+  </header>
+
+  <div class="ev__grid">
+    <section class="ev__list" aria-labelledby="ev-list-title">
+      <div class="ev__list-head">
+        <h2 id="ev-list-title" class="ev__h2">All events</h2>
+        <button class="btn btn-accent btn-sm" type="button" id="ev-new">New event</button>
+      </div>
+      <div class="ev__generate">
+        <button class="btn btn-sm" type="button" id="ev-generate">Generate next month</button>
+        <span class="form-hint">Drafts for each weekend: 1st XP, 2nd Landsraad, 3rd crafting, 4th harvest, 5th Landsraad. Nothing goes live until you publish.</span>
+        <p class="ev__msg" id="ev-generate-msg" role="status"></p>
+      </div>
+      <div class="ev__filters" role="group" aria-label="Show">
+        <button type="button" class="ev__filter ev__filter--on" data-filter="upcoming">Upcoming</button>
+        <button type="button" class="ev__filter" data-filter="draft">Drafts</button>
+        <button type="button" class="ev__filter" data-filter="past">Past</button>
+        <button type="button" class="ev__filter" data-filter="cancelled">Cancelled</button>
+      </div>
+      <ul class="ev__rows" id="ev-rows" aria-live="polite"><li class="ev__empty">Loading events</li></ul>
+    </section>
+
+    <section class="ev__editor" aria-labelledby="ev-editor-title" hidden id="ev-editor">
+      <h2 id="ev-editor-title" class="ev__h2">New event</h2>
+      <p class="ev__status" id="ev-state"></p>
+
+      <form id="ev-form" novalidate>
+        <div class="form-group">
+          <label for="ev-title-input">Title</label>
+          <input type="text" id="ev-title-input" name="title" maxlength="{{ limits.title }}" required>
+        </div>
+        <div class="ev__row2">
+          <div class="form-group">
+            <label for="ev-kind">Kind</label>
+            <select id="ev-kind" name="kind">
+              {% for k in kinds %}<option value="{{ k }}">{{ k.replace('_', ' ') }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="ev-banner">Banner</label>
+            <select id="ev-banner" name="banner">
+              <option value="">None</option>
+              {% for b in banners %}<option value="{{ b }}">{{ b.replace('-', ' ') }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="ev__row2">
+          <div class="form-group">
+            <label for="ev-effect">Game effect</label>
+            <select id="ev-effect" name="effect">
+              {% for e in effects %}<option value="{{ e }}">{{ {"none": "None", "xp": "Double XP (restart)", "spec_xp": "Double Landsraad spec XP", "crafting": "Crafting 20% off (restart)", "harvest": "Double mining"}[e] }}</option>{% endfor %}
+            </select>
+            <span class="form-hint">Publishing an effect event is the go: the runner applies it at the start and removes it at the end. XP and crafting restart every map at both ends.</span>
+          </div>
+          <div class="form-group" id="ev-effect-opts" hidden>
+            <label for="ev-effect-scope">Runs on</label>
+            <select id="ev-effect-scope" name="effect_scope">
+              {% for sc in scopes %}<option value="{{ sc }}">{{ "Every map" if sc == "fleet" else sc|capitalize + " only" }}</option>{% endfor %}
+            </select>
+            <label for="ev-effect-hours">Length</label>
+            <select id="ev-effect-hours" name="effect_hours">
+              {% for h, label in windows %}<option value="{{ h }}">{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <p class="ev__status" id="ev-effect-state"></p>
+        <button class="btn btn-sm" type="button" id="ev-effect-rearm" hidden>Re-arm effect</button>
+        <div class="ev__row2">
+          <div class="form-group">
+            <label for="ev-starts">Starts (Eastern)</label>
+            <input id="ev-starts" name="starts_et" type="datetime-local" required>
+            <span class="form-hint" id="ev-starts-utc"></span>
+          </div>
+          <div class="form-group" id="ev-ends-box">
+            <label for="ev-ends">Ends (Eastern, optional)</label>
+            <input id="ev-ends" name="ends_et" type="datetime-local">
+            <span class="form-hint" id="ev-ends-utc"></span>
+          </div>
+        </div>
+        <div class="ev__row2">
+          <div class="form-group">
+            <label for="ev-map">Map</label>
+            <input type="text" id="ev-map" name="map" maxlength="{{ limits.map }}" placeholder="Hagga Basin">
+          </div>
+          <div class="form-group">
+            <label for="ev-host">Host</label>
+            <input type="text" id="ev-host" name="host" maxlength="{{ limits.host }}" placeholder="Who is running it">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="ev-description">Description</label>
+          <textarea id="ev-description" name="description" rows="6" maxlength="{{ limits.description }}"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="ev-discord-sync"><input type="checkbox" id="ev-discord-sync" name="discord_sync"> Also show it as a Discord scheduled event</label>
+          <span class="form-hint" id="ev-discord-state"></span>
+        </div>
+
+        <div class="ev__actions">
+          <button class="btn btn-sm" type="submit" data-status="draft" id="ev-save-draft">Save draft</button>
+          <button class="btn btn-accent btn-sm" type="submit" data-status="published" id="ev-publish">Publish</button>
+          <button class="btn btn-ghost btn-sm" type="button" id="ev-close">Close</button>
+        </div>
+        <p class="ev__msg" id="ev-msg" role="status"></p>
+      </form>
+
+      <h3 class="ev__h3">Player card preview</h3>
+      <article class="ev__card" id="ev-preview" aria-label="Preview">
+        <img class="ev__card-banner" id="ev-preview-banner" alt="" hidden>
+        <div class="ev__card-body">
+          <p class="ev__card-kind" id="ev-preview-kind"></p>
+          <h4 class="ev__card-title" id="ev-preview-title"></h4>
+          <p class="ev__card-when" id="ev-preview-when"></p>
+          <p class="ev__card-meta" id="ev-preview-meta"></p>
+          <p class="ev__card-desc" id="ev-preview-desc"></p>
+        </div>
+      </article>
+
+      <div class="ev__cancel" id="ev-cancel-box" hidden>
+        <h3 class="ev__h3">Cancel this event</h3>
+        <p class="ev__copy">Final. Players holding a reminder get a mailbox notice, and the reason shows on the event page.</p>
+        <div class="form-group">
+          <label for="ev-cancel-reason">Reason (shown to players)</label>
+          <input type="text" id="ev-cancel-reason" maxlength="300">
+        </div>
+        <div class="form-group">
+          <label for="ev-cancel-confirm">Type CANCEL</label>
+          <input type="text" id="ev-cancel-confirm" autocomplete="off">
+        </div>
+        <button class="btn btn-destructive btn-sm" type="button" id="ev-cancel" disabled>Cancel event</button>
+      </div>
+
+      <div id="ev-history-box" hidden>
+        <h3 class="ev__h3">History</h3>
+        <ol class="ev__history" id="ev-history"></ol>
+      </div>
+    </section>
+  </div>
+</main>
+{% endblock %}
+{% block scripts %}
+<script src="/admin/static/js/v2/events.js?v=20261030a" defer></script>
+{% endblock %}

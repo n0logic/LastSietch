@@ -1,0 +1,65 @@
+/* Events Manager (ADMIN-02). Amber is chrome, as everywhere in the panel; the
+   player card preview borrows the portal's proportions, not its palette. */
+
+body.admin-page .ev__header { margin-bottom: var(--space-6); }
+body.admin-page .ev__title { margin: 0 0 var(--space-2); }
+body.admin-page .ev__copy { max-width: 74ch; margin: 0; font-size: var(--text-sm); line-height: 1.6; color: var(--text-muted); }
+
+body.admin-page .ev__grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(0, 1.4fr); gap: var(--space-6); align-items: start; }
+@media (max-width: 960px) { body.admin-page .ev__grid { grid-template-columns: 1fr; } }
+/* The H0 rail takes 216px above 900px, so the editor needs the same room 216px later. */
+@media (max-width: 1176px) { body.admin-shell-next .ev__grid { grid-template-columns: 1fr; } }
+
+body.admin-page .ev__generate { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3); margin-bottom: var(--space-4); padding-bottom: var(--space-3); border-bottom: 1px solid var(--border); }
+body.admin-page .ev__generate .form-hint { flex: 1 1 220px; margin: 0; }
+body.admin-page .ev__generate .ev__msg { flex-basis: 100%; margin: 0; }
+body.admin-page .ev__generate .ev__msg:empty { display: none; }
+
+body.admin-page .ev__h2 { margin: 0; font-size: var(--text-md); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+body.admin-page .ev__h3 { margin: var(--space-6) 0 var(--space-3); font-size: var(--text-sm); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+
+body.admin-page .ev__list-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); }
+body.admin-page .ev__filters { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
+body.admin-page .ev__filter { padding: var(--space-1) var(--space-3); background: var(--bg-card); color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; font: inherit; font-size: var(--text-sm); cursor: pointer; }
+body.admin-page .ev__filter--on { color: var(--text); border-color: var(--accent); }
+
+body.admin-page .ev__rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+body.admin-page .ev__empty { color: var(--text-muted); font-size: var(--text-sm); padding: var(--space-3) 0; }
+body.admin-page .ev__row { width: 100%; display: grid; gap: 2px; text-align: left; padding: var(--space-3); background: var(--bg-card); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font: inherit; cursor: pointer; }
+body.admin-page .ev__row:hover { border-color: var(--border-strong); }
+body.admin-page .ev__row--on { border-color: var(--accent); }
+body.admin-page .ev__row-title { font-weight: 600; }
+body.admin-page .ev__row-when { font-size: var(--text-sm); color: var(--text-muted); }
+body.admin-page .ev__tag { justify-self: start; margin-top: var(--space-1); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+body.admin-page .ev__tag--published { color: var(--accent-bright); }
+body.admin-page .ev__tag--cancelled { color: var(--red); }
+
+body.admin-page .ev__editor { padding: var(--space-5); background: var(--bg-card); border: 1px solid var(--border); border-left: 2px solid var(--accent); border-radius: 4px; }
+body.admin-page .ev__status { margin: var(--space-2) 0 var(--space-4); font-size: var(--text-sm); color: var(--text-muted); }
+body.admin-page .ev__editor input, body.admin-page .ev__editor select, body.admin-page .ev__editor textarea { width: 100%; box-sizing: border-box; }
+body.admin-page .ev__row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+@media (max-width: 600px) { body.admin-page .ev__row2 { grid-template-columns: 1fr; } }
+body.admin-page .ev__actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }
+body.admin-page .ev__msg { min-height: 1.4em; margin: var(--space-3) 0 0; font-size: var(--text-sm); color: var(--text-muted); }
+body.admin-page .ev__msg--bad { color: var(--red); }
+
+body.admin-page .ev__card { max-width: 420px; overflow: hidden; background: var(--bg-deep); border: 1px solid var(--border); border-radius: 6px; }
+body.admin-page .ev__card-banner { display: block; width: 100%; aspect-ratio: 16 / 7; object-fit: cover; }
+body.admin-page .ev__card-body { padding: var(--space-4); }
+body.admin-page .ev__card-kind { margin: 0 0 var(--space-1); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+body.admin-page .ev__card-title { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
+body.admin-page .ev__card-when, body.admin-page .ev__card-meta { margin: 0 0 var(--space-1); font-size: var(--text-sm); color: var(--text-muted); }
+body.admin-page .ev__card-desc { margin: var(--space-3) 0 0; font-size: var(--text-sm); line-height: 1.6; white-space: pre-wrap; }
+
+body.admin-page .ev__cancel { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+body.admin-page .ev__history { margin: 0; padding-left: var(--space-5); font-size: var(--text-sm); display: flex; flex-direction: column; gap: var(--space-3); }
+body.admin-page .ev__history-change { color: var(--text-muted); overflow-wrap: anywhere; }
+
+/* design-system.css themes text inputs by type and has no datetime-local rule. */
+body.admin-page .ev__editor input[type="datetime-local"] {
+  padding: 0.6rem 1rem; font-family: var(--font-mono); font-size: var(--text-sm);
+  color: var(--text); background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-md); color-scheme: dark;
+}
+body.admin-page .ev__editor input[type="datetime-local"]:hover { border-color: var(--border-strong); }
+body.admin-page .ev__editor input[type="datetime-local"]:focus { outline: none; border-color: var(--accent); }

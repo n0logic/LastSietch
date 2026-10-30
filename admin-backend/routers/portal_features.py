@@ -33,6 +33,13 @@ FEATURE_GATES = (
     ("market_sell_backpack", "LASTSIETCH_MARKET_SELL_BACKPACK_ENABLED"),
     ("augment", "LASTSIETCH_AUGMENT_ENABLED"),
     ("reports", "LASTSIETCH_REPORTS_ENABLED"),
+    ("amtal_pvp", "LASTSIETCH_AMTAL_PVP_ENABLED"),
+    ("sietch", "LASTSIETCH_SIETCH_NIGHTS_ENABLED"),
+    # The redesigned Home (portal shell P1). Default OFF; the frontend also honours an
+    # owner-only ?shell=next override for testing before the flip.
+    ("shell_next", "LASTSIETCH_PORTAL_SHELL_NEXT_ENABLED"),
+    # Weekend reminder opt-in (plan B3). Default OFF; the toggle stays hidden until set.
+    ("weekend_remind", "LASTSIETCH_WEEKEND_REMIND_ENABLED"),
 )
 
 # --- routes ------------------------------------------------------------------
@@ -45,6 +52,8 @@ async def portal_features():
     feature whose environment says nothing reads closed here too."""
     features = {name: bool(feature_flags.enabled(flag, "0"))
                 for name, flag in FEATURE_GATES}
+    # The Amtal page (and its nav link) is shown with its PvP board.
+    features["amtal"] = features["amtal_pvp"]
     # No native container-move backend exists; an operator flag is insufficient.
     features["storage_move"] = False
     features['profile_login'] = False

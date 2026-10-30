@@ -67,7 +67,11 @@
 </Modal>
 
 <style>
-  :global(.modal.size-karum-detail) { top: 0; right: 0; left: auto; bottom: 0; transform: none; width: min(600px, 100vw); max-width: none; max-height: 100dvh; border-radius: 0; }
+  /* Modal's own entry animation fills with translate(-50%, -50%), which outranks the
+     transform: none below and left the sheet half off screen. Replace it, as the
+     Exchange drawer does, with one that ends at no transform. */
+  :global(.modal.size-karum-detail) { top: 0; right: 0; left: auto; bottom: 0; transform: none; width: min(600px, 100vw); max-width: none; max-height: 100dvh; border-radius: 0; animation: sheet-in var(--motion-mid) var(--ease-out); }
+  @keyframes sheet-in { from { transform: translateX(24px); opacity: .4; } to { transform: none; opacity: 1; } }
   .identity { display: flex; gap: 18px; align-items: center; }
   .identity img { width: 72px; height: 72px; object-fit: contain; background: var(--bg-deep); border: 1px solid var(--edge); border-radius: 6px; padding: 8px; }
   .identity p { margin: 0 0 4px; color: var(--accent-text); font-size: 13px; }
@@ -88,5 +92,6 @@
   .market-links { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; margin-top: 24px; }
   .market-links a, .market-links button { padding: 8px 0; background: none; border: 0; color: var(--accent-text); font: inherit; font-size: 14px; text-decoration: none; cursor: pointer; }
   .watch { padding: 16px; border: 1px solid var(--edge); border-radius: 4px; }
+  @media (prefers-reduced-motion: reduce) { :global(.modal.size-karum-detail) { animation: none; } }
   @media (max-width: 600px) { :global(.modal.size-karum-detail) { top: 4dvh; max-height: 96dvh; border-radius: 12px 12px 0 0; } .identity h2 { font-size: 27px; } .identity img { width: 56px; height: 56px; } dd { font-size: 16px; } }
 </style>

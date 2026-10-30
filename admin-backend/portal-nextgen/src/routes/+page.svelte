@@ -7,7 +7,11 @@
   import ServerSchedule from '$lib/components/ServerSchedule.svelte';
   import VerdictCard from '$lib/components/home/VerdictCard.svelte';
   import ArrivalHero from '$lib/components/home/ArrivalHero.svelte';
+  import SietchHomeBanner from '$lib/components/home/SietchHomeBanner.svelte';
   import LiveCountdown from '$lib/components/LiveCountdown.svelte';
+  import WeekendCard from '$lib/components/events/WeekendCard.svelte';
+  import NextHome from '$lib/components/shell/NextHome.svelte';
+  import { shell, loadShell } from '$lib/shellNext.svelte.js';
   import { useAuthGate } from '$lib/authGate.svelte.js';
   import { home, subscribe, setDim, loadHomeOverview } from '$lib/home.svelte.js';
   import { homeAppearance } from '$lib/home/appearance.js';
@@ -16,13 +20,21 @@
 
   const gate = useAuthGate();
   onMount(subscribe);
+  // The redesigned Home is dark behind LASTSIETCH_PORTAL_SHELL_NEXT_ENABLED (or ?shell=next).
+  onMount(loadShell);
   let nextEvent = $state(null);
+  let eventLive = $state(false);
   let eventsRead = $state(false);
+  let weekendEvents = $state([]);
   onMount(() => {
     let mounted = true;
-    api.events.list('upcoming').then((response) => {
+    // A running event outranks the next one: it is the answer to "what is on".
+    Promise.all([api.events.list('live'), api.events.list('upcoming')]).then(([live, upcoming]) => {
       if (!mounted) return;
-      nextEvent = response?.events?.[0] || null;
+      const running = live?.events?.[0] || null;
+      nextEvent = running || upcoming?.events?.[0] || null;
+      eventLive = running != null;
+      weekendEvents = [...(live?.events || []), ...(upcoming?.events || [])];
       eventsRead = true;
     }).catch(() => {});
     return () => { mounted = false; };
@@ -39,8 +51,13 @@
 
 <svelte:head><title>Home | Last Sietch</title></svelte:head>
 
+{#if shell.status === 'ready' && shell.next}
+  <NextHome />
+{:else if shell.status === 'ready'}
+
 <div class="page" data-stand={appearance.map}>
   <AnnouncementBanner announcement={home.raw.announcement} />
+  <SietchHomeBanner />
   <p class="start-link">New to Last Sietch? <a href={`${base}/start`}>Start with the first-session guide <span aria-hidden="true">↗</span></a></p>
   <div class="arrival-grid">
     <ArrivalHero {appearance} signals={s} {fresh} />
@@ -79,7 +96,7 @@
     <section class="desert" aria-label="Explore the desert">
       <div class="section-head"><h2>Your desert</h2><a href={`${base}/desert`}>World pulse <span aria-hidden="true">↗</span></a></div>
       <div class="map-links">
-        {#each [{ name: 'Habbanya', slug: 'habbanya', mode: 'PvE' }, { name: 'Kulon', slug: 'kulon', mode: 'PvP' }, { name: 'Amtal', slug: 'amtal', mode: 'Full PvP · untracked' }] as map}
+        {#each [{ name: 'Habbanya', slug: 'habbanya', mode: 'PvE' }, { name: 'Amtal', slug: 'amtal', mode: 'Full PvP · untracked' }] as map}
           <a class="map-link" href={`${base}/maps/hagga?inst=${map.slug}`}>
             <img src={`/img/v3/plates/${map.slug}-dusk-clear-small.jpg`} alt="" loading="lazy" width="640" height="360" />
             <span><b>{map.name}</b><small>{map.mode}</small></span>
@@ -89,12 +106,13 @@
       <div class="more-places"><a href={`${base}/maps`}>All maps</a><a href={`${base}/bases`}>Base blueprints</a><a href={`${base}/storage`}>Your storage</a></div>
     </section>
     <CarvedSlab>
-      <p class="reading-label">Next event</p>
+      <p class="reading-label">{eventLive ? 'Happening now' : 'Next event'}</p>
       {#if nextEvent}
         {#if banner}<img class="event-art" src={`/img/v3/banners/${banner}.jpg`} alt="" loading="lazy" />{/if}
         <h2>{nextEvent.title}</h2>
-        {#if nextEvent.starts_utc}<p class="event-time"><LiveCountdown target={nextEvent.starts_utc} prefix="Starts in" /></p>{/if}
-        <a class="event-link" href={`${base}/events/${nextEvent.id}`}>View event and reminder <span aria-hidden="true">↗</span></a>
+        {#if eventLive && nextEvent.ends_utc}<p class="event-time"><LiveCountdown target={nextEvent.ends_utc} prefix="Ends in" /></p>
+        {:else if nextEvent.starts_utc}<p class="event-time"><LiveCountdown target={nextEvent.starts_utc} prefix="Starts in" /></p>{/if}
+        <a class="event-link" href={`${base}/events/${nextEvent.id}`}>{eventLive ? 'View event' : 'View event and reminder'} <span aria-hidden="true">↗</span></a>
       {:else}
         <h2>{eventsRead ? 'The calendar is clear' : 'Check the calendar'}</h2>
         <p class="event-time">{eventsRead ? 'The next gathering will appear here when it is announced.' : 'The next event could not be read yet.'}</p>
@@ -102,8 +120,15 @@
       {/if}
     </CarvedSlab>
   </div>
-  <p class="footnote">Ibad blue marks live readings. <a href={`${base}/maps`}>All maps</a> · <a href={`${base}/rules`}>Server rules</a> · <a href={`${base}/help`}>Help</a></p>
+  {#if eventsRead}
+    <section class="weekends" aria-label="Weekend events">
+      <div class="section-head"><h2>Weekend events</h2><a href={`${base}/events`}>All events <span aria-hidden="true">↗</span></a></div>
+      <WeekendCard events={weekendEvents} />
+    </section>
+  {/if}
+  <p class="footnote">Blue figures update live. <a href={`${base}/maps`}>All maps</a> · <a href={`${base}/rules`}>Server rules</a> · <a href={`${base}/help`}>Help</a></p>
 </div>
+{/if}
 
 <style>
   .page { max-width: var(--content-max); margin: 0 auto; padding: 24px 24px 48px; }
@@ -135,6 +160,7 @@
   .more-places { display: flex; flex-wrap: wrap; gap: 20px; padding-top: 16px; }
   .event-art { width: 100%; aspect-ratio: 3; object-fit: cover; border-radius: 4px; margin-bottom: 12px; }
   .event-time { font-size: 14px; color: var(--text-muted); margin: 12px 0; }
+  .weekends { margin-top: 28px; }
   .footnote { font-size: 12px; color: var(--text-muted); margin: 32px 0 0; }
   [data-stand='amtal'] .reading { border-top-color: #ad7056; }
   :global([data-theme='night']) [data-stand='amtal'] .reading { background: linear-gradient(rgba(38,23,18,.96), rgba(25,17,13,.97)), url('/img/v3/textures/red-rock.jpg'); }

@@ -1,4 +1,7 @@
+import asyncio
 import json
+import logging
+import os
 import re
 import time
 from collections import defaultdict, deque
@@ -12,6 +15,8 @@ from auth import get_current_user, require_admin
 from cache import ttl_cache
 from config import RELAY_API_KEY, RELAY_URL
 from relay import call_relay
+
+logger = logging.getLogger(__name__)
 
 try:
     import rules_catalog
@@ -416,12 +421,28 @@ async def cached_last_funcom_push() -> dict:
     return await call_relay("/dune/rmq/last-funcom-push")
 
 
+def public_status(data: dict) -> dict:
+    """The anonymous-web projection of _fetch_dune_status. Per-map `players` and `map_dims` are dropped:
+    it split Hagga by dimension, so dim 2 was a live Amtal head count (owner
+    ruling 2026-09-30: total population only, never per partition). Server-side
+    callers (portal._player_counts) keep reading _fetch_dune_status directly."""
+    if not isinstance(data, dict):
+        return data
+    # maps[].players goes too (review of PR #131): the Hagga figure includes
+    # Amtal, so Hagga total minus the visible Hagga dots was the Amtal count.
+    out = {k: v for k, v in data.items() if k != "map_dims"}
+    if isinstance(out.get("maps"), list):
+        out["maps"] = [{k: v for k, v in m.items() if k != "players"} if isinstance(m, dict) else m
+                       for m in out["maps"]]
+    return out
+
+
 @router.get("/api/dune/status")
 async def dune_status(request: Request):
     if not _check_dune_rate(_client_ip(request)):
         raise HTTPException(429, "Rate limit exceeded")
     try:
-        return await _fetch_dune_status()
+        return public_status(await _fetch_dune_status())
     except Exception:
         # Past max_stale and the relay is still down — hardcoded down state so
         # the dashboard renders rather than throws. Stale-within-window is
@@ -455,10 +476,30 @@ async def dune_presence(request: Request, window: str = "24h"):
         }
 
 
+def viewer_signed_in(request: Request) -> bool:
+    """A portal player session or an admin panel session. Owner ruling
+    2026-09-30: live player positions and world vehicles are for signed-in
+    players only, never the anonymous web. Anything that fails to read a
+    session counts as signed out (fail closed)."""
+    try:
+        get_current_user(request)
+        return True
+    except Exception:
+        pass
+    try:
+        from portal_auth import get_portal_session
+        return get_portal_session(request) is not None
+    except Exception:
+        return False
+
+
 @router.get("/api/dune/positions")
 async def dune_positions(request: Request):
     if not _check_dune_rate(_client_ip(request)):
         raise HTTPException(429, "Rate limit exceeded")
+    if not viewer_signed_in(request):
+        return {"map": "HaggaBasin", "count": 0, "players": [], "by_map": {},
+                "available": True, "signin_required": True}
     return await positions_payload()
 
 
@@ -497,6 +538,14 @@ async def positions_raw_payload() -> dict | None:
     return raw
 
 
+def _count_by_map(points) -> dict:
+    out = {}
+    for pt in points:
+        key = pt.get("m") or "HaggaBasin"
+        out[key] = out.get(key, 0) + 1
+    return out
+
+
 async def positions_payload() -> dict:
     """The public positions payload WITHOUT the per-IP rate check. The admin
     Live Map used to call this directly: an admin session is already gated by
@@ -512,8 +561,9 @@ async def positions_payload() -> dict:
 
     # Coords + partition tag only. Defensively strip anything that is not
     # x/y/p (partition_id) from each entry so a future relay change can never
-    # leak PII through here. `p` splits the two Hagga sietches (1=Habbanya,
-    # 32=Kulon) and is a non-identifying world id.
+    # leak PII through here. `p` is the Hagga sietch partition (1=Habbanya;
+    # 33=Amtal is dropped below; 32 was Kulon until it closed 2026-10-28) and is
+    # a non-identifying world id.
     # The strip is now load-bearing rather than defensive: since 2026-09-04 the
     # game-host feed DOES carry `a` (account id) and `n` (character name), for
     # the admin Live Map. This allowlist is what keeps them off the public wire.
@@ -535,12 +585,16 @@ async def positions_payload() -> dict:
          "m": p.get("m"), "d": p.get("d")}
         for p in (raw.get("players") or [])
         if p.get("p") != 33
+        and not ((p.get("m") or "HaggaBasin") == "HaggaBasin" and p.get("d") == 2)
     ]
+    # `count` and `by_map` are REBUILT from the filtered list (review of PR #131,
+    # 2026-09-30): the collector computes both before any filter, so passing them
+    # through made count - len(players) a live Amtal head count.
     data = {
         "map": raw.get("map", "HaggaBasin"),
-        "count": raw.get("count", len(players)),
+        "count": len(players),
         "players": players,
-        "by_map": raw.get("by_map") or {},
+        "by_map": _count_by_map(players),
         "available": True,
     }
     # The cache lives in positions_raw_payload now, so `stale` arrives on the raw
@@ -554,12 +608,32 @@ async def positions_payload() -> dict:
 async def dune_vehicles(request: Request):
     if not _check_dune_rate(_client_ip(request)):
         raise HTTPException(429, "Rate limit exceeded")
+    if not viewer_signed_in(request):
+        return {"map": "HaggaBasin", "count": 0, "vehicles": [], "by_map": {},
+                "available": True, "signin_required": True}
     return await vehicles_payload()
 
 
 async def vehicles_payload() -> dict:
-    """The public vehicles payload without the per-IP rate check; see
-    positions_payload for why the admin Live Map reads it directly."""
+    """The public vehicles payload without the per-IP rate check.
+
+    AMTAL EXCLUSION (owner ruling 2026-08-27, extended 2026-09-30): a vehicle
+    usually has its driver in it, so Amtal vehicles on the public map track
+    players as well as the positions feed would. Drop partition 33, and on Hagga
+    also dimension 2 (Amtal's dim, map_model.py): vehicles with no partition tag
+    carry only `d`, and the /dune page draws untagged ones on Habbanya."""
+    raw = await vehicles_raw_payload()
+    public = [
+        v for v in raw.get("vehicles") or []
+        if v.get("p") != 33
+        and not ((v.get("m") or "HaggaBasin") == "HaggaBasin" and v.get("d") == 2)
+    ]
+    return {**raw, "vehicles": public, "count": len(public), "by_map": _count_by_map(public)}
+
+
+async def vehicles_raw_payload() -> dict:
+    """The vehicles feed, cached and allowlisted but NOT Amtal-filtered: the
+    admin Live Map reads this, the public route reads vehicles_payload."""
     now = time.monotonic()
     cached = _vehicles_cache["data"]
     if cached is not None and now - _vehicles_cache["fetched_at"] < VEHICLES_CACHE_TTL:
@@ -632,7 +706,7 @@ def public_stream_frame(frame: str):
     players = [
         {k: pt.get(k) for k in _STREAM_POINT_KEYS}
         for pt in (payload.get("players") or [])
-        if isinstance(pt, dict) and pt.get("p") != 33
+        if isinstance(pt, dict) and pt.get("p") != 33 and pt.get("p") is not None
     ]
     payload["players"] = players
     payload["count"] = len(players)
@@ -646,10 +720,13 @@ async def dune_positions_stream(request: Request):
 
     Proxies the relay's text/event-stream (/dune/positions/stream) frame for
     frame through public_stream_frame(), which enforces the same public policy
-    as /api/dune/positions (x/y/p only, Amtal dropped), so no auth gate. The dashboard EventSource falls back
-    to the 5s /api/dune/positions poll on a stream error."""
+    as /api/dune/positions (x/y/p only, Amtal dropped). Signed-in viewers only
+    since 2026-09-30, like the polled feed. The EventSource falls back to the
+    /api/dune/positions poll on a stream error."""
     if not _check_dune_rate(_client_ip(request)):
         raise HTTPException(429, "Rate limit exceeded")
+    if not viewer_signed_in(request):
+        raise HTTPException(401, "Sign in to see live positions")
 
     url = f"{RELAY_URL}/dune/positions/stream"
     headers = {"X-API-Key": RELAY_API_KEY}
@@ -719,14 +796,9 @@ async def dune_fields(request: Request):
 
 @router.get("/api/dune/progression/snapshot")
 async def dune_progression_snapshot(request: Request):
-    """Latest per-account character progression for the dashboard widgets
-    (level distribution histogram, Top-N by level).
-
-    Carries character names — visible per the leaderboard-convention PII
-    policy (same convention as the PvP leaderboards). PII-sensitive fields
-    NOT in the public surface: account_id is stripped, online_status is
-    coarsened to up/down boolean, ts is dropped. xp, lvl, total_sp,
-    unspent_sp, keystone_sp, intel pass through."""
+    """Latest per-character progression, ANONYMOUS (2026-09-30): no name, no
+    online flag, no account_id, no ts. xp, lvl, total_sp, unspent_sp,
+    keystone_sp, intel pass through."""
     if not _check_dune_rate(_client_ip(request)):
         raise HTTPException(429, "Rate limit exceeded")
 
@@ -742,11 +814,12 @@ async def dune_progression_snapshot(request: Request):
             return {**cached, "stale": True}
         return {"available": False, "count": 0, "players": []}
 
+    # 2026-09-30 (owner): the public surface is anonymous. A name beside an
+    # online flag told anyone which characters were in game (Amtal hunting),
+    # so both are dropped; the named Top 10 is /api/dune/standings, no flag.
     players = []
     for p in (raw.get("players") or []):
         players.append({
-            "name": p.get("char_name"),
-            "online": (p.get("online_status") == "Online"),
             "xp": p.get("xp"),
             "lvl": p.get("lvl"),
             "total_sp": p.get("total_sp"),
@@ -763,11 +836,9 @@ async def dune_progression_snapshot(request: Request):
 
 @router.get("/api/dune/progression/levelups")
 async def dune_progression_levelups(request: Request, limit: int = 50):
-    """Recent level-up events for the dashboard ticker. Newest first.
-
-    Carries character names — same PII policy as the snapshot route.
-    account_id is stripped; xp deltas are dropped (only ts + name +
-    from_lvl + to_lvl pass through)."""
+    """Recent level-up events, newest first, ANONYMOUS (2026-09-30): only ts,
+    from_lvl and to_lvl pass through. A name with a timestamp says who was
+    online and when."""
     if not _check_dune_rate(_client_ip(request)):
         raise HTTPException(429, "Rate limit exceeded")
     if not isinstance(limit, int) or limit < 1:
@@ -793,7 +864,6 @@ async def dune_progression_levelups(request: Request, limit: int = 50):
     for lu in (raw.get("levelups") or []):
         levelups.append({
             "ts": lu.get("ts"),
-            "name": lu.get("char_name"),
             "from_lvl": lu.get("from_lvl"),
             "to_lvl": lu.get("to_lvl"),
         })
@@ -803,6 +873,203 @@ async def dune_progression_levelups(request: Request, limit: int = 50):
     _progression_levelups_cache["data"] = data
     _progression_levelups_cache["fetched_at"] = now
     return data
+
+
+# --- Live Pulse + Standings (2026-09-30, site rework Phase 2) ---
+#
+# /api/dune/pulse is the ONE call the public /dune page makes. Owner rulings
+# 2026-09-30: total population only (no per-map, per-world or per-partition
+# counts: at one or two players a small count is a presence tell, worst on
+# Amtal), level-ups anonymous, no positions, no names. Every list below is
+# REBUILT from an allowlist, never copied from the relay.
+
+# Character names hidden from the public standings (your staff), comma-separated, case-insensitive.
+STANDINGS_EXCLUDE = {n.strip().lower() for n in os.environ.get("LASTSIETCH_STANDINGS_EXCLUDE", "").split(",")
+                     if n.strip()}
+LEVEL_BUCKETS = 20      # 10 levels each, 1..200
+PULSE_LEVELUPS = 5
+
+
+def hourly_peaks(series, end_ts: int, hours: int) -> list:
+    """Max concurrent players per clock hour for the `hours` hours ending with
+    the hour that holds end_ts. Hours with no sample read 0."""
+    end_hour = int(end_ts) // 3600 * 3600
+    start = end_hour - (hours - 1) * 3600
+    out = [0] * hours
+    for pt in series or []:
+        try:
+            ts, n = int(pt.get("ts")), int(pt.get("count") or 0)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        i = (ts // 3600 * 3600 - start) // 3600
+        if 0 <= i < hours and n > out[i]:
+            out[i] = n
+    return out
+
+
+def level_buckets(players) -> dict:
+    counts = [0] * LEVEL_BUCKETS
+    at_cap = 0
+    total = 0
+    for p in players or []:
+        try:
+            lvl = max(1, min(200, int(p.get("lvl") or 1)))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        counts[min(LEVEL_BUCKETS - 1, (lvl - 1) // 10)] += 1
+        total += 1
+        if lvl >= 200:
+            at_cap += 1
+    return {"count": total, "buckets": counts, "at_cap": at_cap}
+
+
+def standings_top(players, n: int = 10, accounts=None) -> list:
+    """Top n by level then XP. XP orders the board but never leaves it (review
+    of PR #131): an exact XP next to a name could be matched to the anonymous
+    snapshot, or watched rising to tell who is in game right now. `accounts`,
+    when given, is filled with each row's account id in board order; it is for
+    the title lookup only and never reaches the payload."""
+    rows = []
+    for p in players or []:
+        name = (p.get("char_name") or "").strip()
+        if not name or name.lower() in STANDINGS_EXCLUDE:
+            continue
+        try:
+            lvl, xp = int(p.get("lvl") or 1), int(p.get("xp") or 0)
+        except (TypeError, ValueError):
+            continue
+        rows.append((lvl, xp, name, p.get("account_id")))
+    rows.sort(key=lambda r: (-r[0], -r[1]))
+    if accounts is not None:
+        accounts.extend(r[3] for r in rows[:n])
+    return [{"rank": i + 1, "name": name, "lvl": lvl} for i, (lvl, xp, name, _a) in enumerate(rows[:n])]
+
+
+@ttl_cache("dune.pulse_presence", ttl=60, max_stale=600)
+async def _cached_presence(window: str) -> dict:
+    return await call_relay(f"/dune/stats/presence?window={window}")
+
+
+@ttl_cache("dune.pulse_snapshot", ttl=60, max_stale=600)
+async def _cached_snapshot_raw() -> dict:
+    return await call_relay("/dune/progression/snapshot")
+
+
+@ttl_cache("dune.pulse_levelups", ttl=30, max_stale=300)
+async def _cached_levelups_raw() -> dict:
+    return await call_relay(f"/dune/progression/levelups?limit={PULSE_LEVELUPS}")
+
+
+async def _guard(coro):
+    try:
+        out = await coro
+    except Exception as exc:
+        logger.warning("pulse/standings source failed: %s", exc)
+        return None
+    # the relay scripts report a DB error as HTTP 200 {"available": false}
+    if isinstance(out, dict) and out.get("available") is False:
+        return None
+    return out
+
+
+async def pulse_payload() -> dict:
+    status, p24, p7, snap, lus = await asyncio.gather(
+        _guard(_fetch_dune_status()), _guard(_cached_presence("24h")),
+        _guard(_cached_presence("7d")), _guard(_cached_snapshot_raw()),
+        _guard(_cached_levelups_raw()))
+    now = int(time.time())
+    out = {"available": status is not None, "as_of": now}
+
+    if isinstance(status, dict):
+        out["online"] = status.get("online_players")
+        # Up/down per map only. NO player counts: owner ruling, total only.
+        out["maps"] = [{"name": m.get("name"), "up": bool(m.get("up")),
+                        "on_demand": bool(m.get("on_demand"))}
+                       for m in status.get("maps") or [] if m.get("name")]
+        if status.get("stale"):
+            out["stale"] = True
+    else:
+        out["online"] = None
+        out["maps"] = []
+
+    presence = {}
+    for key, raw, hours in (("24h", p24, 24), ("7d", p7, 168)):
+        if isinstance(raw, dict) and raw.get("series") is not None:
+            presence[key] = {"peak": raw.get("peak"), "play_hours": raw.get("play_hours"),
+                             "end_ts": now, "hours": hourly_peaks(raw.get("series"), now, hours)}
+    out["presence"] = presence
+
+    out["levels"] = level_buckets(snap.get("players")) if isinstance(snap, dict) else None
+    out["levelups"] = [{"ts": lu.get("ts"), "to_lvl": lu.get("to_lvl")}
+                       for lu in ((lus or {}).get("levelups") or [])[:PULSE_LEVELUPS]
+                       if isinstance(lu, dict)] if isinstance(lus, dict) else []
+    return out
+
+
+@router.get("/api/dune/pulse")
+async def dune_pulse(request: Request):
+    if not _check_dune_rate(_client_ip(request)):
+        raise HTTPException(429, "Rate limit exceeded")
+    return await pulse_payload()
+
+
+@router.get("/api/dune/standings")
+async def dune_standings(request: Request):
+    """Top 10 characters by level then XP, for the portal Standings page. Names
+    are public by the leaderboard convention; sietch crew are left out so they
+    don't crowd community players. No online flag, no account id."""
+    if not _check_dune_rate(_client_ip(request)):
+        raise HTTPException(429, "Rate limit exceeded")
+    try:
+        payload = await _standings_payload()
+    except Exception:
+        return {"available": False, "top": [], "levels": None}
+    return _public_standings(payload, _standings_titles(payload.get("accounts") or []))
+
+
+@ttl_cache("dune.standings", ttl=3600, max_stale=7200)
+async def _standings_payload() -> dict:
+    """Hourly on purpose (review of PR #131): a 60 s board lets a poller watch
+    a named player's standing move while they play. Carries `accounts` for the
+    title lookup; _public_standings is the only shape that leaves."""
+    snap = await _guard(_cached_snapshot_raw())
+    if not isinstance(snap, dict):
+        # raise, never return: ttl_cache would keep an empty board for an hour;
+        # raising makes it serve the last good board (max_stale) instead
+        raise RuntimeError("progression snapshot unavailable")
+    players = snap.get("players") or []
+    accounts = []
+    return {"available": True, "top": standings_top(players, accounts=accounts),
+            "levels": level_buckets(players), "accounts": accounts}
+
+
+def _standings_titles(account_ids) -> dict:
+    """Cosmetic titles for the board's accounts, read per request so a title
+    change shows without waiting out the hourly board. {} on any failure."""
+    try:
+        import cosmetics
+        return cosmetics.account_titles(account_ids)
+    except Exception as exc:
+        logger.warning("standings titles skipped: %s", exc)
+        return {}
+
+
+def _public_standings(payload: dict, titles: dict) -> dict:
+    """Built field by field, never by copying the cached dict: the account ids
+    it holds must not reach a public payload. A row gains `title` only when its
+    player wears one."""
+    accounts = payload.get("accounts") or []
+    top = []
+    for i, row in enumerate(payload.get("top") or []):
+        out = {"rank": row["rank"], "name": row["name"], "lvl": row["lvl"]}
+        try:
+            title = titles.get(int(accounts[i])) if i < len(accounts) else None
+        except (TypeError, ValueError):
+            title = None
+        if title:
+            out["title"] = {"key": title["key"], "name": title["name"]}
+        top.append(out)
+    return {"available": True, "top": top, "levels": payload.get("levels")}
 
 
 # --- Authenticated JSON (player names = PII) ---
@@ -1028,8 +1295,9 @@ _TRAFFIC_ROWS = (
      "name": "Deep Desert", "mode": "PvP", "src": ("dim", "DeepDesert_1", 1)},
     {"key": "hagga:habbanya", "map_key": "hagga", "inst": "habbanya",
      "name": "Habbanya", "mode": "PvE", "src": ("dim", "Survival_1", 0)},
-    {"key": "hagga:kulon", "map_key": "hagga", "inst": "kulon",
-     "name": "Kulon", "mode": "PvP", "src": ("dim", "Survival_1", 1)},
+    # Kulon (Survival_1 dim 1) closed 2026-10-28: no row. Should a dim 1 server
+    # ever report again, it is not on the board and its rules block keys as
+    # "Survival_1:1" (_canonical_row_key's fallback).
     # Owner ruling 891b8aa: Amtal stays public-count-free. players / in_game /
     # queue are all player counts, so all three are withheld, not just the first
     # -- publishing "0 in game" would answer the question the ruling closes.
@@ -1540,12 +1808,37 @@ async def cached_rules() -> dict:
     return _shape_rules(await cached_battlegroup_raw())
 
 
+_TRAFFIC_COUNT_KEYS = ("players", "in_game", "queue")
+
+
+def public_traffic(data: dict) -> dict:
+    """Anonymous projection of cached_traffic (owner ruling 2026-09-30: total
+    population only). Every per-world and per-instance players / in_game /
+    queue figure is nulled, not just Amtal's: the total includes Amtal, so the
+    total minus the published rows was the Amtal head count (audit of PR #131).
+    online_players, cap, state and scaling stay. The cache is never mutated."""
+    if not isinstance(data, dict):
+        return data
+    out = dict(data)
+    out["rows"] = [{**r, **{k: None for k in _TRAFFIC_COUNT_KEYS}} if isinstance(r, dict) else r
+                   for r in data.get("rows") or []]
+    inst = data.get("instanced")
+    if isinstance(inst, dict):
+        inst = dict(inst)
+        inst["players"] = None
+        inst["queue"] = None
+        inst["rows"] = [{**r, **{k: None for k in _TRAFFIC_COUNT_KEYS if k in r}} if isinstance(r, dict) else r
+                        for r in inst.get("rows") or []]
+        out["instanced"] = inst
+    return out
+
+
 @router.get("/api/dune/traffic")
 async def dune_traffic(request: Request):
     if not _check_dune_rate(_client_ip(request)):
         raise HTTPException(429, "Rate limit exceeded")
     try:
-        return await cached_traffic()
+        return public_traffic(await cached_traffic())
     except Exception:
         # Past max_stale and the BGD read is still failing. Hardcoded down state
         # so the board renders "not observed" instead of the page throwing.

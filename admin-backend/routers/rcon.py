@@ -4,6 +4,7 @@ from collections import defaultdict, deque
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+import games_offline
 from auth import audit_log, get_current_user, require_admin, require_csrf
 from relay import call_relay
 
@@ -78,6 +79,8 @@ async def rcon_execute(request: Request, body: RconRequest):
     # Rate limit
     if not _check_rcon_rate(user["username"]):
         raise HTTPException(429, "Rate limit exceeded (10 commands/minute)")
+
+    games_offline.refuse_if_offline(body.game_id)
 
     # Reject when the target game doesn't expose RCON.
     try:

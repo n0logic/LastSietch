@@ -1,6 +1,6 @@
 """VC2 P1 — Server > Monitor aggregator + sub-tab shell.
 
-Reference: docs/dune-research/VC2-P1-EXECUTION-BRIEF.md §3, §4.1, §7.1.
+Reference: the design notes (not published) §3, §4.1, §7.1.
 
 One JSON aggregator drives the P1 panels (Hero, Presence, World Counters,
 Action Stream, Funcom Intelligence) plus the VC4 Leaderboards card on a 10s

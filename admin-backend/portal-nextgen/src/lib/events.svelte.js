@@ -16,16 +16,16 @@
 // read them"). The toggle renders ABSENT on null rather than showing an off
 // switch that would silently be a lie about the player's own account.
 //
-// Only `upcoming` polls. A past event cannot change while you watch it, so the
+// Only `upcoming` and `live` poll. A past event cannot change while you watch it, so the
 // past window is read once per subscribe and once more whenever the tab comes
 // back, which is the moment its 90 day edge may have moved.
 import { api } from './api.js';
 import { auth } from './auth.svelte.js';
 
 // The four kinds the backend CHECK constraint allows, as the WIRE values and
-// nothing else. The composer owns the words a player reads: it maps each value
-// through its own label table, so a label typed here would be a second copy of
-// the same vocabulary and the two would drift.
+// nothing else. Each surface maps a value through its own label table, so a label
+// typed here would be a second copy of the same vocabulary and the two would drift.
+// Events are written in the admin panel (/admin/v2/players/events) since 2.22.0.
 export const EVENT_KINDS = [
   'community',
   'faction_war',
@@ -50,10 +50,11 @@ export const EVENT_BANNERS = [
 
 // Two minutes. The list is served from a 60s server cache behind a rate limiter,
 // so polling faster buys nothing and only spends the limiter's budget.
-const POLL_MS = { upcoming: 120_000 };
+const POLL_MS = { upcoming: 120_000, live: 120_000 };
 
 export const events = $state({
   status: 'idle',    // idle | loading | ready | error
+  live: [],          // started and not yet ended, ending soonest first
   upcoming: [],      // soonest first, published only
   past: [],          // newest first, 90 day window
   mine: null,        // reminded event ids, or null (anonymous, or a failed read)
@@ -69,27 +70,14 @@ export const eventRemind = $state({
   noticeTone: 'info',
 });
 
-// The admin lane: the composer's own state plus the admin list, which is the
-// only read that can see drafts. Never populated for a player without the role,
-// because the endpoint answers 404 to them.
-export const eventAdmin = $state({
-  open: false,       // composer open
-  mode: 'create',    // create | edit
-  target: null,      // the event being edited, or null
-  status: 'idle',    // idle | loading | ready | error
-  rows: null,        // admin list rows, null until a read succeeds
-  busy: false,       // a create/update/cancel is in flight
-  error: '',         // refusal copy for the composer
-});
-
 // Monotonic token per read. A tab regaining focus fires an immediate refetch
 // while the previous request is still open; whichever lands second must not win
 // on age alone.
-const seq = { upcoming: 0, past: 0, mine: 0, detail: 0, admin: 0 };
+const seq = { upcoming: 0, live: 0, past: 0, mine: 0, detail: 0 };
 
 let subscribers = 0;
 let listening = false;
-const timers = { upcoming: null };
+const timers = { upcoming: null, live: null };
 
 function visible() {
   return typeof document === 'undefined' || document.visibilityState !== 'hidden';
@@ -131,6 +119,15 @@ export async function loadUpcoming() {
     // true. Only a board that never read at all goes to error.
     if (events.status !== 'ready') events.status = 'error';
   }
+}
+
+export async function loadLive() {
+  const s = ++seq.live;
+  try {
+    const r = await api.events.list('live');
+    if (s !== seq.live) return;
+    events.live = rowsOf(r);
+  } catch (e) {}
 }
 
 export async function loadPast() {
@@ -221,93 +218,6 @@ export async function toggleRemind(eventId) {
   }
 }
 
-/** The admin list, drafts included. Called ONLY from behind the role gate: for
- *  anyone else the endpoint is a 404, and asking is a request we know the answer
- *  to. The gate hides controls; the server decides the role. */
-export async function loadAdminList() {
-  const s = ++seq.admin;
-  eventAdmin.status = 'loading';
-  try {
-    const r = await api.events.adminList();
-    if (s !== seq.admin) return;
-    eventAdmin.rows = rowsOf(r);
-    eventAdmin.status = 'ready';
-  } catch (e) {
-    if (s !== seq.admin) return;
-    eventAdmin.rows = null;
-    eventAdmin.status = 'error';
-  }
-}
-
-export function openComposer(target) {
-  eventAdmin.target = target || null;
-  eventAdmin.mode = target ? 'edit' : 'create';
-  eventAdmin.error = '';
-  eventAdmin.open = true;
-}
-
-export function closeComposer() {
-  eventAdmin.open = false;
-  eventAdmin.target = null;
-  eventAdmin.error = '';
-}
-
-/** Create or update, decided by the mode the composer was opened in. */
-export async function submitComposer(body) {
-  if (eventAdmin.busy) return false;
-  eventAdmin.busy = true;
-  eventAdmin.error = '';
-  const target = eventAdmin.target;
-  try {
-    if (eventAdmin.mode === 'edit' && target && target.id != null) {
-      await api.events.adminUpdate(String(target.id), body);
-    } else {
-      await api.events.adminCreate(body);
-    }
-    closeComposer();
-    await refreshAfterWrite();
-    return true;
-  } catch (e) {
-    eventAdmin.error = friendly(e, 'That did not save. Nothing changed.');
-    return false;
-  } finally {
-    eventAdmin.busy = false;
-  }
-}
-
-/** Cancel the event the composer is open on. The composer calls this with the
- *  typed token and the reason, positionally, and the id comes from the composer's
- *  own target rather than from the form: a cancellation mails every player who
- *  set a reminder and cannot be taken back. */
-export async function cancelEvent(confirm, reason) {
-  if (eventAdmin.busy) return false;
-  const target = eventAdmin.target;
-  const id = target && target.id != null ? String(target.id) : '';
-  if (!id) return false;
-  eventAdmin.busy = true;
-  eventAdmin.error = '';
-  try {
-    await api.events.adminCancel(id, String(confirm || ''), String(reason || ''));
-    closeComposer();
-    await refreshAfterWrite();
-    return true;
-  } catch (e) {
-    eventAdmin.error = friendly(e, 'That cancellation did not go through. Nothing changed.');
-    return false;
-  } finally {
-    eventAdmin.busy = false;
-  }
-}
-
-/** After any admin write, re-read what the write could have changed. The public
- *  list is edge cached for a minute, so this can still show the old row; the
- *  admin list is not, and it is the one an admin is reading. */
-async function refreshAfterWrite() {
-  await loadAdminList();
-  loadUpcoming();
-  loadPast();
-}
-
 /** Map a refusal token to friendly copy.
  *
  *  Prefers the SERVER's own sentence when it sent one: `e.message` is the TOKEN,
@@ -327,7 +237,6 @@ function friendly(e, fallback) {
     event_reminder_cap: 'This event is holding all the reminders it can. Nothing changed.',
     player_reminder_cap: 'You are holding as many reminders as the sietch allows. Drop one, then set this.',
     reminder_throttled: 'Too many reminder changes in the last hour. Wait a while, then try again.',
-    confirm_required: 'Type CANCEL to confirm. Nothing changed.',
     rate_limited: 'Slow down a moment, then try again.',
   };
   return map[t] || fallback;
@@ -335,6 +244,7 @@ function friendly(e, fallback) {
 
 const READS = {
   upcoming: loadUpcoming,
+  live: loadLive,
   past: loadPast,
   mine: loadMine,
 };

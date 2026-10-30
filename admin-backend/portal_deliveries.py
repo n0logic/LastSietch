@@ -64,17 +64,18 @@ FAIL_TTL_S = 30.0
 _cache: dict = {}
 
 # The pack version decides where every welcome leg landed, so it is matched
-# EXACTLY and never by "is it not the new one". v1.0.1 through v1.6 are the
-# offline lane, which applied the whole pack inline at grant time; v1.7 is the
-# online lane, which delivers over RMQ and defers research and scrip to a sweep.
+# EXACTLY and never by "is it not the new one". v1.0.1 through v1.6, and v1.8
+# (the 2026-10-20 Mk3 pack), are the offline lane, which applies the whole pack
+# inline at grant time; v1.7 and v1.8-rmq are the online lane, which delivers
+# over RMQ and defers research and scrip to a sweep.
 #
 # Everything else is a THIRD case and it has to stay one. `notes` is NULL on some
 # rows, and the re-roll heal writes the transient marker "REGRANT-REROLL-HEAL"
 # into it; both used to fall through to the offline rules and report a backpack,
 # research and scrip the server may never have sent. An unrecognised version
 # reads every leg "unknown", which is the only true answer available.
-VERSION_OFFLINE_RE = re.compile(r"^v1\.[0-6]")
-VERSION_RMQ_RE = re.compile(r"^v1\.7")
+VERSION_OFFLINE_RE = re.compile(r"^v1\.([0-6]|8(?!-rmq))")
+VERSION_RMQ_RE = re.compile(r"^v1\.(7|8-rmq)")
 
 LANE_OFFLINE = "offline"
 LANE_RMQ = "rmq"

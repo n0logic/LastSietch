@@ -1,6 +1,6 @@
 <script>
   import { authPost, authMessage, usePasskey } from '$lib/signin.js';
-  let { linking = false } = $props();
+  let { linking = false, title = '' } = $props();
   let character = $state('');
   let code = $state('');
   let username = $state('');
@@ -39,7 +39,7 @@
 </script>
 
 <div class="verification">
-  <h3>{linking ? 'Link a game account' : 'New here? Verify in game'}</h3>
+  <h3>{title || (linking ? 'Verify in game' : 'New here? Verify in game')}</h3>
   {#if verified}
     <p>Game account verified. Save your first sign-in method within ten minutes to finish creating your profile.</p>
     <form onsubmit={(event) => { event.preventDefault(); act('password'); }}>
@@ -53,7 +53,7 @@
     </form>
   {:else if challenge}
     <form onsubmit={(event) => { event.preventDefault(); act('verify'); }}>
-      <label>Verification code <input bind:value={code} inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required /></label>
+      <label>Verification code <input bind:value={code} inputmode="numeric" autocomplete="one-time-code" pattern={'[0-9]{6}'} maxlength="6" required /></label>
       <div class="actions"><button disabled={busy}>Verify code</button><button type="button" disabled={busy} onclick={() => { challenge = ''; code = ''; message = ''; }}>Start again</button></div>
     </form>
   {:else}

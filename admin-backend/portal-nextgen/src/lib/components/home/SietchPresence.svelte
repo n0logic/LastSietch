@@ -1,6 +1,6 @@
 <script>
   // Home panel: who from your guild is on the sand. (A sietch is the server
-  // community, Habbanya or Kulon; a guild is a guild. The card says which.) One row per member, at most
+  // community, Habbanya or Amtal; a guild is a guild. The card says which.) One row per member, at most
   // the twelve the server already sorted (online first); the order is the
   // server's and is not re-sorted here, so the list does not shuffle between polls.
   //

@@ -62,6 +62,7 @@ AUDIT_ACTION_GROUPS = (
         "dune_vault_history", "dune_vault_capture_requested", "dune_vault_capture",
         "dune_vault_restore_plan_requested", "dune_vault_restore_plan",
         "dune_vault_restore_apply_refused",
+        "dune_vault_backup_history", "dune_vault_backup_capture_requested", "dune_vault_backup_capture",
     )),
     ("Game levers", (
         "dune_grant", "dune_custom_grant", "dune_cart_fire", "dune_preset_fire",
@@ -75,10 +76,11 @@ AUDIT_ACTION_GROUPS = (
     ("Moderation", (
         "dune_kick", "dune_ban", "dune_unban",
         "takedown_blueprint", "takedown_signal", "takedown_directory",
+        "amtal_case_create", "amtal_case_verdict", "amtal_case_bounty", "amtal_case_void",
     )),
     ("Portal: links and characters", (
-        "portal_manual_link", "portal_revoke_link", "portal_unlock",
-        "portal_rescue", "portal_reward_claim", "portal_character_augment",
+        "portal_manual_link", "portal_revoke_link", "portal_transfer_relink", "portal_unlock",
+        "portal_rescue", "portal_reward_claim", "portal_landsraad_claim", "portal_character_augment",
         "portal_gift_send", "portal_gift_inbound_alert",
         "portal_event_create", "portal_event_update", "portal_event_cancel",
         "portal_event_remind_toggle",
@@ -110,6 +112,10 @@ AUDIT_ACTION_GROUPS = (
     # is always accounted for in the same ledger as everything else.
     ("Portal: QA harness", (
         "portal_qa_session",
+    )),
+    ("Seven Nights", (
+        "sietch_award", "sietch_contest_award", "sietch_spots",
+        "sietch_order_redrive", "sietch_order_refund",
     )),
     ("Blueprints", (
         "portal_blueprint_download", "portal_blueprint_publish",

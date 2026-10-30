@@ -10,12 +10,19 @@
   // "Your contribution" only appears when the figure was actually read. A null
   // contribution is absent, never 0: a player who contributed nothing and a
   // player whose contribution could not be loaded are different statements.
+  //
+  // The active decree rides on the same public standings read (term.active_decree,
+  // the field the Landsraad page shows); no second fetch. The standings poll every
+  // 60 s and a failed poll keeps the last answer on screen, so once the last good
+  // read is older than two missed polls the face says when it was read.
   import { base } from '$app/paths';
   import CarvedSlab from '$lib/components/CarvedSlab.svelte';
   import SealedPanel from '$lib/components/SealedPanel.svelte';
   import LandsraadStanding from '$lib/components/LandsraadStanding.svelte';
 
-  let { standings = null, myContribution = null } = $props();
+  let { standings = null, myContribution = null, readAt = null, now = null } = $props();
+
+  const STALE_MS = 150_000;
 
   const CREST = (c) => `/admin/static/img/factions/${c}.png`;
 
@@ -29,6 +36,12 @@
   let leader = $derived.by(() => {
     if (rails.length < 2 || rails[0].score === rails[1].score) return null;
     return rails[0].score > rails[1].score ? rails[0] : rails[1];
+  });
+  let decree = $derived(available ? (standings?.term?.active_decree?.label || null) : null);
+  let asOf = $derived.by(() => {
+    if (typeof readAt !== 'number' || typeof now !== 'number' || now - readAt < STALE_MS) return '';
+    const d = new Date(readAt);
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
   });
   let contribution = $derived(
     typeof myContribution === 'number' && Number.isFinite(myContribution)
@@ -52,6 +65,12 @@
         <span class="val mono">{rails[0].score}<small>{rails[0].name}</small></span>
       {:else}
         <span class="val muted">No active term</span>
+      {/if}
+      {#if decree}
+        <span class="decree"><span class="mono">Decree</span> {decree}</span>
+      {/if}
+      {#if asOf}
+        <span class="asof mono" title="The standings feed has not answered since then.">as of {asOf}</span>
       {/if}
       {#if leader?.crest}
         <img class="glyph crest" src={CREST(leader.crest)} alt="" aria-hidden="true" loading="lazy" />
@@ -90,6 +109,12 @@
   }
   .val small { font-size: var(--text-xs); font-weight: 400; color: var(--text-muted); margin-left: var(--space-2); }
   .val.muted { color: var(--text-muted); font-size: var(--text-lg); font-weight: 400; }
+  .decree { grid-column: 1; font-size: var(--text-sm); color: var(--text); margin-top: var(--space-1); overflow-wrap: anywhere; }
+  .decree .mono {
+    font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .14em;
+    color: var(--text-muted); margin-right: var(--space-1);
+  }
+  .asof { grid-column: 1; font-size: var(--text-xs); color: var(--text-muted); }
   .glyph {
     grid-row: 1 / 3; grid-column: 2; align-self: center; width: 34px; height: 34px;
     fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; opacity: .8;

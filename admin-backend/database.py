@@ -155,6 +155,26 @@ CREATE INDEX IF NOT EXISTS idx_pma_account_unseen
 CREATE INDEX IF NOT EXISTS idx_pma_dm_pending
     ON portal_market_alert(id) WHERE dm_sent = 0;
 
+-- Landsraad portal claims: one row per APPLIED claim, holding the player-facing
+-- receipt (friendly names only, no internal ids). The game-side record is
+-- dune.ls_item_delivery_log; this row exists so Cielago can DM the receipt the next
+-- time the player is online (pulled via /_internal/landsraad-claims), mirroring
+-- portal_market_alert's dm_sent/dm_note pair.
+CREATE TABLE IF NOT EXISTS portal_landsraad_claim (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    discord_id  TEXT    NOT NULL,
+    account_id  INTEGER NOT NULL,
+    receipt     TEXT    NOT NULL,                 -- JSON, see landsraad_claim.shape_receipt
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    dm_sent     INTEGER NOT NULL DEFAULT 0,
+    dm_note     TEXT,
+    CHECK (account_id > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_plc_dm_pending
+    ON portal_landsraad_claim(id) WHERE dm_sent = 0;
+CREATE INDEX IF NOT EXISTS idx_plc_account
+    ON portal_landsraad_claim(account_id, id DESC);
+
 -- Guild recruiting flag + portal-authored blurb. OUR metadata (NOT game-state):
 -- a guild Leader/Officer (verified via their linked controller_id holding
 -- role_id 1/50 in dune.guild_members) marks their guild "recruiting" and writes
@@ -749,6 +769,24 @@ CREATE TABLE IF NOT EXISTS portal_events (
     published_at           TEXT,                  -- stamped once, on first publish
     cancelled_at           TEXT,
     cancel_reason          TEXT,
+    -- Discord scheduled-event sync (2026-10-23, WEEKEND-EVENTS-PLAN). Also in
+    -- _PORTAL_ALTERS for an admin.db that pre-dates them.
+    discord_sync           INTEGER NOT NULL DEFAULT 0,
+    discord_event_id       TEXT,                  -- Discord's id once created
+    discord_status         TEXT,                  -- last status Discord accepted
+    discord_state          TEXT,                  -- pending | synced | failed
+    discord_error          TEXT,
+    discord_synced_at      TEXT,
+    -- Weekend effects (2026-10-28, WEEKEND-EVENTS-PLAN Stage 3). Also in
+    -- _PORTAL_ALTERS. NULL effect = an event written before effects existed.
+    effect                 TEXT,                  -- none | xp | spec_xp | crafting | harvest
+    effect_scope           TEXT,                  -- fleet | amtal
+    effect_state           TEXT,                  -- armed | running | done | failed | missed
+    effect_error           TEXT,
+    effect_job             TEXT,                  -- start | end while a <game-host> job is in flight
+    effect_job_at          TEXT,
+    effect_started_at      TEXT,                  -- readback confirmed on every target pod
+    effect_ended_at        TEXT,
     CHECK (kind IN ('community','faction_war','maintenance','other')),
     CHECK (status IN ('draft','published','cancelled')),
     CHECK (length(title) <= 200),
@@ -913,6 +951,152 @@ CREATE INDEX IF NOT EXISTS idx_pcr_state
     ON portal_chat_reports(state, created_utc);
 CREATE INDEX IF NOT EXISTS idx_pcr_message
     ON portal_chat_reports(message_id);
+
+-- ==========================================================================
+-- Seven Nights of the Sietch (sietch_nights.py): the LS Token ledger.
+--
+-- LS Tokens live ONLY here, never in dune.*. portal_sn_earn is raw per-account
+-- evidence; portal_sn_ledger is the money, append-only and signed, and a
+-- balance is SUM(delta) over every event (tokens carry over, owner 2026-10-24).
+-- There is no cached balance column, so nothing can drift. profile_id is
+-- portal_profiles.id (TEXT, 32 hex): every cap and limit keys on the profile,
+-- never on account_id, and a profile's credit for one (night, source, ref) is the
+-- MAX across its linked accounts, never the SUM.
+--
+-- A refund is a NEW ledger row (one per order, ux_sn_refund), never an UPDATE.
+-- portal_sn_spots holds Knock coordinates entered through the admin API on the
+-- night; they are never committed to the repo and public=0 rows never leave the
+-- server. Additive only: CREATE TABLE IF NOT EXISTS is itself the migration.
+-- ==========================================================================
+CREATE TABLE IF NOT EXISTS portal_sn_earn (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event       TEXT    NOT NULL,
+    account_id  INTEGER NOT NULL,
+    night       TEXT    NOT NULL,              -- UTC date key 'YYYY-MM-DD'
+    source      TEXT    NOT NULL,              -- visit|streak|knock|landsraad|activity
+    ref         TEXT    NOT NULL DEFAULT '',
+    amount      INTEGER NOT NULL CHECK (amount > 0),
+    evidence    TEXT,                          -- json sidecar
+    operator    TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (account_id, night, source, ref)
+);
+CREATE INDEX IF NOT EXISTS idx_sn_earn_night ON portal_sn_earn(night, source);
+
+CREATE TABLE IF NOT EXISTS portal_sn_ledger (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event       TEXT    NOT NULL,
+    profile_id  TEXT    NOT NULL,
+    delta       INTEGER NOT NULL CHECK (delta <> 0),
+    kind        TEXT    NOT NULL CHECK (kind IN ('earn','order','refund','admin_adjust')),
+    night       TEXT,
+    source      TEXT,
+    ref         TEXT,
+    earn_id     INTEGER REFERENCES portal_sn_earn(id),
+    order_id    INTEGER REFERENCES portal_sn_orders(id),
+    operator    TEXT,
+    reason      TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sn_credit
+    ON portal_sn_ledger(profile_id, night, source, ref) WHERE kind = 'earn';
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sn_admin
+    ON portal_sn_ledger(profile_id, ref) WHERE kind = 'admin_adjust';
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sn_debit
+    ON portal_sn_ledger(order_id) WHERE kind = 'order';
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sn_refund
+    ON portal_sn_ledger(order_id) WHERE kind = 'refund';
+CREATE INDEX IF NOT EXISTS idx_sn_ledger_profile ON portal_sn_ledger(profile_id, id);
+CREATE INDEX IF NOT EXISTS idx_sn_ledger_event ON portal_sn_ledger(event, kind);
+
+CREATE TABLE IF NOT EXISTS portal_sn_orders (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    event         TEXT    NOT NULL,
+    idem_key      TEXT    NOT NULL UNIQUE,     -- client uuid, stable across retries
+    delivery_key  TEXT    NOT NULL UNIQUE,     -- uuid5(profile, sku, order id); sent to the writer
+    profile_id    TEXT    NOT NULL,
+    discord_id    TEXT,
+    account_id    INTEGER,                     -- resolved server-side
+    controller_id INTEGER,                     -- resolved server-side; Deleted excluded
+    sku           TEXT    NOT NULL,
+    lane          TEXT    NOT NULL,
+    price         INTEGER NOT NULL CHECK (price >= 0),
+    status        TEXT    NOT NULL CHECK (status IN
+                  ('queued','delivering','delivered','reconciling','failed','refunded')),
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    attempt_at    TEXT,                        -- when the last writer call began
+    lane_ref      TEXT,
+    error         TEXT,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    settled_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sn_orders_profile ON portal_sn_orders(profile_id, sku, status);
+CREATE INDEX IF NOT EXISTS idx_sn_orders_status ON portal_sn_orders(status, id);
+
+-- E4: base is the last-seen Landsraad total for the account, delta the positive
+-- tick deltas accumulated into that night. A negative delta is a term rollover:
+-- re-base, keep what was accumulated.
+CREATE TABLE IF NOT EXISTS portal_sn_landsraad (
+    account_id  INTEGER NOT NULL,
+    night       TEXT    NOT NULL,
+    base        REAL    NOT NULL,
+    delta       REAL    NOT NULL DEFAULT 0,
+    seen_at     TEXT    NOT NULL,
+    turnins     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, night)
+);
+
+-- The last reading per house ladder, kept across nights. Per ladder so that a
+-- read missing a ladder (or an empty one) never re-bases it to zero.
+CREATE TABLE IF NOT EXISTS portal_sn_landsraad_ladder (
+    account_id  INTEGER NOT NULL,
+    ladder      TEXT    NOT NULL,
+    base        REAL    NOT NULL,
+    seen_at     TEXT    NOT NULL,
+    PRIMARY KEY (account_id, ladder)
+);
+
+-- Per-account eligibility facts gathered by the worker and /state: whether the
+-- account logged in before the event cut-off, the highest level the mirror has
+-- shown, and when its login history was last pulled (bounds relay hops).
+CREATE TABLE IF NOT EXISTS portal_sn_accounts (
+    account_id       INTEGER PRIMARY KEY,
+    early_login      INTEGER NOT NULL DEFAULT 0,
+    max_lvl          INTEGER NOT NULL DEFAULT 0,
+    login_pulled_at  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS portal_sn_spots (
+    id             TEXT    PRIMARY KEY,
+    night          TEXT    NOT NULL,
+    kind           TEXT    NOT NULL CHECK (kind IN ('porch','clue','stall','seek','haunt')),
+    map            TEXT    NOT NULL,
+    x              REAL    NOT NULL,
+    y              REAL    NOT NULL,
+    radius         REAL    NOT NULL DEFAULT 15000,
+    seq            INTEGER,
+    public_name    TEXT,
+    riddle         TEXT,
+    award          INTEGER NOT NULL CHECK (award > 0),
+    first_n_bonus  INTEGER NOT NULL DEFAULT 0,
+    public         INTEGER NOT NULL DEFAULT 1      -- 0 for seek: coordinates never leave the server
+);
+CREATE INDEX IF NOT EXISTS idx_sn_spots_night ON portal_sn_spots(night, kind, seq);
+
+-- Every Knock attempt (rate limit + audit). dist is server-side only.
+CREATE TABLE IF NOT EXISTS portal_sn_knocks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id  TEXT    NOT NULL,
+    account_id  INTEGER NOT NULL,
+    night       TEXT    NOT NULL,
+    spot_id     TEXT,
+    dist        REAL,
+    band        TEXT,                          -- the result token returned
+    hit         INTEGER NOT NULL DEFAULT 0,
+    stale       INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sn_knocks_profile ON portal_sn_knocks(profile_id, night, id);
 """
 
 # Idempotent ALTER paths for in-place upgrade of an admin.db that pre-dates the
@@ -927,6 +1111,8 @@ _PORTAL_ALTERS = (
     # reader emitted coords / before this upgrade.
     "ALTER TABLE spice_candidate_acc ADD COLUMN x REAL",
     "ALTER TABLE spice_candidate_acc ADD COLUMN y REAL",
+    # Seven Nights pays one Landsraad rung per turn-in (2026-10-27).
+    "ALTER TABLE portal_sn_landsraad ADD COLUMN turnins INTEGER NOT NULL DEFAULT 0",
     # Social layer Tier 2: structured Signal-Board filter columns on the existing
     # recruiting table (upgrade path for an admin.db that pre-dates them).
     "ALTER TABLE portal_guild_recruiting ADD COLUMN playstyle TEXT",
@@ -960,6 +1146,44 @@ _PORTAL_ALTERS = (
     # the DEFAULT is what backfills every row posted before this wave: they were
     # all typed, so 'say' is the truth and not a placeholder.
     "ALTER TABLE portal_chat_messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'say'",
+    # Discord scheduled-event sync for portal events (2026-10-23). Every existing
+    # event starts unsynced (discord_sync 0), which is the truth: nothing has ever
+    # reached Discord from events.
+    "ALTER TABLE portal_events ADD COLUMN discord_sync INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE portal_events ADD COLUMN discord_event_id TEXT",
+    "ALTER TABLE portal_events ADD COLUMN discord_status TEXT",
+    "ALTER TABLE portal_events ADD COLUMN discord_state TEXT",
+    "ALTER TABLE portal_events ADD COLUMN discord_error TEXT",
+    "ALTER TABLE portal_events ADD COLUMN discord_synced_at TEXT",
+    # Weekend effects (2026-10-28). Every existing event reads as no effect
+    # (NULL) except the two Landsraad weekends, which _PORTAL_BACKFILLS labels.
+    "ALTER TABLE portal_events ADD COLUMN effect TEXT",
+    "ALTER TABLE portal_events ADD COLUMN effect_scope TEXT",
+    "ALTER TABLE portal_events ADD COLUMN effect_state TEXT",
+    "ALTER TABLE portal_events ADD COLUMN effect_error TEXT",
+    "ALTER TABLE portal_events ADD COLUMN effect_job TEXT",
+    "ALTER TABLE portal_events ADD COLUMN effect_job_at TEXT",
+    "ALTER TABLE portal_events ADD COLUMN effect_started_at TEXT",
+    "ALTER TABLE portal_events ADD COLUMN effect_ended_at TEXT",
+    # Seven Nights shop (QA M1): when a writer call began, so a 'delivering' order
+    # orphaned by a crash can be told from one still in flight.
+    "ALTER TABLE portal_sn_orders ADD COLUMN attempt_at TEXT",
+)
+
+
+# One-time data labels that ride init_db like the ALTERs. Each must be a no-op on
+# its second run and on an admin.db that does not hold the rows it names.
+# Rows 1 and 2 are the Landsraad spec XP weekends run by hand (2026-10-24 and
+# 2026-10-30). The start-date bound keeps a fresh or test admin.db, whose rows 1
+# and 2 are something else, untouched; `effect IS NULL` makes it run once and
+# never overwrite an operator's later edit. A window already over is done (the
+# manual runner ran it); one still open or ahead is armed for the effect runner.
+_PORTAL_BACKFILLS = (
+    "UPDATE portal_events SET effect = 'spec_xp', effect_scope = 'fleet',"
+    " effect_state = CASE WHEN ends_utc IS NOT NULL AND ends_utc <= datetime('now')"
+    " THEN 'done' ELSE 'armed' END"
+    " WHERE id IN (1, 2) AND effect IS NULL"
+    " AND starts_utc >= '2026-10-24 00:00:00' AND starts_utc < '2026-11-01 00:00:00'",
 )
 
 
@@ -985,6 +1209,8 @@ def init_db():
     conn = get_db()
     conn.executescript(SCHEMA)
     for sql in _PORTAL_ALTERS:
+        _try_alter(conn, sql)
+    for sql in _PORTAL_BACKFILLS:
         _try_alter(conn, sql)
     conn.commit()
     conn.close()

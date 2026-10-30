@@ -1,49 +1,140 @@
 {% extends "v2/base.html" %}
-{% block title %}Bases — Players{% endblock %}
+{% from "v2/_includes/guide.html" import guide_card, how_panel with context %}
+{% block title %}Bases{% endblock %}
 {% block extra_css %}
+<link rel="stylesheet" href="/admin/static/css/v2/base-vault.css?v=20260911b">
 <link rel="stylesheet" href="/admin/static/css/v2/player-tools.css">
+<link rel="stylesheet" href="/admin/static/css/v2/claims-map.css?v=3">
+<link rel="stylesheet" href="/admin/static/css/v2/bases.css?v=20261030a">
 {% endblock %}
 {% block content %}
-<main class="v2-main v2-player-bases" id="v2-player-bases">
+{# Map calibration travels as a data attribute, not an inline <script>: the admin
+   panel must not depend on a laxer CSP than the portal's. Values come from
+   map_model so markers cannot drift from the Claims map. #}
+<main class="v2-main ls-bases" id="ls-bases" data-view="{{ view }}" data-maps="{{ maps|tojson|forceescape }}">
 
-  <header class="v2-player-bases__header">
-    <h1 class="v2-player-bases__title">BRT backups</h1>
-    <p class="v2-player-bases__subtitle">
-      Packed base backups from the Base Reconstruction Tool, available as G20 handoff and G21 clone sources.
-      Read-only catalog. Filter by name, owner, or account; open a row for its composition.
-      For placed bases and archived saved state, <a href="/admin/v2/players/vault">open Base Vault</a>.
+  <header class="ls-bases__header">
+    <h1 class="ls-bases__title">Bases</h1>
+    <p class="ls-bases__subtitle">
+      Every base in one place: placed claims, packed BRT backups, held bases and bases that only
+      survive in the Base Vault. Read-only. Open a base for its owner, vault coverage and what can
+      be done about it. Admin only: this names players against map positions.
     </p>
   </header>
 
-  <div class="v2-bases-toolbar">
-    <input type="search" id="v2-bases-filter" class="input v2-bases-toolbar__filter"
-           placeholder="Filter by base name, owner, or account..." autocomplete="off"
-           aria-label="Filter base backups">
-    <button type="button" class="btn btn-sm" id="v2-bases-refresh"
-            hx-get="/admin/api/dune/v2/players/_bases"
-            hx-target="#v2-bases-body" hx-swap="innerHTML">Refresh</button>
+  {{ guide_card("bases", "Statuses.", "Placed stands on a loaded map. Packed sits in the owner's BRT (n/3 slots). Held is stored on a closed map and loaded by no server. Orphaned has no owner on record. Archived only exists in the Base Vault and no longer in the game.") }}
+
+  <div class="ls-bases-toolbar">
+    <div class="ls-seg" role="group" aria-label="View">
+      <button type="button" class="ls-seg__btn" data-bases-view="map" aria-pressed="{{ 'true' if view == 'map' else 'false' }}">Map</button>
+      <button type="button" class="ls-seg__btn" data-bases-view="list" aria-pressed="{{ 'true' if view == 'list' else 'false' }}">List</button>
+    </div>
+    <input type="search" id="ls-bases-filter" class="input ls-bases-toolbar__filter"
+           placeholder="Filter by base, owner, account, totem or backup id..."
+           autocomplete="off" aria-label="Filter bases">
+    <span class="ls-bases-count" id="ls-bases-count" role="status" aria-live="polite">Loading directory...</span>
   </div>
 
-  <section id="v2-bases-body" aria-live="polite">
-    {% include "v2/_fragments/bases_list.html" %}
+  <div class="ls-chips" role="group" aria-label="Status filter" id="ls-bases-status">
+    <button type="button" class="ls-chip" data-bases-status="" aria-pressed="true">All</button>
+    <button type="button" class="ls-chip" data-bases-status="placed" aria-pressed="false">Placed</button>
+    <button type="button" class="ls-chip" data-bases-status="packed" aria-pressed="false">Packed</button>
+    <button type="button" class="ls-chip" data-bases-status="held" aria-pressed="false">Held</button>
+    <button type="button" class="ls-chip" data-bases-status="orphaned" aria-pressed="false">Orphaned</button>
+    <button type="button" class="ls-chip" data-bases-status="archived" aria-pressed="false">Archived only</button>
+  </div>
+
+  {% set ls_side = request and (request.state|default(none)).admin_shell|default(none) %}
+  {% if ls_side %}<div class="ls-with-side"><div class="ls-with-side__main">{% endif %}
+
+  <section class="ls-bases-panel" id="ls-bases-map-panel" aria-label="Bases map"{% if view != 'map' %} hidden{% endif %}>
+    <div class="ls-bases-maptools">
+      <div class="v2-claims-instances" role="group" aria-label="Map" id="ls-bases-maps"></div>
+      <div class="v2-claims-instances" role="group" aria-label="Instance" id="ls-bases-dims"></div>
+    </div>
+    <div class="v2-claims-layout">
+      <div class="v2-claims-map ls-bases-map" id="ls-bases-map">
+        <div class="v2-claims-map__stage" id="ls-bases-stage">
+          <img class="v2-claims-map__img" id="ls-bases-img" alt="" draggable="false" hidden>
+          <svg class="v2-claims-map__svg" id="ls-bases-svg" viewBox="0 0 1000 1000"
+               preserveAspectRatio="none" aria-label="Bases map"></svg>
+        </div>
+        <div class="v2-claims-map__zoom">
+          <button type="button" id="ls-bases-zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+          <button type="button" id="ls-bases-zoom-out" title="Zoom out" aria-label="Zoom out">&minus;</button>
+          <button type="button" id="ls-bases-zoom-reset" title="Reset view" aria-label="Reset view">&#8634;</button>
+        </div>
+        <div class="v2-claims-map__hint">drag to pan, scroll to zoom, click a marker for details</div>
+      </div>
+      <aside class="v2-claims-side">
+        <h2>Legend</h2>
+        <div class="v2-claims-legend">
+          <div class="v2-claims-legend__row"><span class="v2-claims-legend__swatch" style="background:var(--green)"></span><span class="v2-claims-legend__label"><b>placed, owner active</b><span>Seen in the last 14 days. Yellow, orange and red mark longer absences.</span></span></div>
+          <div class="v2-claims-legend__row"><span class="v2-claims-legend__swatch" style="background:var(--grace-period)"></span><span class="v2-claims-legend__label"><b>orphaned</b><span>No owner on record.</span></span></div>
+          <div class="v2-claims-legend__row"><span class="v2-claims-legend__swatch ls-swatch--held"></span><span class="v2-claims-legend__label"><b>held</b><span>Stored, loaded by no server.</span></span></div>
+          <div class="v2-claims-legend__row"><span class="v2-claims-legend__swatch ls-swatch--packed"></span><span class="v2-claims-legend__label"><b>packed backup</b><span>Hollow, at the stored origin where the BRT would rebuild it. Shown on every instance of its map.</span></span></div>
+        </div>
+        <p class="v2-claims-note" id="ls-bases-note"></p>
+      </aside>
+    </div>
   </section>
 
-  <aside class="v2-bases-drawer" id="v2-bases-drawer" aria-hidden="true">
-    <div class="v2-bases-drawer__panel" role="dialog" aria-modal="true"
-         aria-labelledby="v2-bases-drawer-title">
+  <section class="ls-bases-panel" id="ls-bases-list-panel" aria-label="Bases list"{% if view != 'list' %} hidden{% endif %}>
+    <div class="ls-bases-tablewrap">
+      <table class="table table--compact table--zebra ls-ledger ls-bases-table">
+        <thead>
+          <tr>
+            <th scope="col">Base</th>
+            <th scope="col">Owner</th>
+            <th scope="col">Status</th>
+            <th scope="col">Where</th>
+            <th scope="col">Loaded</th>
+            <th scope="col">Base Vault</th>
+            <th scope="col">BRT</th>
+            <th scope="col"><span class="sr-only">Detail</span></th>
+          </tr>
+        </thead>
+        <tbody id="ls-bases-rows"></tbody>
+      </table>
+    </div>
+    <p class="ls-bases-empty" id="ls-bases-empty" hidden>No base matches this filter.</p>
+  </section>
+
+  {% if ls_side %}</div>
+  {{ how_panel("How Bases works", [
+      ["One row per base.", "Claims, BRT backups and Base Vault archives are joined by totem."],
+      ["Loaded.", "A base on a running server lives in its memory; a shutdown save overwrites database edits."],
+      ["Vault age.", "Take a snapshot from the Vault tab before any change to a base."],
+      ["Actions.", "Back up and adopt still run from Claims. The guided wizards come next."]
+  ], "Opening a base changes nothing.") }}
+  </div>{% endif %}
+
+  <aside class="v2-bases-drawer" id="ls-bases-drawer" aria-hidden="true">
+    <div class="v2-bases-drawer__panel" role="dialog" aria-modal="true" aria-labelledby="ls-bases-drawer-title">
       <header class="v2-bases-drawer__head">
-        <h2 class="v2-bases-drawer__title" id="v2-bases-drawer-title">Base detail</h2>
-        <button type="button" class="v2-bases-drawer__close" id="v2-bases-drawer-close"
-                aria-label="Close detail">&times;</button>
+        <h2 class="v2-bases-drawer__title" id="ls-bases-drawer-title">Base</h2>
+        <button type="button" class="v2-bases-drawer__close" id="ls-bases-drawer-close" aria-label="Close detail">&times;</button>
       </header>
-      <div class="v2-bases-drawer__body" id="v2-bases-drawer-body">
-        <p class="v2-bases-detail__hint">Select a base to view its composition.</p>
+      <div class="ls-tabs-local" role="tablist" aria-label="Base detail">
+        <button type="button" role="tab" class="ls-tabs-local__tab" id="ls-bases-tab-overview" aria-controls="ls-bases-pane-overview" aria-selected="true" data-bases-tab="overview">Overview</button>
+        <button type="button" role="tab" class="ls-tabs-local__tab" id="ls-bases-tab-vault" aria-controls="ls-bases-pane-vault" aria-selected="false" data-bases-tab="vault">Vault</button>
+        <button type="button" role="tab" class="ls-tabs-local__tab" id="ls-bases-tab-actions" aria-controls="ls-bases-pane-actions" aria-selected="false" data-bases-tab="actions">Actions</button>
+      </div>
+      <div class="v2-bases-drawer__body">
+        <div role="tabpanel" id="ls-bases-pane-overview" aria-labelledby="ls-bases-tab-overview"></div>
+        <div role="tabpanel" id="ls-bases-pane-vault" aria-labelledby="ls-bases-tab-vault" hidden></div>
+        <div role="tabpanel" id="ls-bases-pane-actions" aria-labelledby="ls-bases-tab-actions" hidden></div>
       </div>
     </div>
   </aside>
 
+  <div class="v2-claims-tip" id="ls-bases-tip" hidden role="tooltip"></div>
+
 </main>
+{% include "v2/_includes/base_vault.html" %}
 {% endblock %}
 {% block scripts %}
-<script src="/admin/static/js/v2/player-bases.js" defer></script>
+<script src="/admin/static/js/v2/base-vault.js?v=20260929a" defer></script>
+<script src="/admin/static/js/v2/backup-vault.js?v=20261030a" defer></script>
+<script src="/admin/static/js/v2/bases-directory.js?v=20261030a" defer></script>
 {% endblock %}

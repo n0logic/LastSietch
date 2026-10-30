@@ -49,18 +49,24 @@ FACTION_CHANNELS = {"Atreides": "faction:atreides", "Harkonnen": "faction:harkon
 FACTION_LABELS = {"faction:atreides": "House Atreides",
                   "faction:harkonnen": "House Harkonnen"}
 
-# Owner ruling 2026-09-04: the three Hagga sietches and the two Deep Desert
-# modes, nothing else. Amtal is off the PUBLIC map list but a linked-only room
+# Owner ruling 2026-09-04: the Hagga sietches and the two Deep Desert modes,
+# nothing else. Amtal is off the PUBLIC map list but a linked-only room
 # for it is allowed; the instanced worlds and the social hubs get no room this
 # wave. The ids are FIXED strings and the labels track map_model, so a rename of
 # a sietch lands in one place and does not move anybody's channel id.
 _MAP_CHANNEL_SPECS = (
     ("map:hagga:habbanya", "hagga", "habbanya"),
-    ("map:hagga:kulon", "hagga", "kulon"),
     ("map:hagga:amtal", "hagga", "amtal"),
     ("map:deep-desert:pve", "deep-desert", "pve"),
     ("map:deep-desert:pvp", "deep-desert", "pvp"),
 )
+
+# Owner ruling 2026-10-27: Kulon closed 2026-10-28 and its room stays READ-ONLY.
+# It is still a map channel (readable, moderatable, history intact) but the rail
+# marks it can_post False and portal_chat's send route refuses it. The label is
+# fixed here because map_model no longer carries the instance.
+CLOSED_MAP_CHANNELS = (("map:hagga:kulon", "Hagga Basin (Kulon, closed)"),)
+CLOSED_CHANNEL_IDS = frozenset(cid for cid, _label in CLOSED_MAP_CHANNELS)
 
 # How long one character's resolved house is trusted. Faction is a relay read on
 # a path a player changes rarely and the channel list is fetched on every page
@@ -84,7 +90,7 @@ def _map_label(map_key: str, instance_key: str) -> str:
     return "%s (%s)" % (name, instance_key)
 
 
-MAP_CHANNELS = tuple((cid, _map_label(mk, ik)) for cid, mk, ik in _MAP_CHANNEL_SPECS)
+MAP_CHANNELS = tuple((cid, _map_label(mk, ik)) for cid, mk, ik in _MAP_CHANNEL_SPECS) + CLOSED_MAP_CHANNELS
 MAP_CHANNEL_IDS = frozenset(cid for cid, _label in MAP_CHANNELS)
 
 
@@ -335,7 +341,7 @@ async def channels_for(request):
 
     for cid, label in MAP_CHANNELS:
         rows.append({"id": cid, "kind": "map", "label": label,
-                     "can_post": True, "can_moderate": admin})
+                     "can_post": cid not in CLOSED_CHANNEL_IDS, "can_moderate": admin})
 
     counts = unread_counts(account_id, [r["id"] for r in rows])
     for row in rows:

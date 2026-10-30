@@ -465,12 +465,31 @@ async def _load_bb_sources() -> dict:
     }
 
 
+def _bases_maps() -> list:
+    """Map views for the Bases page. Calibration comes from map_model so markers
+    land where the Claims map and the portal put them. Hagga keeps the closed
+    Kulon dimension so its held leftovers stay visible to admins."""
+    hagga = map_model.MAPS["hagga"]
+    dd = map_model.MAPS["deep-desert"]
+    return [
+        {"key": "hagga", "label": "Hagga Basin", "engine_map": hagga["engine_map"], "cal": hagga["cal"],
+         "img": "/admin/static/img/maps/hagga-map.webp?v=1",
+         "dims": [{"dim": 0, "label": "Habbanya \u00b7 PvE"},
+                  {"dim": 1, "label": "Kulon \u00b7 closed"},
+                  {"dim": 2, "label": "Amtal \u00b7 Full PvP"}]},
+        {"key": "deep-desert", "label": "Deep Desert", "engine_map": dd["engine_map"], "cal": dd["cal"],
+         "img": None,
+         "dims": [{"dim": i["dim"], "label": "Deep Desert \u00b7 " + i["label"]} for i in dd["instances"]]},
+    ]
+
+
 @router.get("/v2/players/bases")
-async def v2_players_bases(request: Request):
+async def v2_players_bases(request: Request, view: str = "map"):
+    """Bases (plan A1): every base in one place, as a map or a list. The page
+    carries no data; it reads the cached A0 directory client-side."""
     user, redirect = _admin_or_redirect(request)
     if redirect:
         return redirect
-    bases = await _load_bb_sources()
     return templates.TemplateResponse(
         request,
         "v2/players_bases.html",
@@ -478,7 +497,8 @@ async def v2_players_bases(request: Request):
             "user": user,
             "current_tab": "players",
             "current_sub_tab": "bases",
-            "bases": bases,
+            "view": view if view in ("map", "list") else "map",
+            "maps": _bases_maps(),
         },
     )
 

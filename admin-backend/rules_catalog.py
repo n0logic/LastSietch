@@ -1,7 +1,7 @@
 """Label map + publish gate for the live Server Rules panel (wave 5).
 
 `data/gameplay-settings-catalog.json` is a byte-identical copy of
-`docs/dune-research/gameplay-settings-catalog-2026-06-13.json` (24 knobs, the
+the design notes (not published) (24 knobs, the
 whole `serverGameplaySettings` body). It supplies HUMAN TEXT only: the label,
 the one-line "what it controls", and the unit. It never supplies a value --
 `liveValue` there is a June observation and publishing it would show a number
@@ -53,7 +53,7 @@ PUBLISHED = (
 
 # The five of the 24 that stay off the public page. The reason is the point:
 #   serverDisplayName                       per-partition string (Habbanya /
-#                                           Kulon / ...), not a server rule, and
+#                                           Amtal / ...), not a server rule, and
 #                                           it is the one string value in the body
 #   vehicleDurabilityDamageMultiplier       BGD reports 1.0, our ini says 0.5 in
 #                                           three places; publishing a number the

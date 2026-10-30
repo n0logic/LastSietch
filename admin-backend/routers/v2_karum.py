@@ -1,6 +1,6 @@
 """Karum operator page: resolve a stuck trade, and read the escrow audit.
 
-Contract: docs/dune-research/v2-portal/KARUM-BUILD-CONTRACT-2026-07-27.md section 11
+Contract: the design notes (not published) section 11
 
 THE ASK THIS ANSWERS. `paid_undelivered` is a real state with a real player's goods and a
 real player's money in it. Without an operator lever, resolving one means hand-written SQL

@@ -7,8 +7,12 @@
 <link rel="icon" type="image/x-icon" href="/assets/favicon.ico">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/admin/static/css/design-system.css?v=20260612a">
-<link rel="stylesheet" href="/admin/static/css/v2/landing.css?v=20260611b">
-<script src="/admin/static/js/landing.js" defer></script>
+{# Easier reading font: applied before first paint; the switch is in the user menu. #}
+<script>try { if (localStorage.getItem('ls-reading-font') === '1') document.documentElement.setAttribute('data-reading-font', 'dyslexic'); var rs = localStorage.getItem('ls-reading-size'); if (rs === 's' || rs === 'l') document.documentElement.setAttribute('data-reading-size', rs); } catch (e) {}</script>
+<link rel="stylesheet" href="/admin/static/css/reading-font.css?v=20261026-rsize">
+<script src="/admin/static/js/reading-font.js?v=20261026-rsize" defer></script>
+<link rel="stylesheet" href="/admin/static/css/v2/landing.css?v=20261026-relocating">
+<script src="/admin/static/js/landing.js?v=20261030-host" defer></script>
 </head>
 <body class="admin-page">
 
@@ -24,12 +28,12 @@
 
 <main class="v2-landing">
 
-  <!-- Infra card: Proxmox cluster -->
-  <section class="card v2-landing__infra" id="infra-banner" role="region" aria-label="Proxmox Cluster Infrastructure Status">
+  <!-- Infra card: host -->
+  <section class="card v2-landing__infra" id="infra-banner" role="region" aria-label="Host Infrastructure Status">
     <div class="v2-landing__infra-head">
       <div class="v2-landing__infra-label">
         <span class="v2-landing__dot is-healthy" id="infra-dot" role="img" aria-label="Infrastructure status: healthy"></span>
-        Proxmox Cluster
+        Host
       </div>
       <span class="v2-landing__refresh">refreshes every 30s</span>
     </div>
@@ -68,7 +72,7 @@
 
     <div class="v2-landing__infra-foot">
       <span id="infra-vms">VMs Running: ---</span>
-      <span class="v2-landing__infra-loc" id="infra-location">Proxmox</span>
+      <span class="v2-landing__infra-loc" id="infra-location">Host</span>
     </div>
   </section>
 

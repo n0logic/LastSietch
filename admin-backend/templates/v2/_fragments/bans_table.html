@@ -29,7 +29,7 @@
     {{ rows|length }} {{ 'action' if history else 'active ban' }}{{ '' if rows|length == 1 else 's' }}
   </div>
   <div style="overflow-x: auto;">
-    <table class="table table--compact table--zebra v2-bans-table">
+    <table class="table table--compact table--zebra v2-bans-table{% if request and (request.state|default(none)).admin_shell|default(none) %} ls-ledger{% endif %}">
       <thead>
         {% if history %}
           <tr>

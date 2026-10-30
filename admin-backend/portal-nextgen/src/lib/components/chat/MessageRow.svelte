@@ -22,7 +22,9 @@
   // mute dialog behind these actions says which room the mute covers, and
   // without the label it would say "guild:41" to the person deciding.
   import RowActions from '$lib/components/chat/RowActions.svelte';
+  import TitleChip from '$lib/components/TitleChip.svelte';
   import { tokenize } from '$lib/chat/links.js';
+  import { chatStamp } from '$lib/chat/stamp.js';
 
   let {
     message,
@@ -32,24 +34,7 @@
     onchanged,
   } = $props();
 
-  // The wire stamp is UTC and may arrive with or without a zone marker; a bare
-  // "2026-09-04 11:02:03" parsed as local time would print the wrong hour.
-  function parseUtc(s) {
-    if (typeof s !== 'string' || !s.trim()) return null;
-    let v = s.trim().replace(' ', 'T');
-    if (!/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(v)) v += 'Z';
-    const t = Date.parse(v);
-    return Number.isNaN(t) ? null : t;
-  }
-
-  const pad = (n) => String(n).padStart(2, '0');
-
-  let stamp = $derived.by(() => {
-    const t = parseUtc(message?.created_utc);
-    if (t == null) return '';
-    const d = new Date(t);
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  });
+  let stamp = $derived(chatStamp(message?.created_utc));
 
   let mine = $derived(message?.mine === true);
   let deleted = $derived(message?.deleted === true);
@@ -66,8 +51,8 @@
 
 <article class="row" class:mine class:deleted class:pending class:failed class:emote class:system>
   <header class="head">
-    {#if !emote && !system}<span class="who" class:me={mine}>{message?.char_name || ''}</span>{/if}
-    {#if stamp}<time class="when mono" datetime={message?.created_utc}>{stamp}</time>{/if}
+    {#if !emote && !system}<span class="who" class:me={mine}>{message?.char_name || ''}</span>{#if !deleted}<TitleChip title={message?.title} />{/if}{/if}
+    {#if stamp.text}<time class="when mono" datetime={message?.created_utc} title={stamp.title}>{stamp.text}</time>{/if}
     {#if !deleted && !pending && !system}
       <RowActions {message} {channel} {channelLabel} {canModerate} {onchanged} />
     {/if}
@@ -111,6 +96,7 @@
     letter-spacing: .06em; color: var(--text);
   }
   .who.me { color: var(--accent-text); }
+  .head :global(.title-chip) { margin-left: 0; }
   .when { font-size: var(--text-xs); color: var(--text-muted); }
 
   .body {

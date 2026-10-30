@@ -4,13 +4,16 @@
 <link rel="stylesheet" href="/admin/static/css/v2/cvars.css">
 {% endblock %}
 {% block content %}
-<main class="v2-cvars" id="v2-cvars" data-queued-banner="{{ queued_banner }}">
+<main class="v2-cvars" id="v2-cvars">
 
   <header class="v2-cvars__header">
     <h1 class="v2-cvars__title">CVars</h1>
     <p class="v2-cvars__subtitle">
       Server config (5-layer INI hierarchy) + Funcom live settings + da-tweakables catalog.
-      Writes are queued — they apply at the next maintenance restart, never live.
+      Read only.
+    </p>
+    <p class="v2-cvars__subtitle" id="cvars-write-retired" role="note">
+      <strong>Editing is retired.</strong> {{ write_retired }}
     </p>
   </header>
 
@@ -79,40 +82,6 @@
   </section>
 
 </main>
-
-{# Confirmation modal — "Type CONFIRM to submit" gate per brief §11 test #3.
-   Hidden until JS triggers it from a per-row Edit button. #}
-<div class="cvars-confirm-overlay" id="cvars-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="cvars-confirm-title" hidden>
-  <div class="cvars-confirm-dialog">
-    <h2 class="cvars-confirm-dialog__title" id="cvars-confirm-title">Confirm CVar write</h2>
-    <p class="cvars-confirm-dialog__warning">
-      This write is queued. It applies at the next announced maintenance restart, not live.
-    </p>
-    <dl class="cvars-confirm-dialog__details">
-      <dt>Section</dt><dd id="cvars-confirm-section">—</dd>
-      <dt>Key</dt><dd id="cvars-confirm-key">—</dd>
-      <dt>Current source layer</dt><dd id="cvars-confirm-source">—</dd>
-      <dt>Old value</dt><dd id="cvars-confirm-old">—</dd>
-      <dt>New value</dt><dd id="cvars-confirm-new">—</dd>
-    </dl>
-    <label class="cvars-confirm-dialog__newval-label" for="cvars-confirm-newval">New value</label>
-    <input type="text" id="cvars-confirm-newval" class="cvars-confirm-dialog__input" autocomplete="off" maxlength="4096">
-    <label class="cvars-confirm-dialog__label" for="cvars-confirm-token">
-      Type <code>CONFIRM</code> to submit
-    </label>
-    <input type="text" id="cvars-confirm-token" class="cvars-confirm-dialog__input" autocomplete="off" maxlength="16">
-    <label class="cvars-confirm-dialog__reason-label" for="cvars-confirm-reason">Reason (optional, logged to history)</label>
-    <textarea id="cvars-confirm-reason" class="cvars-confirm-dialog__reason" rows="2" maxlength="500"></textarea>
-    <p class="cvars-confirm-dialog__help">
-      Writes go to <code>UserOverrides.ini</code> on disk. No <code>dune.*</code> table is mutated; sidesteps DISCORD-INTEL A7 + A8.
-    </p>
-    <div class="cvars-confirm-dialog__actions">
-      <button type="button" class="btn" id="cvars-confirm-cancel">Cancel</button>
-      <button type="button" class="btn btn-accent" id="cvars-confirm-submit" disabled>Queue write</button>
-    </div>
-    <p class="cvars-confirm-dialog__status" id="cvars-confirm-status" aria-live="polite"></p>
-  </div>
-</div>
 
 {% endblock %}
 

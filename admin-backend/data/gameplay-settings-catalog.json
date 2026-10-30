@@ -95,7 +95,7 @@
       "onlineSafety": "online-caution-announce",
       "risk": "MED",
       "v3_xref": "GameplaySetting.HydrationEnabled (status U)",
-      "notes": "Disabling removes a core survival pressure — announce. MED bind; wants Ghidra literal confirm."
+      "notes": "Disabling removes a core survival pressure — announce. MED bind; wants a literal confirm against the binary."
     },
     {
       "id": 4,
@@ -139,7 +139,7 @@
       "onlineSafety": "online-safe",
       "risk": "low",
       "v3_xref": "GameplaySetting.SandStormAutoSpawn (status U)",
-      "notes": "One of the 5 unexposed. MED bind; Ghidra confirm."
+      "notes": "One of the 5 unexposed. MED bind; binary confirm."
     },
     {
       "id": 6,
@@ -205,7 +205,7 @@
       "onlineSafety": "online-caution-announce",
       "risk": "low",
       "v3_xref": "sandworm.dune.Enabled",
-      "notes": "Confirm exact Sandworm.* literal in Ghidra before exposing the toggle write."
+      "notes": "Confirm exact Sandworm.* literal in the binary before exposing the toggle write."
     },
     {
       "id": 9,
@@ -227,7 +227,7 @@
       "onlineSafety": "window-recommended",
       "risk": "MED",
       "v3_xref": "GameplaySetting.SandwormSpawningType (status U)",
-      "notes": "One of the 5 unexposed. Enum values not enumerated; confirm valid set in Ghidra before exposing."
+      "notes": "One of the 5 unexposed. Enum values not enumerated; confirm the valid set in the binary before exposing."
     },
     {
       "id": 10,
@@ -455,7 +455,7 @@
       "jsonKey": "miningOutputMultiplier",
       "category": "HarvestingSettings",
       "human": "Hand-mining yield x",
-      "controls": "Global multiplier on hand/cutteray mining output (NOT hand-pick flora/fiber/dew)",
+      "controls": "Server-wide default for cutteray mining, stock (1x) since 2026-10-06. Each sietch sets its own harvest rate on top: see Harvest yield (per sietch).",
       "valueType": "float",
       "encoding": "\"<multiplier>\"",
       "range": "0.0 - 10.0",
@@ -477,7 +477,7 @@
       "jsonKey": "vehicleMiningOutputMultiplier",
       "category": "HarvestingSettings",
       "human": "Vehicle-mining yield x",
-      "controls": "Global multiplier on vehicle/sandcrawler mining output",
+      "controls": "Server-wide default for vehicle mining, stock (1x) since 2026-10-06. Each sietch sets its own harvest rate on top: see Harvest yield (per sietch).",
       "valueType": "float",
       "encoding": "\"<multiplier>\"",
       "range": "0.0 - 10.0",
@@ -504,7 +504,7 @@
       "encoding": "\"<multiplier>\"",
       "range": "0.0 - 10.0",
       "gaDefault": "2.5",
-      "liveValue": "3.5",
+      "liveValue": "2.5",
       "backingCvar": "SecurityZones.PvpResourceMultiplier",
       "bindType": "bin",
       "applyConfidence": "HIGH",
@@ -513,7 +513,7 @@
       "onlineSafety": "online-safe",
       "risk": "low",
       "v3_xref": "SecurityZones.PvpResourceMultiplier (rate-mult RE #22)",
-      "notes": "Live=3.5. GA default 2.5 (blessed-doc sample). Rate-only-sticks-via-snapshot knob."
+      "notes": "Live=2.5 (Funcom default) since 2026-10-06; was 3.5. Rate-only-sticks-via-snapshot knob."
     },
     {
       "id": 23,
@@ -580,7 +580,7 @@
       "CAT E folklore keys (SpiceTaxAmount, bServerPVE, bEnableBuildingStability, PlayerInventoryStartingSize, WormDetectionDistance, ThreatScale, m_BuildRange, bDeveloperMode)"
     ]
   },
-  "config_note": "These come from the server's configuration, not from the live feed above. They are listed here for clarity so nobody has to ask; the land claim cap is the game's stock value.",
+  "config_note": "These come from the server's configuration, not from the live feed above, and are listed so nobody has to ask. Rows marked native server setting show in the game's own Custom Settings screen on the server page. The land claim cap is the game's stock value.",
   "config_rows": [
     {
       "key": "landclaimStakingUnits",
@@ -605,6 +605,47 @@
       "value": 1,
       "unit": "s",
       "basis": "our setting: the stock placement ladder (60 s and up) is set to 1 second on every level"
+    },
+    {
+      "key": "cs.FiefdomLimit",
+      "human": "Sub-fiefs per player",
+      "controls": "How many sub-fiefs (bases) one player can hold across our sietches.",
+      "value": 5,
+      "unit": "",
+      "basis": "our setting since 2026-10-29, native server setting (Custom Settings screen); stock is 3"
+    },
+    {
+      "key": "cs.FuelBurnTimeMultiplier",
+      "human": "Generator and turbine fuel duration",
+      "controls": "How long a load of fuel lasts in generators and turbines. Doubled power uptime.",
+      "value": 2,
+      "unit": "x",
+      "basis": "our setting since 2026-09-18, native server setting (Custom Settings screen)"
+    },
+    {
+      "key": "cvar.MiningOutput",
+      "human": "Harvest yield (per sietch)",
+      "controls": "Hand gathering, cutteray and vehicle mining, x stock: Habbanya 1.5, Amtal 1.5, Deep Desert 1.5 PvE and 2.5 PvP, instances 1.5. PvP zones add Funcom's 2.5x on top.",
+      "value": 1.5,
+      "unit": "x",
+      "basis": "per-sietch GatheringAmount launch args since 2026-10-06; server-wide mining console variables back to stock 1.0"
+    },
+    {
+      "key": "cs.InventoryVolumeMultiplier",
+      "human": "Inventory volume",
+      "controls": "Carry volume of your inventory, on top of the keystone-based volume already in place.",
+      "value": 2,
+      "unit": "x",
+      "basis": "our setting since 2026-09-22, native server setting (Custom Settings screen)"
+    },
+    {
+      "key": "cs.BaseBackupToolTimeRestriction",
+      "human": "Base reconstruction cooldown",
+      "controls": "How soon the sub-fief console can be backed up again. Stock is 16 hours.",
+      "value": 10,
+      "unit": "s",
+      "basis": "our setting since 2026-09-18, native server setting (Custom Settings screen)"
     }
-  ]
+  ],
+  "_unpublished_config_rows_note": "Five combat keys (PlayerDamageToNPC, NPCHealth, both ShieldDamageAbsorption multipliers, NPCDamageToPlayer) are applied on the server but held out of config_rows by owner decision 2026-09-21 (waiting to see whether players notice). Add them back when the owner says so."
 }

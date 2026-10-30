@@ -4,7 +4,7 @@
   // the value hands off to GiftDialog -- the same POST /portal/gifts/send path
   // the Guilds page already uses -- and the server does the resolving. No
   // account id or controller id ever crosses the wire from here; that is
-  // deliberate (see docs/dune-research/v2-portal/SEND-SOLARI-DESIGN-2026-08-26.md
+  // deliberate (see the design notes (not published)
   // section 2) and is why this path has no IDOR surface. Do not "improve" it by
   // sending ids.
   //

@@ -25,6 +25,9 @@ export const PREF_DEFAULTS = Object.freeze({
   reach_recent: [],
   market_searches: [],
   activity_seen: null,
+  reading_font: false,
+  reading_size: 'm',
+  weekend_remind: false,
 });
 
 export const prefs = $state({

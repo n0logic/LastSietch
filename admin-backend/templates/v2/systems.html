@@ -14,6 +14,7 @@
 {# The admin edge sends no Cache-Control, so the ?v= key IS the cache bust.
    Bump it in the same commit as any content change to systems.css. #}
 <link rel="stylesheet" href="/admin/static/css/v2/systems.css?v=20260904a">
+<link rel="stylesheet" href="/admin/static/css/v2/systems-registry.css?v=20261030a">
 {% endblock %}
 {% block content %}
 <main class="v2-sys" data-sys-root data-poll-interval="15000"
@@ -40,6 +41,19 @@
 
   <section class="sys-grid" aria-label="Systems and health cards">
 
+    {# H4 and E1 (below) are read only and hydrate from systems-registry.js, not
+       systems.js: data-reg-card keeps them off the flag boards' poll. #}
+    <article class="sys-card sys-span-12" data-reg-card data-render="build"
+             data-src="/admin/api/dune/v2/systems/build">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Server build</h2>
+        <span class="sys-state" data-reg-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-reg-body>
+        <p class="sys-card__caption">Reading the hotfix watcher on <web-host>.</p>
+      </div>
+    </article>
+
     <article class="sys-card sys-span-8" data-sys-card data-render="flags"
              data-src="/admin/api/dune/v2/systems/flags">
       <div class="sys-card__header">
@@ -59,6 +73,17 @@
       </div>
       <div class="sys-card__body" data-sys-body>
         <p class="sys-card__caption">Reading the game host through the relay.</p>
+      </div>
+    </article>
+
+    <article class="sys-card sys-span-12" data-reg-card data-render="registry"
+             data-src="/admin/api/dune/v2/systems/registry">
+      <div class="sys-card__header">
+        <h2 class="sys-card__title">Flag registry: every gate, read only</h2>
+        <span class="sys-state" data-reg-state data-state="idle">loading</span>
+      </div>
+      <div class="sys-card__body" data-reg-body>
+        <p class="sys-card__caption">Reading every gate.</p>
       </div>
     </article>
 
@@ -145,4 +170,5 @@
 
 {% block scripts %}
 <script src="/admin/static/js/v2/systems.js?v=20260904a" defer></script>
+<script src="/admin/static/js/v2/systems-registry.js?v=20261030a" defer></script>
 {% endblock %}

@@ -68,7 +68,11 @@ _last_apply: dict = {}  # (user_id, verb) -> monotonic timestamp of last live ap
 # authoritative; these keep errors friendly and reject obviously bad input early.
 QTY_MIN, QTY_MAX = 1, 1000
 DUR_MIN, DUR_MAX = 0.0, 1.0
-XP_MIN, XP_MAX = 1, 10_000_000
+# 344,440 is the cumulative XP for level 200, so one call can never need more.
+XP_MIN, XP_MAX = 1, 344_440
+# AwardXP Category -> EXPEarnArea: Science=0, Exploration=2, any other string =
+# Combat (the design notes (not published) section 3).
+XP_CATEGORIES = ("Combat", "Science", "Exploration")
 WATER_MIN, WATER_MAX = 1, 100
 
 
@@ -299,11 +303,8 @@ async def v2_award_xp(request: Request, account_id: str, body: AwardXpRequest):
         )
 
     try:
-        if not isinstance(body.category, str) or not body.category.strip():
-            raise HTTPException(400, "category is required")
-        # Wrapper charset: [A-Za-z0-9_] (cat.replace("_","").isalnum()).
-        if len(body.category) > MAX_REASON or not body.category.replace("_", "").isalnum():
-            raise HTTPException(400, "category must be alphanumeric/underscore")
+        if body.category not in XP_CATEGORIES:
+            raise HTTPException(400, "category must be one of " + ", ".join(XP_CATEGORIES))
         if isinstance(body.experience, bool) or not isinstance(body.experience, int) \
                 or not (XP_MIN <= body.experience <= XP_MAX):
             raise HTTPException(400, f"experience must be an integer {XP_MIN}..{XP_MAX}")
@@ -316,7 +317,7 @@ async def v2_award_xp(request: Request, account_id: str, body: AwardXpRequest):
         _audit(False, {"result": f"validation_error: {exc.detail}"})
         raise
 
-    args = {"category": body.category.strip(), "experience": body.experience}
+    args = {"category": body.category, "experience": body.experience}
     try:
         res = await _dispatch("award-xp", acct, body.mode, user["username"], body.reason.strip(), args)
     except HTTPException as exc:

@@ -19,6 +19,7 @@
   import SealedPanel from '$lib/components/SealedPanel.svelte';
   import Modal from '$lib/components/Modal.svelte';
   import Notice from '$lib/components/Notice.svelte';
+  import Advanced from './Advanced.svelte';
 
   let status = $state('loading'); // 'loading' | 'error' | 'ready'
   let code = $state('');
@@ -126,7 +127,6 @@
         <p class="code mono">{code}</p>
         <p class="explain">Give this to another player and they can find you without a name, a spelling or a Discord handle. It is a payload, not a link: nothing scans through to a page.</p>
         {#if rotatedAt}<p class="rotated mono">Last rotated {when(rotatedAt)}</p>{/if}
-        <button class="btn" type="button" onclick={() => (confirmOpen = true)}>Rotate</button>
         {#if note}<Notice tone={note.tone} text={note.text} />{/if}
       </div>
 
@@ -158,6 +158,13 @@
       <button class="btn" type="submit" disabled={looking}>{looking ? 'Looking' : 'Look up'}</button>
     </form>
     {#if result}<Notice tone={result.tone} text={result.text} />{/if}
+
+    <div class="advanced-row">
+      <Advanced label="Advanced: rotate your code">
+        <p class="warn">Rotating mints a new code and retires this one. Anyone still holding the old code will not find you with it.</p>
+        <button class="btn" type="button" onclick={() => (confirmOpen = true)}>Rotate</button>
+      </Advanced>
+    </div>
   </CarvedSlab>
 {:else}
   <SealedPanel
@@ -221,7 +228,8 @@
     padding: var(--space-2) var(--space-4); border-radius: var(--radius-sm);
     color: var(--text); background: var(--metal-1); border: 1px solid var(--edge);
   }
-  .who .btn { margin-top: var(--space-3); }
+  .advanced-row { margin-top: var(--space-4); }
+  .advanced-row .btn { justify-self: start; }
   .btn:hover:not(:disabled) { border-color: var(--accent); }
   .btn:disabled { opacity: .45; cursor: not-allowed; }
   .btn.danger { color: var(--bg-deep); background: var(--ls-red); border-color: var(--ls-red); }

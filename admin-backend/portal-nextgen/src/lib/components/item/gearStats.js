@@ -4,7 +4,7 @@
 //
 // IMPORTANT: every numeric stat in this file is BASE (unscaled by the item's
 // in-game quality/grade). The runtime scaling curve is not persisted anywhere
-// we can read (see GHIDRA-GRADE-SCALING-2026-06-17) - a T3 item can show
+// we can read (see the grade-scaling notes) - a T3 item can show
 // 2-3x its base Damage on screen. Callers MUST label these as base values,
 // never present them as the live in-game number.
 import { getJSON } from '$lib/api.js';

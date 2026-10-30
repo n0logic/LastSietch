@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+import games_offline
 import update_orchestrator
 from auth import get_current_user, require_admin, require_csrf
 from database import get_db
@@ -22,6 +23,7 @@ async def trigger_update(request: Request, game_id: str):
     Returns 409 if an update is already running for this game."""
     user = require_admin(request)
     require_csrf(request, user)
+    games_offline.refuse_if_offline(game_id)
 
     try:
         game = await call_relay(f"/games/{game_id}")

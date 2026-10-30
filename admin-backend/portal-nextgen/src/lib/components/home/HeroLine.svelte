@@ -47,7 +47,7 @@
   <p class="facts mono">
     {#if onlinePlayers != null}<span>{onlinePlayers} online</span>{/if}
     {#if stormActive}
-      <span class="warn">storm sweeping now</span>
+      <span class="warn">storm on the board</span>
     {:else if stormNextEtaUtc}
       <span>next storm <LiveCountdown target={stormNextEtaUtc} /></span>
     {/if}

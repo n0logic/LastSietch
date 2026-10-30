@@ -7,6 +7,7 @@
   // is the wrong semantics here. A Karum listing is ONE specific stack from ONE
   // named seller at ONE price, and collapsing them would hide exactly what a buyer
   // is choosing between.
+  import { base } from '$app/paths';
   import { karum, loadBoard, loadMoreBoard } from '$lib/karum.svelte.js';
   import KarumCard from './KarumCard.svelte';
   import KarumWantedCard from './KarumWantedCard.svelte';
@@ -135,6 +136,7 @@
           ? `No open request can be filled with a ${gradeLabel(karum.board.grade)} item. Clear the grade filter to see the rest.`
           : 'There are no open requests. Post what you are looking for.'}
     </p>
+    <a class="howto" href={`${base}/help#howto-selling`}>The Karum or the Exchange: how selling works</a>
   {:else}
     <div class="grid">
       <!-- The card follows the ROW's shape, not the tab: a listing carries listing_id, a
@@ -199,6 +201,7 @@
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--space-3); }
   .card-skel { aspect-ratio: 16 / 13; border-radius: var(--radius-sm); }
   .hollow { color: var(--text-muted); font-size: var(--text-sm); margin: var(--space-4) 0; }
+  .howto { display: inline-block; margin-bottom: var(--space-4); font-size: var(--text-sm); color: var(--accent-text); }
   .more-btn {
     margin: var(--space-4) auto 0; display: block;
     font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: .12em; text-transform: uppercase;

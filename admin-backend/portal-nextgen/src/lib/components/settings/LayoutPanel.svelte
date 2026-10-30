@@ -11,6 +11,7 @@
   import { auth } from '$lib/auth.svelte.js';
   import { prefs, getPref, setPref } from '$lib/prefs.svelte.js';
   import CarvedSlab from '$lib/components/CarvedSlab.svelte';
+  import Advanced from './Advanced.svelte';
 
   const MAP_KEYS = ['map_hidden', 'map_viewer'];
   const VIEWER_LABEL = { carved: 'Board', holo: 'Holo table' };
@@ -89,28 +90,29 @@
   </div>
 
   <div class="maps">
-    <span class="lbl mono">Map defaults</span>
-    {#if rows.length === 0}
-      <p class="explain">No map defaults saved yet. Save a layer preset on any map and it appears here.</p>
-    {:else}
-      <ul class="list">
-        {#each rows as row (`${row.scope}|${row.mapKey}`)}
-          <li class="entry">
-            <span class="who">{row.who}</span>
-            <span class="board mono">{row.mapKey}</span>
-            <span class="detail">
-              {row.hidden} {row.hidden === 1 ? 'layer' : 'layers'} hidden{row.viewer ? ` · ${row.viewer}` : ''}
-            </span>
-            <button
-              class="clear mono"
-              type="button"
-              aria-label="Clear {row.mapKey} default for {row.who}"
-              onclick={() => clearMap(row.scope, row.mapKey)}
-            >Clear</button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
+    <Advanced label="Advanced: map defaults">
+      {#if rows.length === 0}
+        <p class="explain">No map defaults saved yet. Save a layer preset on any map and it appears here.</p>
+      {:else}
+        <ul class="list">
+          {#each rows as row (`${row.scope}|${row.mapKey}`)}
+            <li class="entry">
+              <span class="who">{row.who}</span>
+              <span class="board mono">{row.mapKey}</span>
+              <span class="detail">
+                {row.hidden} {row.hidden === 1 ? 'layer' : 'layers'} hidden{row.viewer ? ` · ${row.viewer}` : ''}
+              </span>
+              <button
+                class="clear mono"
+                type="button"
+                aria-label="Clear {row.mapKey} default for {row.who}"
+                onclick={() => clearMap(row.scope, row.mapKey)}
+              >Clear</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </Advanced>
   </div>
 </CarvedSlab>
 

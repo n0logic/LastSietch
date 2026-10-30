@@ -25,8 +25,9 @@ FUNCOM_ID_RE = re.compile(r"^[^\s#]{1,32}#[0-9]{1,10}$")
 # Flip "verified" to True per row once the real <map>.<dim> is captured.
 CHAT_INSTANCES = {
     "habbanya": {"label": "Habbanya (Hagga Basin, partition 1)", "map": "HaggaBasin", "dim": 0, "verified": False},
-    "kulon": {"label": "Kulon (Hagga Basin, partition 32)", "map": "HaggaBasin", "dim": 0, "verified": False},
-    # dim from the DB dimension_index pairing verified 2026-08-27 (1->0, 32->1, 33->2);
+    # Kulon (partition 32) closed 2026-10-28; its row is gone, so a stale "kulon"
+    # instance is refused by the 400 below rather than routed anywhere.
+    # dim from the DB dimension_index pairing verified 2026-08-27 (1->0, 33->2);
     # whether chat routing keys follow dimension_index is still uncaptured, so this row
     # stays verified: False (dry-run-forced) like its siblings.
     "amtal": {"label": "Amtal (Hagga Basin, partition 33, full PvP)", "map": "HaggaBasin", "dim": 2, "verified": False},

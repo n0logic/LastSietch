@@ -14,6 +14,8 @@
   import { prefs, charScope, getPref, setPref } from '$lib/prefs.svelte.js';
   import SpiceHudConsole from '$lib/components/map/SpiceHudConsole.svelte';
   import ViewerToggle from '$lib/components/map/ViewerToggle.svelte';
+  import TodToggle from '$lib/components/map/TodToggle.svelte';
+  import { readMode, saveMode } from '$lib/map/holo/light.js';
   import LayerTree from '$lib/components/map/LayerTree.svelte';
   import InstrumentTabs from '$lib/components/map/InstrumentTabs.svelte';
   import MapPopup from '$lib/components/map/MapPopup.svelte';
@@ -23,6 +25,7 @@
   import WaypointPanel from '$lib/components/map/WaypointPanel.svelte';
   import RescueButton from '$lib/components/map/RescueButton.svelte';
   import { createMapEngine } from '$lib/map/engine.js';
+  import { fetchDoorPins } from '$lib/map/sietchPins.js';
   import { liveStream } from '$lib/map/stream.js';
   import { CLUSTER_ZOOM_MAX } from '$lib/map/markers.js';
   import {
@@ -134,7 +137,7 @@
   // Debug-override chip: when ?holoLayout=N forces a baked terrain, say so on
   // screen so A/B runs across the 12 layouts stay legible. SSR-safe (both
   // helpers return null without window) and invisible on the normal path.
-  const dbgLayout = forcedLayout();
+  let dbgLayout = $derived(forcedLayout(key));   // DD only: Hagga's layout 0 is its own bake
   const dbgRelief = forcedRelief();
 
   function readViewerPref() {
@@ -190,6 +193,7 @@
     holoActive = true;
     holoMounting = false;
     viewer.setTheme(currentThemeMode());
+    viewer.setTimeOfDay(todMode);
     // Recreate the engine so opts.projector is present at construction (the
     // engine is keyed on `key` + `viewerRev`; recreation just re-fetches /data).
     viewerRev += 1;
@@ -472,6 +476,28 @@
   // Board self-pip freshness: push the chrome's meFresh clock through the
   // engine so the board pin and the chip degrade in lockstep (Ibad only
   // while the /me feed is provably alive). The engine self-heals to fresh
+  // Seven Nights: tonight's porch and stall doors (lantern markers). Pins come
+  // only from the signed-in player's /portal/sietch/state; fetched once per board
+  // and never outside the event window or while signed out.
+  $effect(() => {
+    const eng = engine;
+    if (status !== 'ready' || !eng) return;
+    const k = key;
+    const signedIn = authed;
+    untrack(() => {
+      fetchDoorPins(signedIn).then((rows) => { if (k === key && engine === eng) eng.applyFix?.('sietchSpots', rows); });
+    });
+  });
+
+  // Seven Nights own-dot skin: the viewer's own sietch_mapdot pref (server-checked
+  // against a delivered Stall order). Never applied to anyone else's dot.
+  $effect(() => {
+    const eng = engine;
+    if (status !== 'ready' || !eng) return;
+    const skin = authed ? getPref('sietch_mapdot') : null;
+    untrack(() => eng.setMeSkin?.(skin));
+  });
+
   // on every /me fix, so pushing true again is idempotent.
   $effect(() => {
     const eng = engine;
@@ -520,12 +546,9 @@
     engine?.setShowOthers?.({ ...next });
   }
   let isHagga = $derived(meta?.key === 'hagga');
-  let othersCount = $derived(counts?.othersAvailable ? (counts.otherPlayers || 0) : null);
-  // "Here" count: per-sietch live others on Hagga (the /players total spans both
-  // sietches), else the whole-map total.
-  let hereCount = $derived(
-    isHagga && othersCount != null ? othersCount : (counts?.mapPlayers ?? 0)
-  );
+  // Owner ruling 2026-09-30: total population only. No per-world "here" count
+  // and no count on the Players chip; the header shows the server-wide figure.
+  let othersCount = null;
 
   let meCounts = $derived({
     self: me?.available && me.self ? 1 : 0,
@@ -544,16 +567,26 @@
   // The server stays authoritative; unknown states (no /me yet, feed down)
   // leave the button usable and let the server answer.
   let rescueGate = $derived.by(() => {
-    if (key === 'deep-desert') {
-      return { reason: 'Self-rescue is not available in the Deep Desert.' };
+    // Deep Desert: PvE (partition 8, dim 0) only; ornithopter pilots are always
+    // a destination there, so the own-base check does not apply.
+    const dd = key === 'deep-desert';
+    if (dd && !(me?.available && me.self)) {
+      return { reason: 'Self-rescue is only available in the Deep Desert PvE instance.' };
     }
     if (me?.available) {
       if (!me.self) {
         return { reason: 'We cannot see your character on this board right now.' };
       }
+      if (dd && Number(me.self.part) === 31 && Number(me.self.dim) === 1) {
+        return { reason: 'Self-rescue is not available on PvP maps.' };
+      }
+      if (dd && !(Number(me.self.part) === 8 && Number(me.self.dim) === 0)) {
+        return { reason: 'Self-rescue is only available in the Deep Desert PvE instance.' };
+      }
       if (!me.self.online) {
         return { reason: 'You need to be logged in to the game to be rescued.' };
       }
+      if (dd) return null;
       const sameDim = (me.bases || []).some((b) => b.dim == null || me.self.dim == null
         || Number(b.dim) === Number(me.self.dim));
       if (!sameDim) {
@@ -787,10 +820,20 @@
   // renders as hotspots; the legend note explains the count mismatch. Only
   // shown for boards that actually have an ore category.
   let clusterNote = $derived(
-    zoom < CLUSTER_ZOOM_MAX && legend.some((c) => c.key === 'ore')
-      ? 'Dense ore shows as hotspots. Zoom in for single nodes.'
-      : ''
+    holoActive
+      ? (zoom < 6 ? 'Dense layers group into counted icons. Zoom in to split them.' : '')
+      : zoom < CLUSTER_ZOOM_MAX && legend.some((c) => c.key === 'ore')
+        ? 'Dense ore shows as hotspots. Zoom in for single nodes.'
+        : ''
   );
+
+  // War-Table light: shared with the Sand Table through the same storage key
+  let todMode = $state(readMode());
+  function setTodMode(m) {
+    todMode = m;
+    saveMode(m);
+    if (holoViewer) holoViewer.setTimeOfDay(m);
+  }
 
   // The board eases flat on first engagement and stays flat for the session, so
   // the tilt is a one-time arrival flourish, never a lean-back on pointer-leave.
@@ -816,9 +859,12 @@
       <div class="head-right">
         {#if counts?.playersAvailable}
           <p class="players mono" class:stale={!playersLive}
-             title={playersLive ? 'Players on this map / online server-wide' : 'Last read; player feed is quiet'}>
-            <span class="players-here">{hereCount}</span> here | {counts.serverPlayers} online{#if !playersLive} | last read{/if}
+             title={playersLive ? 'Players online server-wide' : 'Last read; player feed is quiet'}>
+            <span class="players-here">{counts.serverPlayers}</span> online{#if !playersLive} | last read{/if}
           </p>
+        {/if}
+        {#if holoActive}
+          <TodToggle mode={todMode} onchange={setTodMode} />
         {/if}
         {#if holoAvailable}
           <ViewerToggle viewerKind={activeViewerKind} {holoAvailable} onchange={setViewerPref} />
@@ -847,7 +893,7 @@
             class="map-viewport"
             bind:this={viewportEl}
             role="application"
-            aria-label="{boardName || 'Map'} board: drag to pan, pinch or buttons to zoom"
+            aria-label="{boardName || 'Map'} board: drag to pan, pinch or buttons to zoom{holoActive ? ', right-drag or two-finger twist to rotate' : ''}"
           >
             <div class="map-stage" class:holo-active={holoActive} bind:this={stageEl}>
               <div class="map-backdrop" bind:this={backdropEl}></div>
@@ -923,7 +969,7 @@
             {/if}
             {#if isHagga}
               <div class="me-row">
-                <OthersChips count={othersCount} show={showOthers} onchange={onShowOthersChange} />
+                <OthersChips count={othersCount} show={showOthers} signedIn={authed} onchange={onShowOthersChange} />
               </div>
             {/if}
             <LayerTree {legend} {hidden} defaults={layerDefaults} mapKey={key} onchange={onLayersChange}
@@ -940,7 +986,7 @@
 
     {#if counts?.total}
       <p class="fineprint mono">
-        {counts.total.toLocaleString()} points on the board. Ibad blue marks streaming values.
+        {counts.total.toLocaleString()} points on the board. Blue values update live.
       </p>
     {/if}
 
@@ -955,7 +1001,7 @@
       {/if}
       {#if isHagga}
         <div class="me-row">
-          <OthersChips count={othersCount} show={showOthers} onchange={onShowOthersChange} />
+          <OthersChips count={othersCount} show={showOthers} signedIn={authed} onchange={onShowOthersChange} />
         </div>
       {/if}
       <LayerTree {legend} {hidden} defaults={layerDefaults} mapKey={key} onchange={onLayersChange}

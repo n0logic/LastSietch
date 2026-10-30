@@ -5,9 +5,11 @@
   import { version } from '$app/environment';
   import { page } from '$app/stores';
   import { auth, loadAuth, logout, LOGIN_URL } from '$lib/auth.svelte.js';
-  import { loadPrefs } from '$lib/prefs.svelte.js';
+  import { prefs, loadPrefs } from '$lib/prefs.svelte.js';
+  import { applyReadingFont, applyReadingSize } from '$lib/readingFont.js';
   import { api } from '$lib/api.js';
   import { mailbox, refreshUnread } from '$lib/mailbox.svelte.js';
+  import { chatBadge, chatUnreadTotal, watchChatUnread } from '$lib/chatBadge.svelte.js';
   import { exchange, refreshAlerts } from '$lib/exchange.svelte.js';
   import { sendSolari, closeSendSolari } from '$lib/sendSolari.svelte.js';
   import BrandMark from '$lib/components/BrandMark.svelte';
@@ -40,6 +42,7 @@
     // A group without `hub` keeps the unclickable chrome label it shipped with.
     { group: 'Desert', hub: `${base}/desert`, items: [
       { label: 'Maps', href: `${base}/maps`, v2: true },
+      { label: 'Sand Table', href: `${base}/world`, v2: true },
     ] },
     // The Karum sits next to Exchange on purpose: they are the two places you trade,
     // and the whole pitch of the Karum is that it is the OTHER one.
@@ -55,20 +58,24 @@
       { label: 'Bases', href: `${base}/bases`, v2: true },
       { label: 'Solido', href: `${base}/solido`, v2: true },
     ] },
-    // Chat sits next to Guilds (wave 11): it is the other place you talk to the
-    // sietch, and its guild room is the one a guild member reaches for first.
-    // Mailbox stays off the bar on the bell, so this is as close to "between
-    // Guilds and Mailbox" as the grouped IA gets.
+    // Chat is not here: it is the button beside the mail bell, with its own
+    // unread badge (owner ruling 2026-10-20). Same ruling set this order.
     { group: 'Sietch', items: [
       { label: 'Guilds', href: `${base}/guilds`, v2: true },
-      { label: 'Chat', href: `${base}/chat`, v2: true },
       { label: 'Events', href: `${base}/events`, v2: true },
+      // Halloween 2026 (Seven Nights of the Sietch). Gated on the event flag, so
+      // the entry leaves the bar the moment LASTSIETCH_SIETCH_NIGHTS_ENABLED is off.
+      { label: 'Seven Nights', href: `${base}/sietch`, v2: true, feature: 'sietch', badge: 'live' },
+      { label: 'Amtal', href: `${base}/amtal`, v2: true, feature: 'amtal' },
       { label: 'Reports', href: `${base}/reports`, v2: true, feature: 'reports' },
       { label: 'Landsraad', href: `${base}/landsraad`, v2: true },
+      { label: 'Standings', href: `${base}/standings`, v2: true },
     ] },
   ];
-  let reportsEnabled = $state(false);
-  let visibleNav = $derived(NAV.map((section) => ({ ...section, items: section.items.filter((item) => item.feature !== 'reports' || reportsEnabled) })));
+  // Feature-gated nav items (item.feature) are hidden until /portal/features says
+  // that gate is on. Fail closed: an unread features map hides every gated item.
+  let navFeatures = $state({});
+  let visibleNav = $derived(NAV.map((section) => ({ ...section, items: section.items.filter((item) => !item.feature || navFeatures[item.feature] === true) })));
   let path = $derived($page.url.pathname);
   function navActive(item) {
     if (!item.v2) return false;
@@ -125,10 +132,17 @@
 
   onMount(() => {
     applyStoredAppearance();
-    api.server.features().then((data) => { reportsEnabled = data?.features?.reports === true; }).catch(() => { reportsEnabled = false; });
+    api.server.features().then((data) => { navFeatures = (data && data.features) || {}; }).catch(() => { navFeatures = {}; });
     // Preferences read after the session is known: the mirror paints first,
     // the account doc replaces it once /portal/me has answered.
-    loadAuth().then(() => loadPrefs());
+    loadAuth().then(() => loadPrefs()).then(() => {
+      // A reading font (and its size) saved on the account follows the player to this browser;
+      // with nothing saved there, the device choice stands.
+      const rf = prefs.identity.reading_font;
+      if (prefs.status === 'ready' && typeof rf === 'boolean') applyReadingFont(rf);
+      const rsz = prefs.identity.reading_size;
+      if (prefs.status === 'ready' && typeof rsz === 'string') applyReadingSize(rsz);
+    });
     pollStatus();
     const iv = setInterval(pollStatus, 45000);
     return () => clearInterval(iv);
@@ -150,6 +164,15 @@
     else if (auth.status === 'anon') { alertsLoaded = false; }
   });
   let firedAlerts = $derived(auth.status === 'authed' ? (exchange.firedCount || 0) : 0);
+
+  // Chat button beside the bell. Fails closed on the chat gate like the gated
+  // nav items; the badge polls only while that button can be shown.
+  let showChat = $derived(auth.status === 'authed' && navFeatures.chat === true && !chatBadge.dark);
+  let chatUnread = $derived(showChat ? chatUnreadTotal() : 0);
+  let chatActive = $derived(path.startsWith(`${base}/chat`));
+  $effect(() => {
+    if (auth.status === 'authed' && navFeatures.chat === true) return watchChatUnread();
+  });
 </script>
 
 <a class="skip-link" href="#main-content">Skip to content</a>
@@ -176,6 +199,12 @@
 
       {#if auth.status === 'authed'}
         <div class="account">
+          {#if showChat}
+            <a class="chat-btn" class:on={chatActive} href={`${base}/chat`} aria-current={chatActive ? 'page' : undefined} aria-label={chatUnread > 0 ? `Chat, ${chatUnread} unread` : 'Chat'} title="Chat">
+              <svg class="chat-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.5h15v10h-9l-4.5 3.5v-3.5h-1.5z" /></svg>
+              {#if chatUnread > 0}<span class="bell-badge mono">{chatUnread > 99 ? '99+' : chatUnread}</span>{/if}
+            </a>
+          {/if}
           <a class="bell" href={`${base}/mailbox`} aria-label={mailbox.unread > 0 ? `Mailbox, ${mailbox.unread} unread` : 'Mailbox'} title="Mailbox">
             <span class="bell-glyph" aria-hidden="true">✉</span>
             {#if mailbox.unread > 0}<span class="bell-badge mono">{mailbox.unread > 99 ? '99+' : mailbox.unread}</span>{/if}
@@ -227,7 +256,7 @@
                 href={item.href}
                 aria-current={navActive(item) ? 'page' : undefined}
                 {...item.v2 ? {} : { 'data-sveltekit-reload': true }}
-              >{item.label}{#if item.badge === 'alerts' && firedAlerts > 0}<span class="nav-badge mono" aria-label="{firedAlerts} price alerts fired">{firedAlerts > 99 ? '99+' : firedAlerts}</span>{/if}</a>
+              >{item.label}{#if item.badge === 'alerts' && firedAlerts > 0}<span class="nav-badge mono" aria-label="{firedAlerts} price alerts fired">{firedAlerts > 99 ? '99+' : firedAlerts}</span>{/if}{#if item.badge === 'live'}<span class="nav-live">Live</span>{/if}</a>
             {/each}
           </div>
         </div>
@@ -263,9 +292,10 @@
       <span class="ftr-sep" aria-hidden="true">·</span>
       <a href="/portal/account" data-sveltekit-reload>Classic</a>
       <span class="ftr-sep" aria-hidden="true">·</span>
-      <a href="https://discord.gg/your-invite" rel="noopener" target="_blank">Discord</a>
-      <span class="ftr-sep" aria-hidden="true">·</span>
       <a href="https://ko-fi.com/lastsietch" rel="noopener" target="_blank">Tip Jar</a>
+      <span class="ftr-sep" aria-hidden="true">·</span>
+      <a class="ftr-icon" href="https://discord.gg/your-invite" rel="noopener" target="_blank" aria-label="Last Sietch on Discord" title="Discord"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg></a>
+      <a class="ftr-icon" href="https://www.facebook.com/profile.php?id=61594528787402" rel="noopener" target="_blank" aria-label="Last Sietch on Facebook" title="Facebook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.401 0 .955.042 1.468.103a8.68 8.68 0 0 1 1.141.195v3.325a8.623 8.623 0 0 0-.653-.036 26.805 26.805 0 0 0-.733-.009c-.707 0-1.259.096-1.675.309a1.686 1.686 0 0 0-.679.622c-.258.42-.374.995-.374 1.752v1.297h3.919l-.386 2.103-.287 1.564h-3.246v8.245C19.396 23.238 24 18.179 24 12.044c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.628 3.874 10.35 9.101 11.647Z"/></svg></a>
     </span>
   </div>
 </footer>
@@ -324,16 +354,19 @@
 
   /* Account chip: sign-in entry point + linked identity readout. */
   .account { display: inline-flex; align-items: center; gap: var(--space-2); }
-  /* Mailbox bell, settings gear and the help question mark share their chrome
-     (amber on hover); on the bell the unread badge is the only lit element. */
-  .bell, .gear, .help {
+  /* Chat, mailbox bell, settings gear and the help question mark share their
+     chrome (amber on hover); on chat and the bell the unread badge is the only
+     lit element. */
+  .chat-btn, .bell, .gear, .help {
     position: relative; display: inline-flex; align-items: center; justify-content: center;
     width: 2rem; height: 2rem; text-decoration: none;
     color: var(--text-muted); border: 1px solid var(--border); border-radius: var(--radius-sm);
     background: var(--bg-elevated); transition: border-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
   }
-  .bell:hover, .gear:hover, .help:hover { border-color: var(--accent); color: var(--text); }
+  .chat-btn:hover, .bell:hover, .gear:hover, .help:hover { border-color: var(--accent); color: var(--text); }
+  .chat-btn.on { border-color: var(--accent); color: var(--accent-bright); }
   .bell-glyph, .gear-glyph, .help-glyph { font-size: var(--text-base); line-height: 1; }
+  .chat-glyph { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
   .help { margin-left: var(--space-1); }
   .bell-badge {
     position: absolute; top: -6px; right: -6px;
@@ -434,6 +467,10 @@
   }
   /* Mirrors .bell-badge, inline instead of pinned: a count of things that have
      actually happened, so it earns Ibad rather than the amber chrome. */
+  .nav-live {
+    margin-left: 6px; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase; color: var(--bg-deep); background: var(--accent-text);
+  }
   .nav-badge {
     margin-left: 5px; min-width: 1.05rem; height: 1.05rem; padding: 0 3px;
     display: inline-flex; align-items: center; justify-content: center;
@@ -465,6 +502,8 @@
   }
   .ftr a:hover { color: var(--accent); }
   .ftr-sep { opacity: .5; }
+  .ftr-icon { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; }
+  .ftr-icon svg { width: 16px; height: 16px; fill: currentColor; }
   .ftr-ver { margin-left: var(--space-2); opacity: .7; }
   .ftr-ver:hover { opacity: 1; }
   .topbar, .shell, .ftr { margin-left: 104px; min-width: 0; }
@@ -476,7 +515,7 @@
   .navgroup-label { opacity: 1; font: 500 13px var(--font-sans); letter-spacing: 0; text-transform: none; padding: 8px 16px 8px 0; }
   .navgroup-links { align-items: center; }
   .navlink { font: 400 14px var(--font-sans); letter-spacing: 0; text-transform: none; padding: 8px 14px; }
-  .bell, .gear, .help { width: 40px; height: 40px; }
+  .chat-btn, .bell, .gear, .help { width: 44px; height: 44px; }
   .acct-out { font-size: 12px; }
   @media (max-width: 1100px) { .brand-text, .srv-pill, .acct-handle { display: none; } }
   @media (max-width: 759px) {

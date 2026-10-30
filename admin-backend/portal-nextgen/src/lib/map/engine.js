@@ -7,24 +7,29 @@
 import {
   createView, baseScale, setZoom, panToNormalized, screenToNormalized,
   applyStageTransform, normalizedToWorld, attachGestures,
+  setOrbit, stepHeading, orbitLerp, ORBIT_DEFAULT,
 } from './transform.js';
+import { createCompass } from './compass.js';
 import {
   supersample, createIconCache, drawCanvas, nearestMarker,
   computeClusters, clusterAt, CLUSTER_ZOOM_MAX, CLUSTER_RING_PX,
 } from './markers.js';
 import { drawGrid, sectorCenter } from './grid.js';
 import { drawSpice, drawWorms, drawStorm } from './overlays.js';
+import { stormFootprint, hitFootprint, stormLabel } from './stormFootprint.js';
 import { drawMe, wormProximity } from './me.js';
 import { drawOtherPlayers, countOtherPlayers } from './players.js';
 import { drawWaypoints } from './waypoints.js';
+import { drawSietchSpots } from './sietchSpots.js';
 import { createWormAudio } from './audio.js';
 import { createReckoner, prefersReducedMotion } from './reckon.js';
 import {
-  createPollers, deriveConsole, ME_INTERVAL_MS, ME_STALE_MS,
+  createPollers, deriveConsole, mediumsForDim, ME_INTERVAL_MS, ME_STALE_MS,
 } from './pollers.js';
 
 const CLICK_HIT_PX = 18;   // V1 popup hit radius (screen px)
 const HOVER_HIT_PX = 14;   // V1 tooltip hit radius
+const STORM_HOVER_FRESH_MS = 20 * 60 * 1000;   // = the storm layers' live-position window
 
 // hostEls: { viewport, stage, backdrop, canvas, svg }
 // opts: { key, quality?, projector?, on: { onStatus, onLegend, onCounts,
@@ -32,7 +37,9 @@ const HOVER_HIT_PX = 14;   // V1 tooltip hit radius
 //         onProximity } }
 // opts.projector (M3): a 3D viewer supplies { project(nx,ny), unproject(mx,my) }
 // so hit-testing stays engine-side but converts screen<->normalized through the
-// holo camera instead of the affine 2.5D transform. Absent = today's behavior.
+// holo camera instead of the affine 2.5D transform. It also turns on the orbit
+// gestures (view.azimuth / view.tilt, carried in onViewChange) and the heading
+// compass, since only the holo camera rotates. Absent = today's behavior.
 // onScene (M3): a plain spatial snapshot emitted on every spatial change; the
 // carved path draws overlays into the SVG directly, a holo viewer renders from
 // this snapshot. No new derivation; reuses values the engine already holds.
@@ -73,18 +80,24 @@ export function createMapEngine(hostEls, opts) {
     // so board pin and chip degrade in lockstep; a new fix self-heals to true.
     meFresh: true,
     meShow: { self: true, bases: true, vehicles: true },
+    // Own-dot skin from the player's prefs (sietch_mapdot), e.g. 'lantern'; null
+    // is the stock pin. Only ever drawn for the viewer's own dot.
+    meSkin: null,
     // Live OTHER players + world vehicles (Hagga only; public positions feed).
     // Filtered to the selected sietch by partition at draw time. otherCount is
     // the count for the SELECTED sietch (for the chrome readout).
     otherPlayers: [], otherVehicles: [], othersAtMs: null, otherCount: 0,
     showOthers: { players: true, vehicles: true },
     waypoints: [], wpHover: [],
+    // Seven Nights public doors for tonight (chrome-fed; empty outside the event).
+    snSpots: [], snHover: [],
     // Ore hotspots: zoom-independent, recomputed on data/hidden change;
     // shown only below CLUSTER_ZOOM_MAX (clustersShown tracks the crossing).
     clusters: [], clusterMembers: null, clustersShown: false,
     interacting: false,
   };
   const view = createView(1000);
+  let compass = null;   // heading control, holo only (mounted with the gestures)
 
   function cb(name, payload) {
     if (on[name]) on[name](payload);
@@ -129,7 +142,7 @@ export function createMapEngine(hostEls, opts) {
     return state.instance ? state.instance.dim : null;
   }
 
-  // The selected instance's partition (Hagga 1=Habbanya / 32=Kulon / 33=Amtal),
+  // The selected instance's partition (Hagga 1=Habbanya / 33=Amtal),
   // else null (DD/hubs discriminate by dim). The authoritative sietch split for
   // the me layer and the live other-players layer.
   function currentPart() {
@@ -141,7 +154,7 @@ export function createMapEngine(hostEls, opts) {
     state.spiceHover = drawSpice(svg, {
       hasSpice: !!meta.has_spice, grid: meta.grid, viewUnits: view.view,
       hidden: state.hidden, candidates: meta.spice_candidates,
-      candidateCoords: meta.spice_candidate_coords, mediums: meta.spice_mediums,
+      candidateCoords: meta.spice_candidate_coords, mediums: dimMediums(),
       spice: state.spice, dim: currentDim(),
     });
   }
@@ -159,7 +172,7 @@ export function createMapEngine(hostEls, opts) {
     drawStorm(svg, {
       hasStorms: !!meta.has_storms, hidden: state.hidden,
       sandstorm: state.sandstorm, dim: currentDim(),
-      grid: meta.grid, viewUnits: view.view, reckoner: reckoner,
+      grid: meta.grid, viewUnits: view.view, reckoner: reckoner, reduce: reduceMotion,
     });
   }
 
@@ -178,7 +191,13 @@ export function createMapEngine(hostEls, opts) {
       authed: state.meAuthed, me: state.me, show: state.meShow,
       dim: currentDim(), part: currentPart(), viewUnits: view.view,
       els: state.meEls, reckoner: reckoner, intervalMs: ME_INTERVAL_MS,
-      fresh: state.meFresh,
+      fresh: state.meFresh, skin: state.meSkin,
+    });
+  }
+
+  function redrawSietchSpots() {
+    state.snHover = drawSietchSpots(svg, {
+      list: state.snSpots, mapKey: meta.key, part: currentPart(), viewUnits: view.view,
     });
   }
 
@@ -265,8 +284,58 @@ export function createMapEngine(hostEls, opts) {
       state.clustersShown = show;
       redrawMarkers();
     }
-    cb('onViewChange', { zoom: view.zoom, panX: view.panX, panY: view.panY,
-                         interacting: state.interacting });
+    if (compass) compass.update(view.azimuth);
+    cb('onViewChange', viewModel(state.interacting));
+  }
+
+  function viewModel(interacting) {
+    return { zoom: view.zoom, panX: view.panX, panY: view.panY,
+             azimuth: view.azimuth, tilt: view.tilt, interacting: interacting };
+  }
+
+  // ---- holo orbit (azimuth/tilt) ----------------------------------------------
+  // Rotation exists only with a projector (holo); the carved board never sees
+  // it. Animated steps/reset ease over ORBIT_MS; reduced motion snaps.
+  const ORBIT_MS = 350;
+  let orbitAnim = null;   // { raf, to }
+
+  function cancelOrbitAnim() {
+    if (orbitAnim) { cancelAnimationFrame(orbitAnim.raf); orbitAnim = null; }
+  }
+
+  function animateOrbit(to) {
+    cancelOrbitAnim();
+    if (reduceMotion) {
+      setOrbit(view, to.azimuth, to.tilt);
+      pushTransform();
+      return;
+    }
+    const from = { azimuth: view.azimuth, tilt: view.tilt };
+    const t0 = performance.now();
+    orbitAnim = { raf: 0, to: to };
+    function frame(now) {
+      if (state.destroyed || !orbitAnim) return;
+      const t = Math.max(0, Math.min(1, (now - t0) / ORBIT_MS));   // rAF time can precede t0
+      const e = 1 - Math.pow(1 - t, 3);
+      const o = orbitLerp(from, to, e);
+      setOrbit(view, o.azimuth, o.tilt);
+      pushTransform();
+      if (t < 1) orbitAnim.raf = requestAnimationFrame(frame);
+      else orbitAnim = null;
+    }
+    orbitAnim.raf = requestAnimationFrame(frame);
+  }
+
+  // dir +1 clockwise / -1 counter, chained from an in-flight step's target.
+  function rotateStep(dir) {
+    if (!opts.projector || state.destroyed) return;
+    const base = orbitAnim ? orbitAnim.to : view;
+    animateOrbit({ azimuth: stepHeading(base.azimuth, dir), tilt: base.tilt });
+  }
+
+  function resetOrbit() {
+    if (!opts.projector || state.destroyed) return;
+    animateOrbit({ azimuth: ORBIT_DEFAULT.azimuth, tilt: ORBIT_DEFAULT.tilt });
   }
 
   function setupBackdrop() {
@@ -281,14 +350,31 @@ export function createMapEngine(hostEls, opts) {
   }
 
   // ---- data-out models ----------------------------------------------------
+  // The selected instance's medium sites (pollers.mediumsForDim): board, holo,
+  // legend and console all read this one per-dim truth.
+  function dimMediums() {
+    return mediumsForDim(meta, state.spice, currentDim());
+  }
+
+  // Re-emit the legend only when the per-dim medium count/state changes (a new
+  // /live read or an instance switch), not on every 10 s poll.
+  let legendSig = null;
+  function emitLegend() {
+    const m = dimMediums();
+    const sig = m.length + ':' + m.filter(function (x) { return x && x[3] === true; }).length;
+    if (sig === legendSig) return;
+    legendSig = sig;
+    cb('onLegend', legendModel());
+  }
+
   function legendModel() {
-    const mediums = meta.spice_mediums || [];
+    const mediums = dimMediums();
     const medActive = mediums.filter(function (m) { return m && m[3] === true; }).length;
     // Medium-count enrichment (V1 setMediumLegendCount, as data).
     const medTitle = medActive
       ? medActive.toLocaleString() + ' of ' + mediums.length.toLocaleString() +
-        ' medium fields erupted now'
-      : mediums.length.toLocaleString() + ' medium spice fields';
+        ' medium sites erupting now'
+      : mediums.length.toLocaleString() + ' medium spice sites';
     return (state.legend || []).map(function (cat) {
       const types = (cat.types || []).map(function (t) {
         const row = { idx: t.idx, label: t.label, icon: t.icon || null,
@@ -354,7 +440,7 @@ export function createMapEngine(hostEls, opts) {
   function emitScene() {
     if (!on.onScene || !state.ready) return;
     on.onScene({
-      ready: state.ready, view: view.view,
+      ready: state.ready, view: view.view, key: meta.key,
       grid: meta.grid, cal: meta.cal, backdrop: meta.backdrop,
       layout: meta.layout,
       dim: currentDim(), part: currentPart(),
@@ -364,7 +450,7 @@ export function createMapEngine(hostEls, opts) {
       legend: state.legend,
       spiceActive: state.spice,
       candidates: resolvedCandidates(),
-      mediums: meta.spice_mediums,
+      mediums: dimMediums(),
       worms: wormsForInstance(),
       sandstorm: state.sandstorm,
       me: state.me, meAuthed: state.meAuthed, meFresh: state.meFresh, meShow: state.meShow,
@@ -385,6 +471,7 @@ export function createMapEngine(hostEls, opts) {
       state.sandstorm = payload.sandstorm || { dimensions: {} };
       state.spiceAtMs = state.wormsAtMs = Date.now();
       redrawSpice();
+      emitLegend();
       redrawWorms();
       redrawStorm();
       emitConsole();
@@ -395,6 +482,7 @@ export function createMapEngine(hostEls, opts) {
       state.spice = payload;
       state.spiceAtMs = Date.now();
       redrawSpice();
+      emitLegend();
       emitConsole();
       emitScene();
     } else if (kind === 'worms') {
@@ -455,6 +543,9 @@ export function createMapEngine(hostEls, opts) {
       state.waypoints = Array.isArray(payload) ? payload : [];
       redrawWaypoints();
       emitScene();
+    } else if (kind === 'sietchSpots') {
+      state.snSpots = Array.isArray(payload) ? payload : [];
+      redrawSietchSpots();
     }
   }
 
@@ -491,7 +582,7 @@ export function createMapEngine(hostEls, opts) {
     // Static candidates/mediums render before the first /live arrives.
     redrawSpice();
     redrawStorm();
-    cb('onLegend', legendModel());
+    emitLegend();
     emitCounts();
     emitConsole();
     emitScene();
@@ -505,7 +596,14 @@ export function createMapEngine(hostEls, opts) {
   }
 
   // ---- hit tests ------------------------------------------------------------
+  // Holo cluster icons (holo/cluster.js) are hit-tested by the viewer in screen space,
+  // against the same relief-aware projection the icons are drawn with.
+  function hitHoloCluster(mx, my) {
+    return opts.projector && opts.projector.clusterAt ? opts.projector.clusterAt(mx, my) : null;
+  }
+
   function hitCluster(nx, ny) {
+    if (opts.projector && opts.projector.clusterAt) return null;   // holo owns its clusters
     if (!state.clustersShown || !state.clusters.length) return null;
     // Ring is fixed CSS px scaled by zoom on screen -> zoom-independent
     // normalized radius.
@@ -521,6 +619,7 @@ export function createMapEngine(hostEls, opts) {
   // hit-testable either; excluded in-loop so a hidden member cannot shadow
   // a visible marker slightly farther away.
   function hitExclude() {
+    if (opts.projector && opts.projector.clusterMembers) return opts.projector.clusterMembers();
     return state.clustersShown ? state.clusterMembers : null;
   }
 
@@ -541,12 +640,22 @@ export function createMapEngine(hostEls, opts) {
     return { x: fallbackX, y: fallbackY };
   }
 
+  // Reader v2 footprint hover: 'Sandstorm, clears in m:ss' anywhere inside a zone.
+  function stormHoverLabel(nx, ny) {
+    if (!meta.has_storms || state.hidden['sandstorm'] || !state.sandstorm) return null;
+    const info = (state.sandstorm.dimensions || {})[String(currentDim())];
+    const fp = stormFootprint(info);
+    const now = Date.now();
+    if (!fp || !(now - fp.atMs < STORM_HOVER_FRESH_MS)) return null;
+    return hitFootprint(fp, nx, ny, now, reduceMotion) ? stormLabel(fp, now) : null;
+  }
+
   function hoverAt(mx, my) {
     if (!state.ready) return;
     const n = toNorm(mx, my);
     if (!n) { cb('onHover', null); return; }   // off-board (projector only)
     // Priority: me > waypoints > worms > spice > clusters > markers (V1 order).
-    const regions = state.meHover.concat(state.wpHover, state.wormHover,
+    const regions = state.meHover.concat(state.wpHover, state.snHover, state.wormHover,
                                          state.spiceHover);
     for (let i = 0; i < regions.length; i++) {
       const h = regions[i];
@@ -555,6 +664,11 @@ export function createMapEngine(hostEls, opts) {
         cb('onHover', { label: h.label, screenX: mx, screenY: my });
         return;
       }
+    }
+    const hc = hitHoloCluster(mx, my);
+    if (hc) {
+      cb('onHover', { label: hc.label, screenX: mx, screenY: my });
+      return;
     }
     const cl = hitCluster(n.nx, n.ny);
     if (cl) {
@@ -567,9 +681,11 @@ export function createMapEngine(hostEls, opts) {
     if (best) {
       cb('onHover', { label: best[4] || state.typeIndex[best[3]] || '',
                       screenX: mx, screenY: my });
-    } else {
-      cb('onHover', null);
+      return;
     }
+    // Lowest priority: the storm footprint is large, so anything inside it wins.
+    const sl = stormHoverLabel(n.nx, n.ny);
+    cb('onHover', sl ? { label: sl, screenX: mx, screenY: my } : null);
   }
 
   function clickAt(mx, my) {
@@ -587,6 +703,15 @@ export function createMapEngine(hostEls, opts) {
     }
     // Hotspot click: zoom one step centered on the cluster (its dots take
     // over past the threshold). No popup for aggregates.
+    const hc = hitHoloCluster(mx, my);
+    if (hc) {
+      // Holo cluster: frame its bounds (the zoom steps the cluster level, so it splits)
+      setZoom(view, hc.zoom);
+      panToNormalized(view, hc.x, hc.y);
+      pushTransform();
+      cb('onHover', null);
+      return;
+    }
     const cl = hitCluster(n.nx, n.ny);
     if (cl) {
       setZoom(view, view.zoom * 1.5);
@@ -651,14 +776,18 @@ export function createMapEngine(hostEls, opts) {
   const detachGestures = attachGestures(viewport, view, {
     onTransform: pushTransform,
     onInteract: function (active) {
+      if (active) cancelOrbitAnim();   // a hand on the board wins over an animation
       state.interacting = active;
-      cb('onViewChange', { zoom: view.zoom, panX: view.panX, panY: view.panY,
-                           interacting: active });
+      cb('onViewChange', viewModel(active));
     },
     onHover: hoverAt,
     onLeave: function () { cb('onHover', null); },
     onClick: clickAt,
-  });
+    onStep: rotateStep,
+  }, { rotate: !!opts.projector });
+  if (opts.projector) {
+    compass = createCompass(viewport, { onStep: rotateStep, onReset: resetOrbit });
+  }
 
   function onWindowResize() { layout(); }
   window.addEventListener('resize', onWindowResize);
@@ -680,9 +809,11 @@ export function createMapEngine(hostEls, opts) {
       state.instance = next;
       reckoner.remove('storm');   // the other dim's track must not carry over
       redrawSpice();
+      emitLegend();                // medium sites/blows are per dim
       redrawWorms();
       redrawStorm();
       redrawMe();                 // me markers are dim/part-filtered
+      redrawSietchSpots();        // event doors are part-filtered too
       redrawOthers();             // other players re-filter to the new sietch
       pollers.refreshPlayers();   // per-dim count: refetch for the new instance
       emitCounts();               // selected-sietch other-player count changes
@@ -708,13 +839,19 @@ export function createMapEngine(hostEls, opts) {
       pushTransform();
     },
     resetView: function () {
+      cancelOrbitAnim();
       view.zoom = 1; view.panX = 0; view.panY = 0;
+      setOrbit(view, ORBIT_DEFAULT.azimuth, ORBIT_DEFAULT.tilt);   // holo: north up too
       pushTransform();
     },
     panTo: function (nx, ny) {
       panToNormalized(view, nx, ny);
       pushTransform();
     },
+    // Holo orbit: 45 deg heading step (+1 clockwise / -1) and north-up reset.
+    // No-ops on the carved board (no projector).
+    rotateStep: rotateStep,
+    resetOrbit: resetOrbit,
     // ---- M2 personal layer ------------------------------------------------
     // Chrome signals auth: true starts the 10s /me poller, false stops it and
     // clears the layer. Chrome calls this after /portal/me resolves (the
@@ -737,6 +874,13 @@ export function createMapEngine(hostEls, opts) {
       if (state.meFresh === !!fresh) return;
       state.meFresh = !!fresh;
       if (state.ready) { redrawMe(); emitScene(); }
+    },
+    setMeSkin: function (skin) {
+      if (state.destroyed) return;
+      const next = skin === 'lantern' ? 'lantern' : null;
+      if (state.meSkin === next) return;
+      state.meSkin = next;
+      if (state.ready) redrawMe();
     },
     // MeChips toggles: { self, bases, vehicles } booleans.
     setMeShow: function (show) {
@@ -785,6 +929,8 @@ export function createMapEngine(hostEls, opts) {
       pollers.stop();
       reckoner.destroy();
       detachGestures();
+      cancelOrbitAnim();
+      if (compass) compass.destroy();
       window.removeEventListener('resize', onWindowResize);
       icons.destroy();
       wormAudio.destroy();

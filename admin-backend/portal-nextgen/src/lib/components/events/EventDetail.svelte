@@ -12,7 +12,9 @@
   // PageHeader is the only other place the name appears.
   import EventBanner from './EventBanner.svelte';
   import EventKindChip from './EventKindChip.svelte';
+  import EffectChip from './EffectChip.svelte';
   import RemindToggle from './RemindToggle.svelte';
+  import { effectOf } from '$lib/weekend.js';
 
   let { event = null, reminded = null, busy = false, onToggleRemind } = $props();
 
@@ -54,6 +56,7 @@
   let host = $derived(String(event?.host || '').trim());
   let description = $derived(String(event?.description || '').trim());
   let cancelled = $derived(event?.status === 'cancelled');
+  let effect = $derived(effectOf(event));
 
   let live = $derived.by(() => {
     const ev = event;
@@ -61,9 +64,9 @@
     const s = parseUtc(ev.starts_utc);
     if (s == null) return false;
     const now = Date.now();
-    if (now < s || now - s > HOUR_MS) return false;
+    if (now < s) return false;
     const e = parseUtc(ev.ends_utc);
-    return e == null ? true : now <= e;
+    return e == null ? now - s <= HOUR_MS : now < e;
   });
 
   let past = $derived.by(() => {
@@ -81,9 +84,15 @@
       {#if cancelled}
         <p class="flag cancelled mono">Cancelled</p>
       {:else if live}
-        <p class="flag now mono">Starting now</p>
+        <p class="flag now mono">{event?.ends_utc ? 'Happening now' : 'Starting now'}</p>
       {/if}
     </div>
+    {#if cancelled && event?.cancel_reason}
+      <p class="reason">Cancelled: {event.cancel_reason}</p>
+    {/if}
+    {#if effect && !cancelled}
+      <EffectChip effect={effect.effect} state={effect.state} scope={effect.scope} open={live} detail={true} />
+    {/if}
 
     <dl class="meta mono">
       {#if startsUtc}
@@ -137,6 +146,7 @@
   .flag { margin: 0; font-size: var(--text-xs); letter-spacing: .16em; text-transform: uppercase; }
   .flag.now { color: var(--ls-ibad); }
   .flag.cancelled { color: var(--ls-red); }
+  .reason { margin: 0; font-size: var(--text-sm); line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
 
   .meta { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-5); margin: 0; font-size: var(--text-sm); }
   .meta div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

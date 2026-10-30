@@ -5,7 +5,8 @@
   // house rails, and below it the player's rewards summary + the 25-house own-
   // rewards board. Clicking a board tile opens its reward-ladder drawer.
   //
-  // READ-ONLY (contract MODULE 2): account-scoped, no writes, no CSRF. The board
+  // READ-ONLY (contract MODULE 2) except the portal claim (ClaimPanel, CSRF-gated,
+  // shown only when the server reports claim_enabled). The board
   // and rewards halves render independently (either may be null). Reads are never
   // gated; signed-out seals to a Connect-Discord panel.
   import { untrack } from 'svelte';
@@ -20,6 +21,7 @@
   import TileDrawer from '$lib/components/landsraad/TileDrawer.svelte';
   import RewardsSummary from '$lib/components/landsraad/RewardsSummary.svelte';
   import HouseRewardsGrid from '$lib/components/landsraad/HouseRewardsGrid.svelte';
+  import ClaimPanel from '$lib/components/landsraad/ClaimPanel.svelte';
 
   const gate = useAuthGate();
 
@@ -28,6 +30,11 @@
   let term = $derived(board?.term || null);
   let rails = $derived(Array.isArray(board?.rails) ? board.rails : []);
   let tiles = $derived(Array.isArray(board?.tiles) ? board.tiles : []);
+  // Reigning great house and the decree in force this term. Term-global public
+  // facts (the in-game Landsraad screen shows them to everyone), so no viewer
+  // scoping. Both come from the same shaper the legacy page reads.
+  let reigning = $derived(board?.term?.reigning || null);
+  let decree = $derived(board?.term?.active_decree || null);
   let rewardHouses = $derived(Array.isArray(rewards?.board) ? rewards.board : []);
 
   let loaded = false;
@@ -84,6 +91,28 @@
               </div>
             {/if}
           </div>
+          {#if reigning || decree}
+            <div class="decree">
+              {#if reigning}
+                <div class="dec-house" data-faction={reigning.slug}>
+                  <span class="rib-cap mono">Reigning</span>
+                  <span class="dec-house-name">House {reigning.name}</span>
+                </div>
+              {/if}
+              {#if decree}
+                <div class="dec-body">
+                  <span class="rib-cap mono">Active decree</span>
+                  <span class="dec-name">{decree.label}</span>
+                  {#if decree.description}<span class="dec-desc">{decree.description}</span>{/if}
+                  {#if decree.confidence === 'community'}
+                    <span class="dec-src" title="Effect size is transcribed from community sources, not published by Funcom. Treat as indicative.">community-sourced figure</span>
+                  {:else if decree.confidence === 'unknown'}
+                    <span class="dec-src" title="No documented effect for this decree.">effect not documented</span>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/if}
         </CarvedSlab>
       {/if}
 
@@ -109,6 +138,7 @@
         />
       {:else if rewards}
         <CarvedSlab><RewardsSummary summary={rewards.summary} /></CarvedSlab>
+        <ClaimPanel summary={rewards.summary} />
         {#if rewardHouses.length}
           <CarvedSlab sharp={true}><HouseRewardsGrid houses={rewardHouses} /></CarvedSlab>
         {/if}
@@ -131,6 +161,14 @@
   .rib-val { font-size: var(--text-lg); color: var(--text); }
   .rib-cd { margin-left: auto; }
 
+  .decree { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid rgba(255, 255, 255, 0.10); }
+  .dec-house, .dec-body { display: flex; flex-direction: column; gap: var(--space-1); }
+  .dec-house-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); }
+  [data-faction='atreides'] .dec-house-name { color: var(--ls-ibad); }
+  [data-faction='harkonnen'] .dec-house-name { color: var(--ls-red); }
+  .dec-name { font-size: var(--text-sm); font-weight: 600; color: var(--accent-text); }
+  .dec-desc { font-size: var(--text-sm); color: var(--text); max-width: 60ch; }
+  .dec-src { font-size: var(--text-xs); color: var(--text-muted); text-decoration: underline dotted; cursor: help; width: fit-content; }
   .board-row {
     display: grid; gap: var(--space-4);
     grid-template-columns: minmax(0, 0.8fr) minmax(0, 2fr) minmax(0, 0.8fr);

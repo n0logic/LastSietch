@@ -1,0 +1,57 @@
+{
+ "1": {
+  "storm_state": "active",
+  "storm_scanned_utc": "2026-10-07T19:55:57+00:00",
+  "center_nx": 1341.5,
+  "center_ny": -87.1,
+  "heading_yaw": 169.6,
+  "radius_nr": 615.2,
+  "start_nx": 1369.1,
+  "start_ny": -92.1,
+  "end_nx": -369.1,
+  "end_ny": 225.5,
+  "lifetime_remaining": 282.6,
+  "lifetime_total": 297.2,
+  "ends_utc": "2026-10-07T20:00:39+00:00",
+  "level": 0,
+  "move_speed": 5000.0,
+  "zones": [
+   {
+    "name": "core",
+    "damage": true,
+    "nx": 1384.0,
+    "ny": -94.9,
+    "ax_nr": 166.1,
+    "ay_nr": 332.2,
+    "yaw": 169.6
+   },
+   {
+    "name": "gustfront",
+    "damage": false,
+    "nx": 1306.7,
+    "ny": -80.7,
+    "ax_nr": 295.3,
+    "ay_nr": 369.1,
+    "yaw": 169.6
+   },
+   {
+    "name": "stormwall",
+    "damage": true,
+    "nx": 1355.1,
+    "ny": -89.6,
+    "ax_nr": 172.2,
+    "ay_nr": 306.3,
+    "yaw": 169.6
+   },
+   {
+    "name": "top",
+    "damage": true,
+    "nx": 1300.8,
+    "ny": -79.7,
+    "ax_nr": 172.2,
+    "ay_nr": 258.4,
+    "yaw": 169.6
+   }
+  ]
+ }
+}

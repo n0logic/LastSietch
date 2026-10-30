@@ -1,39 +1,27 @@
 """P8 — CVars admin sub-tab.
 
-Reference: docs/dune-research/P8-EXECUTION-BRIEF.md (Appendix B is canonical;
+Reference: the design notes (not published) (Appendix B is canonical;
 the original §3/§4/§9 are obsolete).
 
 Architecture: admin-backend → relay host → dispatch shell on lastsietch-dune
 → kubectl exec into game pod. No direct Postgres client in admin-backend;
-no Python helper module to import. All game-side reads and writes go through
-the three relay endpoints:
+no Python helper module to import. All game-side reads go through the relay
+endpoints:
 
     GET  /server/cvars/read           — merged 5+1-layer INI walk + raw_sections
-    POST /server/cvars/write          — UserOverrides.ini write + relay-side INSERT
     GET  /server/cvars/diff?since=…   — settingsUpdate capture diff
     GET  /server/cvars/history        — paginated holadmin.cvar_changes rows
 
-The relay owns the `holadmin.cvar_changes` INSERT (it has pg access; admin-
-backend does not — see Appendix B.5 + dune_grant.py precedent). Admin-backend
-just persists its own SQLite audit_log row referencing the relay's change_id.
+The write route is retired (admin plan P0-4). It wrote UserOverrides.ini, and
+cvars do not apply from INI files: they apply only from -execcmds at start or
+the RMQ ServerExec channel. POST /v2/server/cvars/write now refuses and audits
+every call; the dispatcher's cvars-write token refuses as well.
 
 Auth: `require_admin` on reads, `require_admin + require_csrf` on POST.
-The brief refers to this gate as `require_operator`; that helper does not
-exist (team-lead confirmed). The admin role IS the Operator role for v1.
-
-CSRF header is `X-CSRF-Token` (matches existing `require_csrf` validator and
-the JS in `templates/v2/base.html`). The brief mentioned `X-Admin-CSRF-Token`
-in error.
-
-Success banner copy: "Queued — applies at next maintenance restart".
-NEVER "Saved". The change is filesystem-only on UserOverrides.ini — it does
-not take effect until the next announced maintenance restart. Never restart
-a live community server outside an announced window.
 """
 import json
 import logging
 import os
-import re
 import time
 
 from fastapi import APIRouter, HTTPException, Request
@@ -74,19 +62,10 @@ _intel_cache: dict = {"data": None, "mtime": 0.0}
 VALID_SUBTABS = ("live", "catalog", "history", "diff")
 HISTORY_PAGE_SIZE = 50
 
-QUEUED_BANNER = "Queued — applies at next maintenance restart"
-CONFIRM_TOKEN_EXPECTED = "CONFIRM"
-
-# Input bounds — match holadmin.cvar_changes column widths (TEXT, unconstrained
-# in pg, but we still cap server-side for log readability + audit JSON size).
-MAX_SECTION_LEN = 200
-MAX_KEY_LEN = 200
-MAX_VALUE_LEN = 4096
-MAX_REASON_LEN = 500
-
-# Conservative INI key / section shapes (Unreal-style).
-_INI_KEY_RE = re.compile(r"^[A-Za-z0-9_.+\-]+$")
-_INI_SECTION_RE = re.compile(r"^[A-Za-z0-9_./\-]+$")
+CVAR_WRITE_RETIRED = (
+    "cvars do not apply from INI files. The game reads cvars only from "
+    "-execcmds and the ServerExec channel, so the INI writer is retired."
+)
 
 
 # --- Auth wrappers ---
@@ -217,17 +196,9 @@ def _enrich_live(live: dict | None) -> dict:
 # The live-values read is the slow part of the CVars page (~3s: SSH -> kubectl
 # exec -> merge 6 INI layers). Cache it briefly so repeat opens are instant. A
 # short TTL (not hours) keeps it fresh enough that out-of-band changes (CLI
-# edits, queued overrides applied at a maintenance restart) surface quickly; a
-# successful panel write busts the cache immediately via _invalidate_live_read().
+# edits, changes applied at a maintenance restart) surface quickly.
 LIVE_READ_TTL = 90.0
 _live_read_cache: dict = {"data": None, "fetched_at": 0.0}
-
-
-def _invalidate_live_read():
-    """Drop the cached live-values read so the next page load re-fetches.
-    Called after a successful CVar write (UserOverrides.ini changed)."""
-    _live_read_cache["data"] = None
-    _live_read_cache["fetched_at"] = 0.0
 
 
 async def _relay_read(force: bool = False) -> dict | None:
@@ -345,7 +316,7 @@ async def cvars_page(request: Request, sub: str = "live"):
         # (which would read current_server_sub) light up the CVars tab.
         "current_server_sub": "cvars",
         "active_subtab": sub,
-        "queued_banner": QUEUED_BANNER,
+        "write_retired": CVAR_WRITE_RETIRED,
     }
 
     if sub == "live":
@@ -464,166 +435,25 @@ class CvarWriteRequest(BaseModel):
 
 @router.post("/v2/server/cvars/write")
 async def cvars_write(request: Request, body: CvarWriteRequest):
-    """Operator-gated CVar write. Calls the relay's POST /server/cvars/write
-    which owns the atomic transaction (file backup → INI patch → INSERT into
-    holadmin.cvar_changes → return audit envelope). Admin-backend records its
-    own audit_log row referencing the returned change_id.
-
-    Banner copy on success: "Queued — applies at next maintenance restart".
-    NEVER "Saved" — UserOverrides.ini changes are filesystem-only and only
-    take effect on the next announced maintenance restart of the game pod.
-    """
+    """Retired. This route wrote UserOverrides.ini, and cvars do not apply from
+    INI files: they apply only from -execcmds at start or the RMQ ServerExec
+    channel. A write here changed a file and nothing in game. Every call is
+    refused and audited; the relay is never called. Reads stay on the GET
+    routes above."""
     user = require_admin(request)
     require_csrf(request, user)
 
     ip = request.client.host if request.client else "unknown"
-    target = f"{body.section}:{body.key}"
-    operator_handle = user["username"]  # stored in operator_discord_id TEXT col
-
-    # --- Validation (failures are audited too) ---
-    try:
-        if not body.section or not isinstance(body.section, str):
-            raise HTTPException(400, "section is required")
-        if len(body.section) > MAX_SECTION_LEN or not _INI_SECTION_RE.match(body.section):
-            raise HTTPException(400, "section has invalid shape or is too long")
-        if not body.key or not isinstance(body.key, str):
-            raise HTTPException(400, "key is required")
-        if len(body.key) > MAX_KEY_LEN or not _INI_KEY_RE.match(body.key):
-            raise HTTPException(400, "key has invalid shape or is too long")
-        if not isinstance(body.value, str):
-            raise HTTPException(400, "value must be a string (empty-string = clear)")
-        if len(body.value) > MAX_VALUE_LEN:
-            raise HTTPException(400, "value too long")
-        if body.reason is not None and len(body.reason) > MAX_REASON_LEN:
-            raise HTTPException(400, "reason too long")
-        if body.confirm_token != CONFIRM_TOKEN_EXPECTED:
-            raise HTTPException(400, "confirm_token mismatch — write rejected")
-    except HTTPException as exc:
-        audit_log(
-            user["id"], user["username"], "cvar_write",
-            target, ip,
-            details=json.dumps({
-                "section": body.section,
-                "key": body.key,
-                "value": body.value,
-                "reason": body.reason,
-                "result": f"validation_error: {exc.detail}",
-            }),
-            success=False,
-        )
-        raise
-
-    # Best-effort pre-write read so we can attribute `ini_layer_before` to
-    # the actual winning layer (defaultGame / userOverrides / etc.) rather
-    # than the helper's fallback heuristic. A failure here does NOT block
-    # the write — the relay falls back to its own attribution.
-    ini_layer_before: str | None = None
-    pre_read = await _relay_read()
-    if pre_read:
-        for s in (pre_read.get("settings") or []):
-            if s.get("section") == body.section and s.get("key") == body.key:
-                ini_layer_before = s.get("source")
-                break
-
-    relay_body = {
-        "section": body.section,
-        "key": body.key,
-        "value": body.value,
-        "operator": operator_handle,
-        "operator_user_id": user["id"],
-        "ini_layer_before": ini_layer_before,
-        "reason": body.reason,
-    }
-
-    try:
-        result = await call_relay("/server/cvars/write", "POST", relay_body, timeout=60)
-    except HTTPException as exc:
-        audit_log(
-            user["id"], user["username"], "cvar_write",
-            target, ip,
-            details=json.dumps({
-                "section": body.section,
-                "key": body.key,
-                "value": body.value,
-                "reason": body.reason,
-                "result": f"relay_error: {exc.detail}",
-            }),
-            success=False,
-        )
-        return {
-            "success": False,
-            "status": "failed",
-            "message": str(exc.detail),
-            "banner": None,
-            "change_id": None,
-        }
-    except Exception as exc:
-        audit_log(
-            user["id"], user["username"], "cvar_write",
-            target, ip,
-            details=json.dumps({
-                "section": body.section,
-                "key": body.key,
-                "value": body.value,
-                "reason": body.reason,
-                "result": f"error: {exc}",
-            }),
-            success=False,
-        )
-        return {
-            "success": False,
-            "status": "failed",
-            "message": str(exc),
-            "banner": None,
-            "change_id": None,
-        }
-
-    status = (result or {}).get("status", "ok")
-    success = status == "ok"
-    if success:
-        # UserOverrides.ini changed; drop the cached live read so the next page
-        # load reflects the new value immediately instead of waiting out the TTL.
-        _invalidate_live_read()
-    change_id = (result or {}).get("change_id")
-    old_value = (result or {}).get("old_value")
-    source_before = (result or {}).get("source_before")
-
-    audit_db_failed = bool((result or {}).get("audit_db_failed"))
-    row_status = (result or {}).get("row_status")
-
     audit_log(
         user["id"], user["username"], "cvar_write",
-        target, ip,
+        f"{body.section}:{body.key}", ip,
         details=json.dumps({
             "section": body.section,
             "key": body.key,
             "value": body.value,
-            "old_value": old_value,
-            "source_before": source_before,
             "reason": body.reason,
-            "change_id": change_id,
-            "row_status": row_status,
-            "audit_db_failed": audit_db_failed,
-            "bak_path": (result or {}).get("bak_path"),
-            "sha256_before": (result or {}).get("sha256_before"),
-            "sha256_after": (result or {}).get("sha256_after"),
-            "result": status,
+            "result": "refused: writer retired",
         }),
-        # If the file write succeeded but the DB INSERT raced, the operator
-        # still sees the UX banner — the work IS applied — but the audit
-        # row carries success=False so the discrepancy is grep-able later.
-        success=success and not audit_db_failed,
+        success=False,
     )
-
-    return {
-        "success": success,
-        "status": status,
-        "banner": QUEUED_BANNER if success else None,
-        "message": (result or {}).get("error", "") if not success else "",
-        "change_id": change_id,
-        "old_value": old_value,
-        "new_value": (result or {}).get("new_value"),
-        "source_before": source_before,
-        "audit_db_failed": audit_db_failed,
-        "row_status": row_status,
-    }
+    raise HTTPException(410, CVAR_WRITE_RETIRED)

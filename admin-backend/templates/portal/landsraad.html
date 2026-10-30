@@ -86,6 +86,34 @@
       <strong>{{ board.contested }}</strong> still contested.
       Both great houses race each tile to its goal — first to the goal claims the house.
     </p>
+
+    {# Reigning house + the decree currently in force. Term-global public facts,
+       so unlike per-tile progress these are shown to every viewer. #}
+    {% if board.term.reigning or board.term.active_decree %}
+    <div class="lb__decree">
+      {% if board.term.reigning %}
+      <span class="lb__decree-house lb__decree-house--{{ board.term.reigning.slug }}">
+        House {{ board.term.reigning.name }} reigns
+      </span>
+      {% endif %}
+      {% if board.term.active_decree %}
+      <span class="lb__decree-body">
+        <span class="lb__decree-name">{{ board.term.active_decree.label }}</span>
+        {% if board.term.active_decree.description %}
+        <span class="lb__decree-desc">{{ board.term.active_decree.description }}</span>
+        {% endif %}
+        {% if board.term.active_decree.confidence == 'community' %}
+        <span class="lb__decree-src"
+              title="Effect size is transcribed from community sources, not published by Funcom. Treat as indicative.">
+          community-sourced figure
+        </span>
+        {% elif board.term.active_decree.confidence == 'unknown' %}
+        <span class="lb__decree-src" title="No documented effect for this decree.">effect not documented</span>
+        {% endif %}
+      </span>
+      {% endif %}
+    </div>
+    {% endif %}
   </header>
 
   <div class="lb__layout">

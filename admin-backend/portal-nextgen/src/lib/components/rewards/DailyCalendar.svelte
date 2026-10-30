@@ -93,7 +93,7 @@
 
 <div class="cal">
   <div class="cal-head">
-    <p class="panel-kicker mono">Daily rewards</p>
+    <p class="panel-kicker mono">Daily rewards (UTC)</p>
     {#if !hasCalendar}
       <button class="expand mono" type="button" onclick={() => (expanded = !expanded)} aria-expanded={expanded}>
         {expanded ? 'This week' : 'Show month'}

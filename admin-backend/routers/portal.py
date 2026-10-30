@@ -21,7 +21,9 @@ Hard safety:
 """
 import portal_identity
 import asyncio
+import hashlib
 import json
+import math
 import logging
 import os
 import re
@@ -35,7 +37,7 @@ import httpx
 import config
 from http_body import read_body as _read_body
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from config import (
@@ -46,6 +48,7 @@ from config import (
     PORTAL_OAUTH_HTTP_TIMEOUT,
     PORTAL_SESSION_IDLE_MAX_AGE,
 )
+import landsraad_claim
 import mirror
 import rewards
 import market_watch
@@ -813,6 +816,64 @@ def _filter_player_tags(tags) -> list:
     return sorted(out)
 
 
+# Export throttle. Each export fans out to three relay reads (one an SSH helper
+# doing seven psql queries on the live game DB), so it is capped per session AND
+# per account: a second session on the same account cannot double the budget.
+# In-process state (lastsietch-admin runs one worker); a restart simply resets it.
+_EXPORT_RATE_MAX, _EXPORT_RATE_WINDOW_S = 3, 600.0
+_export_hits: dict = {}
+
+
+def _export_rate_ok(keys) -> bool:
+    now = time.monotonic()
+    if len(_export_hits) > 512:
+        for stale in [k for k, v in _export_hits.items()
+                      if not v or now - v[-1] >= _EXPORT_RATE_WINDOW_S]:
+            _export_hits.pop(stale, None)
+    windows = []
+    for key in keys:
+        hits = _export_hits.setdefault(key, [])
+        hits[:] = [t for t in hits if now - t < _EXPORT_RATE_WINDOW_S]
+        windows.append(hits)
+    if any(len(h) >= _EXPORT_RATE_MAX for h in windows):
+        return False
+    for hits in windows:
+        hits.append(now)
+    return True
+
+
+# Internal identifiers never leave in a player-facing export, at any depth.
+_EXPORT_INTERNAL_KEYS = frozenset({
+    "account_id", "player_controller_id", "player_pawn_id",
+    "controller_id", "pawn_id", "entity_id",
+})
+
+
+def _strip_internal_ids(value):
+    if isinstance(value, dict):
+        return {k: _strip_internal_ids(v) for k, v in value.items()
+                if k not in _EXPORT_INTERNAL_KEYS}
+    if isinstance(value, list):
+        return [_strip_internal_ids(v) for v in value]
+    return value
+
+
+async def _export_resolve_ctrl(call_relay, account_id: int, selected):
+    """The controller to export, from the account's live non-Deleted character
+    list (the progress script's LIST_SQL filters Deleted): the selected character
+    when it is on that list, else the account default. None when the account has
+    no live character. Never returns a controller that is not on the list."""
+    payload = await call_relay(f"/dune/player/{account_id}/progress?list=1", timeout=20)
+    chars = [c for c in ((payload or {}).get("characters") or [])
+             if isinstance(c, dict) and isinstance(c.get("controller_id"), int)]
+    if selected is not None and any(c["controller_id"] == selected for c in chars):
+        return selected
+    for c in chars:
+        if c.get("is_default"):
+            return c["controller_id"]
+    return None
+
+
 @router.get("/portal/export/character")
 async def portal_export_character(request: Request):
     """Player self-service "Download my data": a personal snapshot of the
@@ -834,13 +895,30 @@ async def portal_export_character(request: Request):
         return JSONResponse({"ok": True, "status": "deferred",
                              "message": "Character data export is not enabled yet."})
 
-    ctrl = _selected_ctrl(request, active_account_id)
+    session_key = "s:" + hashlib.sha256(
+        request.cookies.get(SESSION_COOKIE, "").encode("utf-8")).hexdigest()[:32]
+    if not _export_rate_ok((session_key, f"a:{active_account_id}")):
+        return JSONResponse({"ok": False, "error": "rate_limited",
+                             "message": "You have downloaded your data a few times "
+                                        "recently. Please try again in about 10 minutes."},
+                            status_code=429, headers={"Retry-After": "600"})
+
     from relay import call_relay
 
-    # 1. Character snapshot (controller-scoped when a character is selected).
-    export_path = f"/dune/player/{active_account_id}/character/export"
-    if ctrl:
-        export_path += f"?ctrl={int(ctrl)}"
+    # 0. Resolve the character server-side, always, so the helper is never asked
+    # for an account-level pick that could land on a Deleted character slot.
+    try:
+        ctrl = await _export_resolve_ctrl(
+            call_relay, active_account_id, _selected_ctrl(request, active_account_id))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("portal export: character list failed acct=%s: %s",
+                       active_account_id, exc)
+        return JSONResponse({"ok": False, "error": "export_unavailable"}, status_code=503)
+    if ctrl is None:
+        return JSONResponse({"ok": False, "error": "no_character"}, status_code=404)
+
+    # 1. Character snapshot, always scoped to the resolved controller.
+    export_path = f"/dune/player/{active_account_id}/character/export?ctrl={int(ctrl)}"
     try:
         snap_env = await call_relay(export_path, timeout=60)
     except Exception as exc:  # noqa: BLE001
@@ -857,10 +935,8 @@ async def portal_export_character(request: Request):
     # 2. Economy (controller-scoped). Best-effort; never fail the whole export.
     economy = {}
     try:
-        prog_path = f"/dune/player/{active_account_id}/progress"
-        if ctrl:
-            prog_path += f"?ctrl={int(ctrl)}"
-        prog = await call_relay(prog_path, timeout=30)
+        prog = await call_relay(
+            f"/dune/player/{active_account_id}/progress?ctrl={int(ctrl)}", timeout=30)
         econ = (prog or {}).get("economy") or {}
         economy = {"bank_solari": econ.get("bank_solari"),
                    "pocket_solari": econ.get("pocket_solari"),
@@ -905,21 +981,19 @@ async def portal_export_character(request: Request):
                    "It is a keepsake and portability copy, NOT a backup you can "
                    "restore yourself. Your character is saved on the server and "
                    "backed up every 6 hours."),
-        "character": {
+        # The raw helper snapshot is deliberately NOT included: it carries the
+        # unfiltered tag list and internal ids, defeating _filter_player_tags.
+        "character": _strip_internal_ids({
             "name":                  character.get("character_name"),
             "map":                   character.get("map"),
             "online_status":         character.get("online_status"),
             "level_component":       character.get("FLevelComponent"),
             "faction":               character.get("FactionPlayerComponent"),
             "specialization_tracks": character.get("specialization_tracks"),
-        },
+        }),
         "economy": economy,
         "storage": storage,
         "journey_progress": journey_progress,
-        # Full-fidelity raw snapshot for portability (tags already allowlisted
-        # above are the player-facing view; raw actor props kept for a future
-        # import path). NOT surfaced as human-readable.
-        "raw_snapshot": snapshot,
     }
 
     charname = character.get("character_name") or "character"
@@ -1326,26 +1400,23 @@ _MAP_DATA_CACHE: dict[str, tuple[float, dict]] = {}
 _MAP_DATA_TTL = 3600.0          # markers change once per 14-day Coriolis cycle
 
 
+# The Classic (V1) map pages are RETIRED (2026-09-30): they showed per-world
+# "here" counts the owner ruled off every public surface, and V2 carries the same
+# boards, waypoints and self-rescue. Only these two PAGE handlers redirect; the
+# JSON routes under /portal/maps/{key}/... (data, live, players, stream, me,
+# waypoints, spice, worms, sandstorm) are V2's API and stay exactly as they are.
 @router.get("/portal/maps")
 async def portal_maps(request: Request):
-    """Maps hub: pick a map (Deep Desert / Hagga Basin) and instance."""
-    maps = [map_model.map_meta(k) for k in map_model.MAPS]
-    ctx = {"maps": [m for m in maps if m]}
-    ctx.update(base_ctx(request))
-    ctx["active_nav"] = "maps"
-    return templates.TemplateResponse(request, "portal/maps.html", ctx)
+    return RedirectResponse(url=v2_home(request.headers.get("host", "").lower()) + "maps",
+                            status_code=301)
 
 
 @router.get("/portal/maps/{map_key}")
 async def portal_map(request: Request, map_key: str):
-    """Coordinate-accurate map renderer for one map (DD or Hagga)."""
-    meta = map_model.map_meta(map_key)
-    if not meta:
+    if map_key not in map_model.MAPS:
         raise HTTPException(404, "Unknown map")
-    ctx = {"map": meta}
-    ctx.update(base_ctx(request))
-    ctx["active_nav"] = "maps"
-    return templates.TemplateResponse(request, "portal/map.html", ctx)
+    return RedirectResponse(url=v2_home(request.headers.get("host", "").lower()) + "maps/" + map_key,
+                            status_code=301)
 
 
 @router.get("/portal/maps/{map_key}/data")
@@ -1600,14 +1671,16 @@ def _storm_world_keys(map_key: str) -> dict[str, str]:
     """{reader world key -> client dimension key} for one map.
 
     The storm readers key Deep Desert by dimension ("0"/"1") and each Hagga
-    sietch by PARTITION ("hagga:1" Habbanya, "hagga:32" Kulon, "hagga:33" Amtal)
+    sietch by PARTITION ("hagga:1" Habbanya, "hagga:33" Amtal; "hagga:32" was
+    Kulon, closed 2026-10-28, and with no instance left to map it onto a stray
+    "hagga:32" entry is filtered out here like any other unknown world)
     -- the prefix is load-bearing, since Habbanya's partition 1 would otherwise
     collide with the DD PvP dimension key 1. Both map clients look a storm up by
     the selected INSTANCE's dim (drawStorm reads dimensions[String(dim)]), so
     this does two jobs at once: it FILTERS the shared relay payload down to the
     worlds belonging to this map (a Hagga storm must never be projected with the
     DD calibration, or vice versa), and it RE-KEYS onto the instance dim, which
-    is what stops a Kulon storm drawing on the Habbanya tab.
+    is what stops an Amtal storm drawing on the Habbanya tab.
     """
     m = map_model.MAPS.get(map_key) or {}
     out: dict[str, str] = {}
@@ -1693,6 +1766,29 @@ async def _sandstorm_overlay(map_key: str) -> dict:
                     pxy = map_model.project(map_key, sxv, syv)
                     if pxy:
                         info2[nx_key], info2[ny_key] = pxy[0], pxy[1]
+            # Reader v2 footprint: oriented ellipses in world cm (cx, cy, semi-axes
+            # ax along the storm heading, ay across it, yaw in UE degrees). Projected
+            # into the map frame; a flipped-Y calibration mirrors the yaw.
+            zones = info.get("zones")
+            if isinstance(zones, list) and span:
+                flip = bool(((m or {}).get("cal") or {}).get("flipY"))
+                proj = []
+                for z in zones:
+                    if not isinstance(z, dict):
+                        continue
+                    zx, zy, ax, ay, yaw = (z.get("cx"), z.get("cy"), z.get("ax"),
+                                           z.get("ay"), z.get("yaw"))
+                    if not all(_num(v) for v in (zx, zy, ax, ay, yaw)):
+                        continue
+                    zxy = map_model.project(map_key, zx, zy)
+                    if not zxy:
+                        continue
+                    proj.append({"name": z.get("name"), "damage": bool(z.get("damage")),
+                                 "nx": zxy[0], "ny": zxy[1],
+                                 "ax_nr": round(float(ax) / span * map_model.VIEW, 1),
+                                 "ay_nr": round(float(ay) / span * map_model.VIEW, 1),
+                                 "yaw": -float(yaw) if flip else float(yaw)})
+                info2["zones"] = proj
             out_dims[ckey] = info2
         # `available` now also requires this map to actually have a world in the
         # payload -- otherwise Hagga would inherit DD's availability and render a
@@ -1810,22 +1906,26 @@ async def _player_counts(map_key: str, dim: int | None = None) -> dict:
             map_players = sum((e.get("players") or 0)
                               for e in (status.get("maps") or [])
                               if e.get("name") == name)
+    # No per-world or per-map head count on this public route (owner ruling
+    # 2026-09-30: total population only). The whole-map Hagga figure includes
+    # Amtal, so it went too (review of PR #131). `untracked` tells the client
+    # the null is deliberate, not a dead feed; server_players stays.
+    untracked = True
     return {
         "available": True,
         "map_name": name,
         "map_dim": dim,
-        "map_players": map_players,
+        "map_players": None if untracked else map_players,
+        "untracked": untracked,
         "server_players": status.get("online_players") or 0,
     }
 
 
 @router.get("/portal/maps/{map_key}/players")
 async def portal_map_players(map_key: str, dim: int | None = None):
-    """Live player counts for a map (this-map total + server-wide online). Polled
-    by every map page (not gated on spice) for the on-map player counter.
-
-    Pass ?dim=N to count ONE dimension of a multi-world map (DD PvE/PvP,
-    Hagga Habbanya/Kulon/Amtal). Omitted = whole-map total, unchanged."""
+    """Server-wide online count for the map pages. map_players is always null
+    with untracked true: total population only (owner ruling 2026-09-30). The
+    ?dim= parameter is still accepted so older clients keep working."""
     if map_key not in map_model.MAPS:
         raise HTTPException(404, "Unknown map")
     return JSONResponse(await _player_counts(map_key, dim))
@@ -2504,7 +2604,10 @@ async def _load_landsraad(account_id: int) -> Optional[dict]:
     Returns None on any failure so callers can degrade gracefully."""
     try:
         # Fast path: local mirror (self-gates on flag + staleness; None on miss).
-        payload = mirror.get_section(account_id, "landsraad")
+        # A snapshot from before this player's last claim would show the rewards they
+        # just took; skip it so the relay (invalidated by the claim) answers instead.
+        payload = mirror.get_section(account_id, "landsraad",
+                                     newer_than=landsraad_claim.last_claim_at(account_id))
         if payload is None:
             from routers.dune import cached_landsraad_rewards
             payload = await cached_landsraad_rewards(account_id)
@@ -2663,6 +2766,12 @@ def _shape_landsraad_board(payload: dict, my_contrib_by_raw: Optional[dict] = No
             "end_utc": term.get("end_utc"),
             "start_utc": term.get("start_utc"),
             "test_term": bool(term.get("test_term")),
+            # Reigning great house + the decree currently in force. Both are
+            # term-global public facts (the in-game Landsraad screen shows them
+            # to everyone), so unlike per-tile progress they are NOT scoped to
+            # the viewer's faction.
+            "reigning": _faction_meta(term.get("reigning_faction_id")),
+            "active_decree": term.get("active_decree"),
         },
         "tiles": tiles,
         "rails": rails,
@@ -3218,7 +3327,8 @@ async def _load_server_overview() -> dict:
         "region": bg.get("region"),
         "online_players": status.get("online_players"),
         "maps": [
-            {"name": m.get("name"), "players": m.get("players"),
+            # No per-map player count: total population only (owner 2026-09-30).
+            {"name": m.get("name"),
              "up": bool(m.get("up")), "on_demand": bool(m.get("on_demand"))}
             for m in (status.get("maps") or [])
         ],
@@ -5531,7 +5641,9 @@ async def portal_storage_items(request: Request, container_id: str, page: int = 
 _REPAIR_ERROR_TEXT = {
     "player_online": ("This repair only applies while you are logged out of Dune. "
                       "If you are still in-game, log out and try again. If you already "
-                      "logged out, give the server a minute to catch up, then retry."),
+                      "logged out, give the server a minute to catch up, then retry. "
+                      "On Amtal your character stays in the world for about 5 minutes "
+                      "after you log out, so wait 5 minutes before retrying."),
     "not_owned": "That looks like it is not yours to repair. Refresh and try again.",
     "no_inv": "We could not find anything to repair there. Refresh and try again.",
     "write_failed": "The repair could not be completed. Please try again.",
@@ -6017,8 +6129,10 @@ def _require_linked_session_json(request: Request):
     (the frontend treats non-2xx as a throw), never a 302 to an HTML page."""
     gate, early = _require_linked_session(request)
     if early is not None:
+        # Every JSON route shares this gate, so the sentence must not name one page.
         return None, _v2_err("unauthenticated",
-                             "Sign in to the portal to use storage.", status=401)
+                             "Sign in to the portal with a linked character to continue.",
+                             status=401)
     return gate, None
 
 
@@ -7265,7 +7379,7 @@ async def portal_storage_v2_transfers(request: Request,
 # ======================================================= THE KARUM ==========
 #
 # Player-to-player trade venue (SB-006 + SB-007), L4 of the four-layer contract.
-# Contract: docs/dune-research/v2-portal/KARUM-BUILD-CONTRACT-2026-07-27.md
+# Contract: the design notes (not published)
 #
 # WHAT THIS LAYER OWNS, and it is not the settlement:
 #   * session auth, CSRF, identity resolution from the session (NEVER the client)
@@ -9943,15 +10057,15 @@ async def portal_market_buy(request: Request):
 # ----------------------------------------------- self-rescue teleport -------
 #
 # B-2b: a confirmed portal player who is stuck (under terrain, in a wreck, etc.)
-# can teleport themselves to one of THEIR OWN base totems. Every control here is
-# server-side and anti-exploit:
+# can teleport themselves to one of THEIR OWN base totems (or, in Deep Desert
+# PvE, an ornithopter pilot). Every control here is server-side and anti-exploit:
 #   * Destination is server-CHOSEN: the nearest OWN base totem in the SAME
 #     map/dim as the player, computed from the authoritative per-player map read.
 #     Client coordinates are NEVER accepted — this is the single most important
 #     control (no "teleport anywhere" primitive is exposed).
 #   * Online-only (the publisher also refuses an offline --send).
 #   * Durable 1/hour cooldown (SQLite portal_rescue_log), so it survives deploys.
-#   * Blocked in Deep Desert entirely (see the DD note below).
+#   * PvP maps (Amtal, Deep Desert PvP) are blocked (see _rescue_gate).
 # NOTE (combat gate): there is NO in-combat signal anywhere in the repo (no
 # combat field in player-map, vitals, or progress), so this ships WITHOUT a
 # combat check — accepted per supervisor. The 1/hour cooldown + own-base-only
@@ -9962,13 +10076,16 @@ _RESCUE_COOLDOWN_SECONDS = 3600          # 1 rescue / hour / account (durable)
 _RESCUE_MIN_INTERVAL_SECONDS = 5.0       # in-process anti-double-submit guard
 _last_rescue_at: dict = {}
 
-# Deep Desert is blocked outright. The repo has TWO CONFLICTING and unverified
-# PvE/PvP partition discriminators (dune_chat.py: dd_pvp=partition 8 / dd_pve=31,
-# both verified:False; dune-containers.py: partition_id=31 => PvP). Because the
-# DD-PvP partition cannot be confidently determined from the repo, we gate
-# CONSERVATIVELY and block ALL Deep Desert rescue (the map value is "DeepDesert"
-# from dune-player-map.py's a.map). Refine to PvP-only once the partition is pinned.
-_RESCUE_BLOCKED_MAPS = {"DeepDesert"}
+# Owner rule 10-29: no self-rescue on PvP maps. Habbanya = HaggaBasin dim 0;
+# Amtal (PvP) shares the HaggaBasin map name on dim 2.
+_RESCUE_ALLOWED_HAGGA_DIMS = {0}
+# Deep Desert runs two instances under one map name. Live UserGame.ini (read
+# 10-29): +m_PveEnabledPartitions=8, +m_PvpEnabledPartitions=31; dune.actors puts
+# partition 8 on dim 0 and 31 on dim 1 (docs/SERVER-RATES-AND-RULES.md PvP
+# topology). Both partition AND dim must match; anything else fails closed.
+_RESCUE_DD_PVE = (8, 0)   # (partition, dim)
+_RESCUE_DD_PVP = (31, 1)
+_RESCUE_PVP_MESSAGE = "Self-rescue is not available on PvP maps."
 
 
 def _rescue_inproc_ok(account_id: int) -> bool:
@@ -10049,6 +10166,40 @@ def _choose_rescue_base(self_pos: dict, bases: list) -> Optional[dict]:
     return best
 
 
+def _rescue_gate(self_pos: dict) -> Optional[tuple]:
+    """None if rescue is allowed from this map/instance, else (state, message)."""
+    smap = self_pos.get("map")
+    if smap == "HaggaBasin":
+        if self_pos.get("dim") in _RESCUE_ALLOWED_HAGGA_DIMS:
+            return None
+        return ("pvp_map_blocked", _RESCUE_PVP_MESSAGE)
+    if smap == "DeepDesert":
+        inst = (self_pos.get("part"), self_pos.get("dim"))
+        if inst == _RESCUE_DD_PVE:
+            return None
+        if inst == _RESCUE_DD_PVP:
+            return ("pvp_map_blocked", _RESCUE_PVP_MESSAGE)
+        return ("deep_desert_blocked",
+                "Self-rescue is not available in this Deep Desert instance.")
+    return None
+
+
+def _rescue_pilots(self_pos: dict, markers: list) -> list:
+    """Deep Desert ornithopter pilots (TaxiService markers, one per trade post)
+    as rescue candidates on the player's own map/dim. The marker layer is shared
+    by both DD instances and has not moved across Coriolis resets (June export,
+    August snapshot and the live table agree), so the map snapshot is the source."""
+    if self_pos.get("map") != "DeepDesert":
+        return []
+    out = []
+    for m in markers or []:
+        if m.get("t") != "TaxiService" or m.get("x") is None or m.get("y") is None:
+            continue
+        out.append({"map": "DeepDesert", "dim": self_pos.get("dim"),
+                    "x": m["x"], "y": m["y"], "kind": "pilot", "name": None})
+    return out
+
+
 async def _resolve_fls_for_account(account_id: int) -> Optional[str]:
     """account_id -> hex FLS id for the teleport payload (mirrors
     v2_moderation._resolve_fls_id). The grant picker carries funcom_id for every
@@ -10068,6 +10219,43 @@ async def _resolve_fls_for_account(account_id: int) -> Optional[str]:
                 return fls.strip()
             return None
     return None
+
+
+_RESCUE_COMPASS = ("north", "north-east", "east", "south-east",
+                   "south", "south-west", "west", "north-west")
+
+
+def _rescue_destination_text(self_pos: dict, dest: dict) -> str:
+    """Plain-language destination for the confirm sheet and the result line.
+    World +x = east, +y = south (homeVerdict.js); game units are centimetres."""
+    if dest.get("kind") == "pilot":
+        what = "the nearest ornithopter pilot"
+    elif dest.get("name"):
+        what = f"your base \"{dest['name']}\""
+    elif dest.get("kind") == "outpost":
+        what = "your nearest outpost"
+    else:
+        what = "your nearest base"
+    try:
+        dx = float(dest["x"]) - float(self_pos["x"])
+        dy = float(dest["y"]) - float(self_pos["y"])
+    except (KeyError, TypeError, ValueError):
+        return what
+    metres = math.hypot(dx, dy) / 100.0
+    if metres < 50:
+        return f"{what}, right next to you"
+    bearing = math.degrees(math.atan2(dx, -dy)) % 360
+    heading = _RESCUE_COMPASS[int((bearing + 22.5) // 45) % 8]
+    dist = f"{metres / 1000:.1f} km" if metres >= 1000 else f"{int(round(metres, -1))} m"
+    return f"{what}, about {dist} {heading} of you"
+
+
+def _rescue_target(ident: str) -> dict:
+    """The grant picker's funcom_id is the Funcom handle (Name#1234), not the hex
+    FLS id; the sender rejects a handle as player_id. Send a handle as resolve."""
+    if "#" in ident:
+        return {"resolve": ident}
+    return {"player_id": ident}
 
 
 def _rescue_result_response(request: Request, *, ok: bool, state: str, message: str,
@@ -10092,9 +10280,10 @@ def _rescue_result_response(request: Request, *, ok: bool, state: str, message: 
 @router.post("/portal/rescue")
 async def portal_rescue(request: Request):
     """Self-rescue 'I'm stuck' teleport for the signed-in player. Teleports them
-    to their own nearest base totem in the same map/dim. Destination is chosen
-    SERVER-SIDE from the authoritative per-player map read — client coords are
-    never accepted. Online-only, durable 1/hour cooldown, blocked in Deep Desert.
+    to their own nearest base totem in the same map/dim (Deep Desert PvE: or the
+    nearest ornithopter pilot). Destination is chosen SERVER-SIDE from the
+    authoritative per-player map read — client coords are never accepted.
+    Online-only, durable 1/hour cooldown, blocked on PvP maps.
     Auth: linked session + CSRF. Returns a small HTML fragment."""
     gate, early = _require_linked_session(request)
     if early is not None:
@@ -10174,15 +10363,19 @@ async def portal_rescue(request: Request):
             request, ok=False, state="offline",
             message="You need to be logged in to the game to be rescued.")
 
-    # Block Deep Desert entirely (PvP partition not confidently determinable).
-    if self_pos.get("map") in _RESCUE_BLOCKED_MAPS:
-        _audit(False, "deep_desert_blocked", {"map": self_pos.get("map")})
-        return _rescue_result_response(
-            request, ok=False, state="deep_desert_blocked",
-            message="Self-rescue is not available in the Deep Desert.")
+    blocked = _rescue_gate(self_pos)
+    if blocked is not None:
+        state, message = blocked
+        _audit(False, state, {"map": self_pos.get("map"), "dim": self_pos.get("dim"),
+                              "part": self_pos.get("part")})
+        return _rescue_result_response(request, ok=False, state=state, message=message)
 
-    # Server-chosen destination: nearest own base totem in the same map/dim.
-    base = _choose_rescue_base(self_pos, bases)
+    # Server-chosen destination: nearest own base totem in the same map/dim, or
+    # in Deep Desert PvE the nearer of that and an ornithopter pilot.
+    dd_markers = []
+    if self_pos.get("map") == "DeepDesert":
+        dd_markers = map_model.load_markers(map_model.MAPS["deep-desert"]).get("markers") or []
+    base = _choose_rescue_base(self_pos, bases + _rescue_pilots(self_pos, dd_markers))
     if base is None:
         _audit(False, "no_destination", {"map": self_pos.get("map")})
         return _rescue_result_response(
@@ -10200,8 +10393,8 @@ async def portal_rescue(request: Request):
                     "Please try again in a moment.",
             status=502)
 
-    # base totems carry no z; send z=0 with exact:false so the engine snaps the
-    # player onto safe ground at the base's x/y.
+    # base totems and pilot markers carry no z; send z=0 with exact:false so the
+    # engine (TeleportTo, not TeleportToExact) snaps the player onto safe ground.
     bx, by = base.get("x"), base.get("y")
     result = None
     ok = False
@@ -10209,7 +10402,7 @@ async def portal_rescue(request: Request):
         from relay import call_relay
         result = await call_relay(
             "/dune/server-command", "POST",
-            {"verb": "teleport", "player_id": fls_id, "mode": "apply",
+            {"verb": "teleport", **_rescue_target(fls_id), "mode": "apply",
              "operator": f"portal:{discord_id}", "reason": "self-rescue",
              "args": {"x": float(bx), "y": float(by), "z": 0.0, "exact": False}},
             timeout=60)
@@ -10223,14 +10416,15 @@ async def portal_rescue(request: Request):
         _record_rescue(active_account_id, self_pos, base)
         _audit(True, "ok", {
             "from_x": self_pos.get("x"), "from_y": self_pos.get("y"),
-            "map": self_pos.get("map"),
+            "map": self_pos.get("map"), "dim": self_pos.get("dim"),
+            "part": self_pos.get("part"),
             "to_base_x": bx, "to_base_y": by,
             "base_kind": base.get("kind"),
         })
-        base_label = base.get("name") or ("outpost" if base.get("kind") == "outpost" else "base")
+        where = _rescue_destination_text(self_pos, base).split(",")[0]
+        message = f"Rescued. You have been moved to {where}."
         return _rescue_result_response(
-            request, ok=True, state="ok",
-            message=f"Rescued. You have been moved to your {base_label}.",
+            request, ok=True, state="ok", message=message,
             cooldown_seconds=_RESCUE_COOLDOWN_SECONDS)
 
     detail = (result or {}).get("detail") if isinstance(result, dict) else None
@@ -10241,6 +10435,59 @@ async def portal_rescue(request: Request):
         request, ok=False, state="send_failed",
         message="Rescue could not be completed right now. If you just logged in or "
                 "moved, wait a moment and try again.")
+
+
+@router.get("/portal/rescue/preview")
+async def portal_rescue_preview(request: Request):
+    """Read-only: where a rescue would send the player right now, for the V2
+    confirm sheet. Same gates and destination choice as POST /portal/rescue,
+    but no cooldown is spent, nothing is sent and nothing is audited. The POST
+    re-checks everything, so a player who moves after the preview still goes to
+    whatever is nearest when they confirm. JSON: {ok, state, message,
+    destination?, cooldown_remaining_s?}."""
+    gate, err = _require_linked_session_json(request)
+    if err is not None:
+        return _v2_err("unauthenticated",
+                       "Sign in to the portal with a linked character to continue.", status=401)
+    active_account_id = gate[2]
+
+    def out(ok, state, message, **extra):
+        return JSONResponse({"ok": ok, "state": state, "message": message, **extra})
+
+    cooldown_left = _rescue_cooldown_remaining(active_account_id)
+    if cooldown_left > 0:
+        mins = (cooldown_left + 59) // 60
+        return out(False, "cooldown",
+                   f"Rescue is on cooldown. Try again in about {mins} minute{'s' if mins != 1 else ''}.",
+                   cooldown_remaining_s=cooldown_left)
+    try:
+        from relay import call_relay
+        snapshot = await call_relay(f"/dune/player/{active_account_id}/map", timeout=30)
+    except Exception:  # noqa: BLE001
+        snapshot = None
+    if not isinstance(snapshot, dict) or not snapshot.get("available"):
+        return out(False, "map_unavailable", "We could not read your in-game position right now. "
+                                             "Please try again in a moment.")
+    self_pos = snapshot.get("self") or None
+    bases = snapshot.get("bases") or []
+    if not self_pos:
+        return out(False, "no_position", "We could not find your character's position. "
+                                         "Log in to the game, then try again.")
+    if not self_pos.get("online"):
+        return out(False, "offline", "You need to be logged in to the game to be rescued.")
+    blocked = _rescue_gate(self_pos)
+    if blocked is not None:
+        return out(False, blocked[0], blocked[1])
+    dd_markers = []
+    if self_pos.get("map") == "DeepDesert":
+        dd_markers = map_model.load_markers(map_model.MAPS["deep-desert"]).get("markers") or []
+    base = _choose_rescue_base(self_pos, bases + _rescue_pilots(self_pos, dd_markers))
+    if base is None:
+        return out(False, "no_destination", "No safe destination found. You have no base in your "
+                                            "current region. Self-rescue can only send you to your own base.")
+    text = _rescue_destination_text(self_pos, base)
+    return out(True, "ready", f"You will be moved to {text}.",
+               destination={"kind": base.get("kind") or "base", "text": text})
 
 
 # ----------------------------------------------------- market SELL ----------
@@ -11785,7 +12032,7 @@ async def portal_logout(request: Request):
 # SvelteKit portal. NEW /v2 endpoints only; every V1 HTML handler above is
 # byte-untouched. Reads reuse the existing loaders/shapers verbatim; return raw
 # ints + icon slugs (the UI formats client-side). Contract:
-# docs/dune-research/v2-portal/V2-MODULE-PORTS-BUILD-CONTRACT-2026-07-15.md
+# the design notes (not published)
 #
 # Relay ctrl-support (verified against relay/app.py): /dune/player/{id}/progress
 # accepts ?ctrl= (per-character); /progression_state and /equipped do NOT (they
@@ -12477,6 +12724,38 @@ async def portal_character_augment(request: Request):
     }
 
 
+# ------------------------------------------------- gear viewer colour data --
+# Per-layer garment colours (data/gear-layers.json) and the layer index maps the
+# gear viewer samples (data/gear-idmaps/). Game-derived, so they are served to
+# linked sessions only and never from static/. Built by scripts/build-gear-layers.py.
+_GEAR_DATA_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "data")
+_GEAR_IDMAP_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,96}$")
+
+
+@router.get("/portal/gear/layers")
+async def portal_gear_layers(request: Request):
+    _, early = _require_linked_session_json(request)
+    if early is not None:
+        return early
+    path = _os.path.join(_GEAR_DATA_DIR, "gear-layers.json")
+    if not _os.path.isfile(path):
+        return _v2_err("gear_layers_missing", "Gear colour data is not available.", status=404)
+    return FileResponse(path, media_type="application/json",
+                        headers={"Cache-Control": "private, max-age=3600"})
+
+
+@router.get("/portal/gear/idmap/{name}.png")
+async def portal_gear_idmap(request: Request, name: str):
+    _, early = _require_linked_session_json(request)
+    if early is not None:
+        return early
+    path = _os.path.join(_GEAR_DATA_DIR, "gear-idmaps", name + ".png")
+    if not _GEAR_IDMAP_NAME_RE.match(name) or not _os.path.isfile(path):
+        return _v2_err("gear_idmap_missing", "No such index map.", status=404)
+    return FileResponse(path, media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
 @router.get("/portal/character/v2")
 async def portal_character_v2(request: Request):
     """V2 Character overview (JSON). Per-character: honors the portal switcher's
@@ -12651,23 +12930,32 @@ async def portal_character_v2(request: Request):
 
 
 # --------------------------------------------------- Landsraad V2 (swatches) --
-# Proxy swatch chips (Option A): render each house's HArmCharDyepack<House> armor
-# palette as honest "house palette" chips (exact:false). File the accurate
-# placeable-dyepack RE extraction as a follow-up. House->LUT key has 3 spelling
-# drifts between data.house_reps and static/data/swatch-lut.json.
+# Swatch chips on reward rows. A reward template names the dyepack its claim
+# unlocks (<House>_Placeables_Swatch -> PlaceableDyePack<House>, the same mapping
+# scripts/dune-landsraad-claim.py writes); when that dyepack is in static/data/
+# swatch-lut.json the chips are its exact five dyes (exact:true). Any other
+# swatch reward falls back to the house's HArmCharDyepack<House> armor palette as
+# an honest "house palette" proxy (exact:false). House->LUT key has 3 spelling
+# drifts between data.house_reps and the LUT.
 _LANDSRAAD_SWATCH_ALIAS = {
     "Argosaz": "Agrosaz",
     "Mikkarol": "Mikarrol",
     "Taligari": "Talgari",
 }
-_SWATCH_LUT_CACHE = {"map": None}
+_LANDSRAAD_SWATCH_RE = re.compile(r"([A-Za-z]+)_(Placeables|LightArmor|Stillsuit|HeavyArmor)_Swatch$")
+_LANDSRAAD_SWATCH_PREFIX = {
+    "Placeables": "PlaceableDyePack",
+    "LightArmor": "LArmCharDyepack",
+    "Stillsuit": "StillSCharDyepack",
+    "HeavyArmor": "HArmCharDyepack",
+}
+_SWATCH_LUT_CACHE = {"map": None, "hexes": None}
 
 
-def _swatch_lut_by_house() -> dict:
-    """{house_base_lower: ['#RRGGBB', ...]} from each Landsraad house's
-    HArmCharDyepack<House> dyepack palette. Loaded once; empty on any failure
-    (chips are simply omitted, name renders alone)."""
-    cached = _SWATCH_LUT_CACHE["map"]
+def _swatch_lut_hexes() -> dict:
+    """{swatch_key: ['#RRGGBB', x5]} for every LUT entry. Loaded once; empty on
+    any failure (chips are simply omitted, name renders alone)."""
+    cached = _SWATCH_LUT_CACHE["hexes"]
     if cached is not None:
         return cached
     out = {}
@@ -12676,15 +12964,29 @@ def _swatch_lut_by_house() -> dict:
                              "static", "data", "swatch-lut.json")
         with open(path, "r", encoding="utf-8") as fh:
             swatches = (json.load(fh) or {}).get("swatches") or {}
-        for raw in HOUSE_REP_LOCATIONS:
-            base = _house_base(raw)
-            key = "HArmCharDyepack" + _LANDSRAAD_SWATCH_ALIAS.get(base, base)
-            entry = swatches.get(key)
+        for key, entry in swatches.items():
             hexes = (entry or {}).get("hex") or []
             if hexes:
-                out[base.lower()] = ["#" + str(h).lstrip("#") for h in hexes]
+                out[key] = ["#" + str(h).lstrip("#") for h in hexes]
     except Exception as exc:  # noqa: BLE001
         logger.warning("portal: swatch-lut load failed: %s", exc)
+    _SWATCH_LUT_CACHE["hexes"] = out
+    return out
+
+
+def _swatch_lut_by_house() -> dict:
+    """{house_base_lower: ['#RRGGBB', ...]} from each Landsraad house's
+    HArmCharDyepack<House> dyepack palette (the proxy palette)."""
+    cached = _SWATCH_LUT_CACHE["map"]
+    if cached is not None:
+        return cached
+    hexes = _swatch_lut_hexes()
+    out = {}
+    for raw in HOUSE_REP_LOCATIONS:
+        base = _house_base(raw)
+        chips = hexes.get("HArmCharDyepack" + _LANDSRAAD_SWATCH_ALIAS.get(base, base))
+        if chips:
+            out[base.lower()] = chips
     _SWATCH_LUT_CACHE["map"] = out
     return out
 
@@ -12694,10 +12996,24 @@ def _swatch_chips_for_house(house_base: str) -> Optional[list]:
     return list(chips) if chips else None
 
 
+def _swatch_for_reward(template_id: str, house_base: str) -> Optional[dict]:
+    """The swatch block for one reward row: the exact dyes when the template names
+    a dyepack the LUT has, else the house proxy palette, else None."""
+    m = _LANDSRAAD_SWATCH_RE.search(template_id or "")
+    if m:
+        token, prefix = m.group(1), _LANDSRAAD_SWATCH_PREFIX[m.group(2)]
+        hexes = _swatch_lut_hexes()
+        for key in (prefix + token, prefix + _LANDSRAAD_SWATCH_ALIAS.get(token, token)):
+            if key in hexes:
+                return {"chips": list(hexes[key]), "exact": True}
+    chips = _swatch_chips_for_house(house_base)
+    return {"chips": chips, "exact": False} if chips else None
+
+
 def _attach_board_swatches(shaped_board: dict, raw_board: dict) -> None:
-    """Attach proxy swatch chips to board tile reward rows whose template_id is a
-    placeable swatch. Correlates shaped tiles<->raw tiles by board_index and
-    reward rows by index (the shaper preserves order)."""
+    """Attach swatch chips to board tile reward rows whose template_id is a
+    swatch. Correlates shaped tiles<->raw tiles by board_index and reward rows by
+    index (the shaper preserves order)."""
     raw_by_idx = {int(t.get("board_index") or -1): t
                   for t in (raw_board.get("tiles") or [])}
     for tile in shaped_board.get("tiles") or []:
@@ -12705,21 +13021,20 @@ def _attach_board_swatches(shaped_board: dict, raw_board: dict) -> None:
         if not rt:
             continue
         raw_rewards = rt.get("rewards") or []
-        chips = _swatch_chips_for_house(tile.get("short") or "")
-        if not chips:
-            continue
         for i, rewrow in enumerate(tile.get("rewards") or []):
             if i >= len(raw_rewards):
                 break
             tid = raw_rewards[i].get("template_id") or ""
             if "Swatch" in tid:
-                rewrow["swatch"] = {"chips": chips, "exact": False}
+                swatch = _swatch_for_reward(tid, tile.get("short") or "")
+                if swatch:
+                    rewrow["swatch"] = swatch
 
 
 def _attach_rewards_swatches(rewards: dict, raw_rewards: dict) -> None:
-    """Attach proxy swatch chips to the rewards-half item rows (board + houses)
-    whose template_id is a placeable swatch. Correlates by house raw name + item
-    index (the shaper preserves per-house item order)."""
+    """Attach swatch chips to the rewards-half item rows (board + houses) whose
+    template_id is a swatch. Correlates by house raw name + item index (the
+    shaper preserves per-house item order)."""
     raw_items_by_house = {
         (h.get("house_name") or ""): (h.get("items") or [])
         for h in (raw_rewards.get("houses") or [])
@@ -12729,15 +13044,15 @@ def _attach_rewards_swatches(rewards: dict, raw_rewards: dict) -> None:
             raw_items = raw_items_by_house.get(entry.get("raw") or "")
             if not raw_items:
                 continue
-            chips = _swatch_chips_for_house(_house_base(entry.get("raw") or ""))
-            if not chips:
-                continue
+            house_base = _house_base(entry.get("raw") or "")
             for i, it in enumerate(entry.get("items") or []):
                 if i >= len(raw_items):
                     break
                 tid = raw_items[i].get("template_id") or ""
                 if "Swatch" in tid:
-                    it["swatch"] = {"chips": chips, "exact": False}
+                    swatch = _swatch_for_reward(tid, house_base)
+                    if swatch:
+                        it["swatch"] = swatch
 
 
 @router.get("/portal/landsraad/v2")
@@ -12758,7 +13073,9 @@ async def portal_landsraad_v2(request: Request):
     rewards = None
     raw_rewards = None
     try:
-        raw_rewards = mirror.get_section(active_account_id, "landsraad")
+        # Never a snapshot from before this player's last claim (see _load_landsraad).
+        raw_rewards = mirror.get_section(active_account_id, "landsraad",
+                                         newer_than=landsraad_claim.last_claim_at(active_account_id))
         if raw_rewards is None:
             from routers.dune import cached_landsraad_rewards
             raw_rewards = await cached_landsraad_rewards(active_account_id)
@@ -12805,6 +13122,87 @@ async def portal_landsraad_v2(request: Request):
         "rewards": rewards,
         "active_character_name": row["character_name"],
         "rewards_error": rewards is None,
+        "claim_enabled": landsraad_claim.enabled_for(
+            config.LANDSRAAD_CLAIM_ENABLED, config.LANDSRAAD_CLAIM_ACCOUNTS, active_account_id),
+    })
+
+
+_last_landsraad_claim_at: dict = {}
+
+
+@router.post("/portal/landsraad/claim")
+async def portal_landsraad_claim(request: Request):
+    """Claim every unclaimed Landsraad house reward from the portal (JSON). Body
+    {mode: "preview"|"apply", csrf_token}. preview runs the writer's real transaction
+    and rolls it back, so the plan shown is the plan applied. The controller is
+    resolved SERVER-SIDE from the session (+ selected character); the writer
+    re-checks offline in-transaction. Ships DARK behind LASTSIETCH_LANDSRAAD_CLAIM_ENABLED
+    and the writer's own gate file. Auth: linked session + CSRF."""
+    gate, early = _require_linked_session_json(request)
+    if early is not None:
+        return early
+    _, discord_id, active_account_id, _ = gate
+
+    body, csrf_ok = await _v2_body_and_csrf(request)
+    if not csrf_ok:
+        return _v2_err("csrf", "Invalid CSRF token", status=403)
+    if not landsraad_claim.enabled_for(config.LANDSRAAD_CLAIM_ENABLED,
+                                       config.LANDSRAAD_CLAIM_ACCOUNTS, active_account_id):
+        return _v2_err(*landsraad_claim.claim_error("preview", "disabled"))
+    mode = str(body.get("mode", "") or "").strip()
+    if mode not in ("preview", "apply"):
+        return _v2_err("bad_request", "Unknown claim mode.", status=400)
+    # check-and-record before the first await, so concurrent requests cannot both pass
+    if not landsraad_claim.take_slot(_last_landsraad_claim_at, active_account_id, mode,
+                                     time.monotonic()):
+        return _v2_err("rate_limited", "One claim at a time, please. Wait a moment.", status=429)
+
+    owner_ctrl, _bank = await _resolve_buyer_ctrl_and_bank(
+        active_account_id, _selected_ctrl(request, active_account_id))
+    if owner_ctrl is None:
+        return _v2_err("unavailable", "We could not verify your in-game character right now. "
+                       "Please try again in a moment.", status=502)
+
+    from relay import call_relay
+    from auth import audit_log
+    result, ok, err_token = None, False, None
+    try:
+        result = await call_relay("/dune/landsraad/claim", method="POST", json_body={
+            "owner_ctrl": owner_ctrl, "mode": mode,
+            "operator": f"portal:{discord_id}"[:64]}, timeout=50)
+        ok = isinstance(result, dict) and bool(result.get("ok"))
+        if not ok and isinstance(result, dict):
+            err_token = result.get("error")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("portal: landsraad claim relay error acct=%s: %s", active_account_id, exc)
+    finally:
+        if mode == "apply":
+            audit_log(None, f"portal:{discord_id}", "portal_landsraad_claim",
+                      str(owner_ctrl), client_ip(request),
+                      details=json.dumps({
+                          "account_id": active_account_id, "owner_ctrl": owner_ctrl,
+                          "result": "ok" if ok else (err_token or "error"),
+                          "withdrawn_lines": (result or {}).get("withdrawn_lines")
+                                             if isinstance(result, dict) else None,
+                      }),
+                      success=ok)
+
+    if not ok:
+        return _v2_err(*landsraad_claim.claim_error(mode, err_token))
+
+    receipt = landsraad_claim.shape_receipt(result)
+    if mode == "apply":
+        landsraad_claim.record_claim(active_account_id, discord_id, receipt)
+        try:
+            from cache import invalidate
+            invalidate("dune.landsraad_rewards", active_account_id)
+        except Exception:  # noqa: BLE001 - cache drop is best-effort
+            pass
+    return _v2_ok({
+        "mode": mode,
+        "online": bool(result.get("online")),
+        "receipt": receipt,
+        "swatches_enabled": bool(result.get("swatches_enabled")),
     })
 
 

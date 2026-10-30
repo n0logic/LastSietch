@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 import config
@@ -35,6 +36,30 @@ from database import get_db
 log = logging.getLogger(__name__)
 
 TS_FMT = "%Y-%m-%d %H:%M:%S"
+
+# Weekend opt-in (plan B3). The portal pref `weekend_remind` is the player's
+# standing "remind me before every weekend event". It is read here, at the T-1h
+# mark, and turned into ordinary portal_event_reminders rows, so delivery, the
+# once-only ledger and the cancelled/draft filters are the ones above and nothing
+# is sent twice. Gated by LASTSIETCH_WEEKEND_REMIND_ENABLED (default off, same gate the
+# portal reads to show the toggle).
+WEEKEND_EFFECTS = ("xp", "spec_xp", "crafting", "harvest")
+
+# The same title fallback as portal-nextgen/src/lib/weekend.js (TITLE_RULES), for
+# a weekend run by hand with no effect column: needs a "double", "2x" or "weekend"
+# word, so a Landsraad term notice or a Great Harvest gathering is not a weekend.
+# Landsraad is tested before plain XP so "Double Landsraad" is not 2x character XP.
+_TITLE_RULES = (
+    (re.compile(r"(?:double|2x)\s+landsraad|landsraad\s+weekend|spec(?:ialization)?\s+xp", re.I), "spec_xp"),
+    (re.compile(r"craft(?:ing)?\s+weekend", re.I), "crafting"),
+    (re.compile(r"(?:double|2x)\s+harvest|harvest\s+weekend", re.I), "harvest"),
+    (re.compile(r"(?:double|2x)\s*xp|\bxp\s+weekend", re.I), "xp"),
+)
+
+# Effects that stop the fleet at the start and again at the end (owner ruling
+# 2026-10-30: remind for these too, and say so).
+RESTART_EFFECTS = ("xp", "crafting")
+RESTART_LINE = "All maps restart for about 20 minutes at the start and again at the end."
 
 # T-1h reminder. The window's lower bound is "now", so an event that already
 # started drops out of it rather than sending a message about the past.
@@ -52,7 +77,8 @@ _DUE_SQL = """
            e.title AS title,
            e.kind AS kind,
            e.starts_utc AS starts_utc,
-           e.map_name AS map_name
+           e.map_name AS map_name,
+           e.effect AS effect
       FROM portal_event_reminders r
       JOIN portal_events e ON e.id = r.event_id
      WHERE r.notified_at IS NULL
@@ -81,8 +107,81 @@ def _body(row) -> str:
     map_name = str(row["map_name"] or "").strip()
     if map_name:
         lines.append(f"Map: {map_name}")
+    if weekend_effect(row["effect"], row["title"]) in RESTART_EFFECTS:
+        lines.append(RESTART_LINE)
     lines.append(EVENT_URL.format(id=row["event_id"]))
     return "\n".join(lines)
+
+
+# Weekend events about to start, and every linked account that opted in. json_valid
+# guards json_extract, which raises on a document that no longer parses.
+_WEEKEND_EVENTS_SQL = """
+    SELECT id, title, effect FROM portal_events
+     WHERE status = 'published' AND starts_utc > ? AND starts_utc <= ?
+"""
+_OPTED_IN_SQL = """
+    SELECT DISTINCT l.account_id AS account_id
+      FROM portal_prefs p
+      JOIN ls_account_links l ON l.discord_id = p.discord_id AND l.revoked_at IS NULL
+     WHERE p.scope = ''
+       AND CASE WHEN json_valid(p.prefs)
+                THEN json_extract(p.prefs, '$.weekend_remind') ELSE 0 END = 1
+"""
+
+
+def _weekend_remind_enabled() -> bool:
+    """Weekend opt-in gate, default OFF. Resolved by feature_flags on every call
+    (override file, then LASTSIETCH_WEEKEND_REMIND_ENABLED, then "0"), so the owner's
+    Systems toggle lands on the next tick with no restart."""
+    import feature_flags
+    return bool(feature_flags.enabled("LASTSIETCH_WEEKEND_REMIND_ENABLED", "0"))
+
+
+def weekend_effect(effect, title):
+    """The weekend effect of a published event, or None. The effect column when
+    the runner set one, else the title (`none` means staff run it by hand). It
+    follows the event, never a calendar rotation, so a fifth-Friday Landsraad
+    weekend or a holiday swap reminds exactly when it is published."""
+    effect = str(effect or "none")
+    if effect in WEEKEND_EFFECTS:
+        return effect
+    if effect != "none":
+        return None
+    for rule, key in _TITLE_RULES:
+        if rule.search(str(title or "")):
+            return key
+    return None
+
+
+def is_weekend_event(effect, title) -> bool:
+    return weekend_effect(effect, title) is not None
+
+
+def enrol_weekend(now: datetime | None = None) -> int:
+    """Give every opted-in linked account a reminder row for each weekend event
+    starting within the lead window. Returns the rows added. INSERT OR IGNORE
+    keeps it idempotent: a row already there (set by hand, or sent) is untouched."""
+    now_s, horizon_s = _now_str(now)
+    conn = get_db()
+    try:
+        events = [r for r in conn.execute(_WEEKEND_EVENTS_SQL, (now_s, horizon_s)).fetchall()
+                  if is_weekend_event(r["effect"], r["title"])]
+        if not events:
+            return 0
+        accounts = [int(r["account_id"]) for r in conn.execute(_OPTED_IN_SQL).fetchall()]
+        added = 0
+        for ev in events:
+            for account_id in accounts:
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO portal_event_reminders (event_id, account_id) "
+                    "VALUES (?, ?)", (ev["id"], account_id))
+                added += cur.rowcount
+        conn.commit()
+        if added:
+            log.info("event_reminders: weekend opt-in enrolled=%d", added)
+        return added
+    finally:
+        conn.close()
 
 
 def run_once(now: datetime | None = None) -> int:
@@ -94,6 +193,11 @@ def run_once(now: datetime | None = None) -> int:
     means a failure mid-batch costs at most the row it was on, never a replay of
     the rows already delivered."""
     now_s, horizon_s = _now_str(now)
+    if _weekend_remind_enabled():
+        try:
+            enrol_weekend(now)
+        except Exception as exc:  # opt-in is a bonus; the per-event reminders still go
+            log.warning("event_reminders: weekend enrol failed: %s", exc)
     conn = get_db()
     try:
         rows = conn.execute(_DUE_SQL, (now_s, horizon_s, TICK_LIMIT)).fetchall()

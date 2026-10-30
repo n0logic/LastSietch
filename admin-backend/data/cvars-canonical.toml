@@ -1,6 +1,6 @@
 # P8 — Last Sietch-curated canonical CVar values.
 #
-# Source of truth: docs/dune-research/P8-EXECUTION-BRIEF.md §7 Diff sub-tab.
+# Source of truth: the design notes (not published) §7 Diff sub-tab.
 # Format: TOML (stdlib tomllib, no PyYAML dep). Section names match the
 # Unreal-style [/Script/...] section headers in DefaultGame.ini /
 # UserOverrides.ini; values are stringified to match what Funcom's INI parser

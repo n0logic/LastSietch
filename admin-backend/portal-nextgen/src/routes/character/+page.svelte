@@ -110,7 +110,7 @@
             <h3 class="yd-title">Your Data</h3>
             <p class="yd-safe">Your character is saved on the server and backed up every 6 hours. If the server ever goes down for maintenance, your progress is safe.</p>
             {#if auth.exportEnabled}
-              <p class="yd-note">A keepsake copy of this dossier is yours to download from <a href={`${base}/settings`}>Settings</a>.</p>
+              <p class="yd-note">A keepsake copy of this dossier is yours to download from <a href={`${base}/settings?tab=privacy`}>Settings</a>.</p>
             {/if}
           </div>
         </CarvedSlab>

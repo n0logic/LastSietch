@@ -7,6 +7,7 @@
 // the SvelteKit alias; api.js itself only touches browser APIs inside fns.
 import { api, getJSON } from '../api.js';
 import { headingToCompass } from './overlays.js';
+import { worldToNormalized } from './transform.js';
 
 export const LIVE_INTERVAL_MS = 10000;       // /live cadence floor (V1)
 export const PLAYERS_INTERVAL_MS = 45000;    // /players cadence (V1)
@@ -22,7 +23,6 @@ export const ME_STALE_MS = 25000;
 // Assumed sweep window for a recurring DD sandstorm. The pod logs emit only a
 // spawn timestamp with no duration, so "active" is derived (V1 calibration
 // assumption, tune if it reads early/late in-game).
-export const STORM_ACTIVE_SECONDS = 180;
 const STORM_LOCATION_FRESH_MS = 20 * 60 * 1000;
 
 export function createPollers(key, applyFix, getDim) {
@@ -156,13 +156,39 @@ export function createPollers(key, applyFix, getDim) {
 // silently, so chrome must degrade Ibad to dim amber when
 // now - asOfMs > ~2.5x the 10s cadence, not trust `fresh` alone.
 // src: { meta, spice, sandstorm, worms, instance, spiceAtMs?, wormsAtMs?, now? }
+// Medium spice sites for ONE instance (dim), as [nx, ny, sector, active].
+// /data spice_mediums is the PvE+PvP union (sites deduped by coord, active if
+// erupted in EITHER dim), so a per-instance view must come from /live, which
+// carries each dim's own ram_mediums in world cm. Projected with the map cal
+// exactly as the backend does (map_model.normalize, rounded to 0.1). Falls back
+// to the /data union until /live has this dim, or for a reader without
+// ram_mediums.
+export function mediumsForDim(meta, spice, dim) {
+  const info = ((spice && spice.dimensions) || {})[String(dim)];
+  const list = info && info.ram_mediums;
+  if (!Array.isArray(list) || !meta || !meta.cal) return (meta && meta.spice_mediums) || [];
+  const view = meta.view || 1000;
+  const out = [];
+  const seen = {};
+  list.forEach(function (md) {
+    const p = worldToNormalized(md && md.x, md && md.y, meta.cal, view);
+    if (!p) return;
+    const nx = Math.round(p.nx * 10) / 10, ny = Math.round(p.ny * 10) / 10;
+    const k = nx + ',' + ny;
+    if (seen[k]) { if (md.active) seen[k][3] = true; return; }
+    seen[k] = [nx, ny, String(md.sector || '').toUpperCase(), !!md.active];
+    out.push(seen[k]);
+  });
+  return out;
+}
+
 export function deriveConsole(src) {
   const dim = src.instance ? src.instance.dim : null;
   const dimKey = String(dim);
   const now = src.now != null ? src.now : Date.now();
   const meta = src.meta || {};
 
-  const mediums = meta.spice_mediums || [];
+  const mediums = mediumsForDim(meta, src.spice, dim);
   const mediumActive = mediums.filter(function (m) { return m && m[3] === true; }).length;
   const spiceInfo = ((src.spice && src.spice.dimensions) || {})[dimKey];
   let blows = [];
@@ -212,34 +238,38 @@ export function deriveConsole(src) {
   };
 }
 
+// Storm card state from real reader state only (2.26.1): no timing-only
+// "sweeping" after a spawn. Reader v2's relay sets storm_state: 'active' (fresh
+// position), 'clear' (healthy, no storm) or 'unknown'. A pre-v2 relay omits it;
+// then a fresh scanned sector is still a real position. endsUtc comes from
+// ends_utc, else storm_scanned_utc + lifetime_remaining (seconds).
 function deriveStorm(sandstorm, dimKey, now) {
   const sealed = { state: 'sealed', fresh: false, label: '' };
   if (!sandstorm || sandstorm.available === false) return sealed;
   const info = (sandstorm.dimensions || {})[dimKey];
   // Selected dim absent from the feed: sealed, NEVER borrow the other dim.
   if (!info) return sealed;
-  const scanned = info.storm_scanned_utc;
-  const locFresh = !!(scanned &&
-    now - new Date(scanned).getTime() < STORM_LOCATION_FRESH_MS);
-  if (info.storm_sector && locFresh) {
-    const heading = headingToCompass(info.heading_yaw);
-    return {
-      state: 'centered',
-      sector: info.storm_sector,
-      heading: heading,
-      // Compass sign VERIFIED 2026-07-04 vs a live sweep (drift bearing 34.47
-      // deg vs heading_yaw 34.5; samples in ops/storm-heading-verify/).
-      headingProvisional: false,
-      fresh: true,
-      label: 'centered ' + info.storm_sector +
-             (heading ? ', heading ' + heading : ''),
-    };
+  const eta = { state: 'eta', etaUtc: info.next_eta_utc || null, fresh: false, label: '' };
+  if (info.storm_state === 'clear') return eta;
+  const scanned = info.storm_scanned_utc ? new Date(info.storm_scanned_utc).getTime() : NaN;
+  const locFresh = !isNaN(scanned) && now - scanned < STORM_LOCATION_FRESH_MS;
+  const active = info.storm_state === 'active' || (info.storm_state == null && !!info.storm_sector && locFresh);
+  if (!active) return eta;
+  const heading = headingToCompass(info.heading_yaw);
+  let endsUtc = info.ends_utc || null;
+  if (!endsUtc && typeof info.lifetime_remaining === 'number' && info.lifetime_remaining > 0 && !isNaN(scanned)) {
+    endsUtc = new Date(scanned + info.lifetime_remaining * 1000).toISOString();
   }
-  if (info.last_spawn_utc) {
-    const since = now - new Date(info.last_spawn_utc).getTime();
-    if (since >= 0 && since < STORM_ACTIVE_SECONDS * 1000) {
-      return { state: 'sweeping', fresh: true, label: 'sweeping now' };
-    }
-  }
-  return { state: 'eta', etaUtc: info.next_eta_utc || null, fresh: false, label: '' };
+  return {
+    state: 'centered',
+    sector: info.storm_sector || null,
+    heading: heading,
+    // Compass sign VERIFIED 2026-07-04 vs a live sweep (drift bearing 34.47
+    // deg vs heading_yaw 34.5; samples in ops/storm-heading-verify/).
+    headingProvisional: false,
+    endsUtc: endsUtc,
+    fresh: true,
+    label: (info.storm_sector ? 'centered ' + info.storm_sector : 'on the board') +
+           (heading ? ', heading ' + heading : ''),
+  };
 }

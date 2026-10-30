@@ -12,7 +12,7 @@
  * has scrolled away from the top of the stream we don't yank the viewport
  * back to the newest row.
  *
- * Reference: docs/dune-research/VC2-P1-EXECUTION-BRIEF.md §8.2.
+ * Reference: the design notes (not published) §8.2.
  * ========================================================================= */
 (function () {
   'use strict';

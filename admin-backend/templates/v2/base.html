@@ -13,15 +13,24 @@
    an asset with no key at all can never be busted. Every /admin/static asset
    loaded here carries one; bump the key in the same commit as the content. #}
 <link rel="stylesheet" href="/admin/static/css/design-system.css?v=20260904a">
+{# Easier reading font: applied before first paint; the switch is in the user menu. #}
+<script>try { if (localStorage.getItem('ls-reading-font') === '1') document.documentElement.setAttribute('data-reading-font', 'dyslexic'); var rs = localStorage.getItem('ls-reading-size'); if (rs === 's' || rs === 'l') document.documentElement.setAttribute('data-reading-size', rs); } catch (e) {}</script>
+<link rel="stylesheet" href="/admin/static/css/reading-font.css?v=20261026-rsize">
+<script src="/admin/static/js/reading-font.js?v=20261026-rsize" defer></script>
 {% block extra_css %}{% endblock %}
+{% if request and (request.state|default(none)).admin_shell|default(none) %}
+<link rel="stylesheet" href="/admin/static/css/v2/shell.css?v=20261030a">
+<script src="/admin/static/js/v2-shell-next.js?v=20261030a" defer></script>
+{% endif %}
 <script src="/admin/static/vendor/htmx.min.js?v=20260904a" defer></script>
 <script src="/admin/static/js/time-local.js?v=20260610e" defer></script>
 <script src="/admin/static/js/v2-shell.js?v=20260904a" defer></script>
 <script src="/admin/static/js/v2-actions.js?v=20260612a" defer></script>
 </head>
-<body class="admin-page admin-v2">
+{% set shell = ((request.state|default(none)).admin_shell|default(none)) if request else none %}
+<body class="admin-page admin-v2{% if shell %} admin-shell-next{% endif %}">
 
-{# Six-tab IA, per docs/dune-research/admin-panel/ADMIN-WAVE1-PLAN-2026-09-03.md §5.
+{# Six-tab IA, per the design notes (not published) §5.
    The highlight is derived from the request PATH, not from `current_tab`: nine
    routers set that key and only two of them are in this change, so a key-based
    highlight would go stale on any page whose router was not edited (and did,
@@ -41,6 +50,36 @@
      else 'overview' if nav_path.startswith('/v2/overview')
      else '' %}
 
+{% if shell %}
+{# H0 shell (flag LASTSIETCH_ADMIN_SHELL_NEXT_ENABLED, admin_shell.py). Rail items are plain
+   links to a section landing page; the section's other pages are the tabs below the
+   banner. No dropdowns, no fly-outs. #}
+{% include "v2/_includes/shell_icons.html" %}
+<a class="ls-skip" href="#ls-content">Skip to content</a>
+<div class="ls-shell">
+  <aside class="ls-rail" aria-label="Main">
+    <a class="ls-brand" href="/admin/v2/overview"><span class="ls-sigil" aria-hidden="true">LS</span><span class="ls-brand__t">Last Sietch<small>Admin</small></span></a>
+    <nav class="ls-rail__nav" aria-label="Sections">
+      {% for g in shell.groups %}
+      <a class="ls-rail__i{% if g.active %} is-active{% endif %}" href="{{ g.href }}" data-section="{{ g.key }}"{% if g.active %} aria-current="page"{% endif %}><svg class="ls-ic" aria-hidden="true"><use href="#ls-i-{{ g.icon }}"/></svg><span>{{ g.label }}</span></a>
+      {% endfor %}
+    </nav>
+    <div class="ls-rail__foot"><span class="ls-env ls-env--{{ env|default('prod') }}">{{ env|default('prod') }}</span></div>
+  </aside>
+  <div class="ls-main">
+    <div class="ls-topbar">
+      <button class="ls-jump" type="button" id="ls-jump-open" aria-haspopup="dialog"><svg class="ls-ic" aria-hidden="true"><use href="#ls-i-search"/></svg><span>Jump to a page</span><kbd>/</kbd></button>
+      <span class="ls-live" id="ls-online" title="Players online now"><i class="ls-dot" aria-hidden="true"></i><span id="ls-online-n">-</span> online</span>
+      <div class="ls-topbar__user">{% include "v2/_includes/header_user_menu.html" %}</div>
+    </div>
+    <div class="ls-banner" role="presentation" style="background-image:url({{ shell.banner }})"></div>
+    <nav class="ls-tabs" aria-label="Section pages">
+      {% for t in shell.tabs %}
+      <a class="ls-tabs__i{% if t.active %} is-active{% endif %}" href="{{ t.href }}"{% if t.active %} aria-current="page"{% endif %}>{{ t.label }}</a>
+      {% endfor %}
+    </nav>
+    <div class="ls-content" id="ls-content">
+{% else %}
 <header class="v2-header">
   <div class="v2-header__chrome">
     <span class="v2-header__env v2-header__env--{{ env|default('prod') }}">{{ env|default('prod') }}</span>
@@ -73,9 +112,30 @@
   {% endif %}
 {% endblock %}
 
+{% endif %}
+
 {% block player_picker %}{% endblock %}
 
 {% block content %}{% endblock %}
+{% if shell %}
+    </div>
+  </div>
+</div>
+<nav class="ls-tabbar" aria-label="Main mobile">
+  {% for g in shell.groups %}
+  <a class="ls-tabbar__i{% if g.active %} is-active{% endif %}" href="{{ g.href }}"{% if g.active %} aria-current="page"{% endif %}><svg class="ls-ic" aria-hidden="true"><use href="#ls-i-{{ g.icon }}"/></svg><span>{{ g.label }}</span></a>
+  {% endfor %}
+</nav>
+<div class="ls-jumpdlg" id="ls-jumpdlg" role="dialog" aria-modal="true" aria-label="Jump to a page" hidden>
+  <div class="ls-jumpdlg__box">
+    <input type="search" id="ls-jump-q" placeholder="Type a page name" autocomplete="off" aria-label="Page name">
+    <ul id="ls-jump-list">
+      {% for pg in shell.pages %}<li><a href="{{ pg.href }}">{{ pg.label }}</a></li>{% endfor %}
+    </ul>
+    <p class="ls-jumpdlg__empty" id="ls-jump-empty" hidden>No page matches.</p>
+  </div>
+</div>
+{% endif %}
 
 <!-- Confirmation Dialog -->
 <div class="confirm-overlay" id="confirm-overlay">

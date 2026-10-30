@@ -4,6 +4,7 @@
 // strings only ever cross the boundary as data.
 
 import { sectorCenter } from './grid.js';
+import { stormFootprint, positionAt, isOver, STORM_STALE_MS as FP_STALE_MS } from './stormFootprint.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 
@@ -298,9 +299,12 @@ export function drawStorm(svg, p) {
   if (old) svg.removeChild(old);
   if (!p.hasStorms || p.hidden['sandstorm']) { p.reckoner.remove('storm'); return; }
   // Backend re-keys each map's storms onto the instance dim, so this lookup
-  // isolates one sietch: a Kulon storm cannot draw on the Habbanya tab.
+  // isolates one sietch: an Amtal storm cannot draw on the Habbanya tab.
   const info = ((p.sandstorm && p.sandstorm.dimensions) || {})[String(p.dim)];
-  if (!info) { p.reckoner.remove('storm'); return; }
+  // storm_state 'clear' = the reader is healthy and sees no storm: draw nothing.
+  if (!info || info.storm_state === 'clear') { p.reckoner.remove('storm'); return; }
+  const fp = stormFootprint(info);
+  if (fp) { drawStormFootprint(svg, p, fp); return; }
   const cx = info.center_nx, cy = info.center_ny;
   const hasCenter = isFiniteNum(cx) && isFiniteNum(cy);
   const sx = info.start_nx, sy = info.start_ny, ex = info.end_nx, ey = info.end_ny;
@@ -371,4 +375,62 @@ export function drawStorm(svg, p) {
     p.reckoner.remove('storm');
   }
   svg.appendChild(layer);
+}
+
+const STORM_FP_FRESH_MS = 20 * 60 * 1000;   // = the holo's live-position window
+
+// Reader v2: the storm's real footprint. One ellipse per zone (damage zones filled,
+// the gust front a dashed outline), the dashed route, the centre + heading. The
+// whole footprint rides one translated group that reckon.js moves along the route
+// at the game's own speed (exact, see stormFootprint.js); no circle.
+function drawStormFootprint(svg, p, fp) {
+  const now = Date.now();
+  if (isOver(fp, now) || !(now - fp.atMs < STORM_FP_FRESH_MS)) { p.reckoner.remove('storm'); return; }
+  const layer = document.createElementNS(SVGNS, 'g');
+  layer.setAttribute('class', 'map-storm-layer map-storm-layer--footprint');
+  const step = p.viewUnits / (p.grid ? p.grid.cols : 9);
+  if (fp.route) {
+    const r = document.createElementNS(SVGNS, 'line');
+    r.setAttribute('x1', fp.route.sx); r.setAttribute('y1', fp.route.sy);
+    r.setAttribute('x2', fp.route.ex); r.setAttribute('y2', fp.route.ey);
+    r.setAttribute('class', 'map-storm-route');
+    layer.appendChild(r);
+  }
+  const track = document.createElementNS(SVGNS, 'g');
+  track.setAttribute('class', 'map-storm-track');
+  let reach = 0;
+  fp.zones.forEach(function (z) {
+    const el = document.createElementNS(SVGNS, 'ellipse');
+    el.setAttribute('cx', z.dx); el.setAttribute('cy', z.dy);
+    el.setAttribute('rx', z.ax); el.setAttribute('ry', z.ay);
+    el.setAttribute('transform', 'rotate(' + z.yaw + ' ' + z.dx + ' ' + z.dy + ')');
+    el.setAttribute('class', 'map-storm-zone ' + (z.damage ? 'map-storm-zone--damage' : 'map-storm-zone--gust'));
+    el.setAttribute('data-zone', z.name);
+    track.appendChild(el);
+    reach = Math.max(reach, z.ax + Math.abs(z.dx) + Math.abs(z.dy));
+  });
+  const mark = document.createElementNS(SVGNS, 'circle');
+  mark.setAttribute('cx', 0); mark.setAttribute('cy', 0);
+  mark.setAttribute('r', step * 0.08);
+  mark.setAttribute('class', 'map-storm-center');
+  track.appendChild(mark);
+  const rad = fp.yaw * Math.PI / 180;
+  const arrow = document.createElementNS(SVGNS, 'line');
+  arrow.setAttribute('x1', 0); arrow.setAttribute('y1', 0);
+  arrow.setAttribute('x2', Math.cos(rad) * reach); arrow.setAttribute('y2', Math.sin(rad) * reach);
+  arrow.setAttribute('class', 'map-storm-heading');
+  track.appendChild(arrow);
+  layer.appendChild(track);
+  svg.appendChild(layer);
+  const until = Math.min(isFinite(fp.endsMs) ? fp.endsMs : Infinity,
+    isFinite(fp.atMs) ? fp.atMs + FP_STALE_MS : Infinity);
+  p.reckoner.followFix('storm', {
+    position: function (w) { return positionAt(fp, w, !!p.reduce); },
+    untilMs: until,
+    apply: function (x, y, estimated) {
+      track.setAttribute('transform', 'translate(' + x + ',' + y + ')');
+      track.classList.toggle('is-extrapolated', !!estimated);
+      if (isOver(fp, Date.now())) layer.style.display = 'none';
+    },
+  });
 }

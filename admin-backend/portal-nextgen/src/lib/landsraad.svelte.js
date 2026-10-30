@@ -4,8 +4,9 @@
 // prop-drilling. Mutate the proxy's PROPERTIES in place (never reassign
 // `landsraad` itself), so the shared reference every component holds stays live.
 //
-// READ-ONLY surface (contract MODULE 2): account-scoped, no CSRF, no writes, no
-// optimistic mutation. The character switcher does NOT re-key this. The board
+// READ-ONLY surface (contract MODULE 2): account-scoped, no CSRF, no optimistic
+// mutation. The one exception is the portal claim, which lives in ClaimPanel and
+// reloads this state after it commits rather than editing it. The character switcher does NOT re-key this. The board
 // (term-global great-house contest) and the rewards (the player's own pending
 // house rewards) render independently: either half may be null and the other
 // still shows. Reads are never gated; signed-out seals to a Connect-Discord panel.
@@ -17,6 +18,7 @@ export const landsraad = $state({
   rewards: null,         // _load_landsraad output (summary/houses/board) | null
   rewardsError: false,   // rewards half failed while the board still resolved
   activeChar: '',        // active character name (server-resolved, echoed)
+  claimEnabled: false,   // portal claim switched on server-side (LASTSIETCH_LANDSRAAD_CLAIM_ENABLED)
 
   selectedTile: null,    // open TileDrawer target (a board tile) | null
   selectedHouse: null,   // open HouseRewardsGrid detail (a rewards house) | null
@@ -37,6 +39,7 @@ export async function loadAll() {
     landsraad.rewards = r?.rewards || null;
     landsraad.rewardsError = r?.rewards_error === true;
     landsraad.activeChar = r?.active_character_name || '';
+    landsraad.claimEnabled = r?.claim_enabled === true;
     landsraad.status = 'ready';
   } catch (e) {
     if (seq !== loadSeq) return;

@@ -1,10 +1,10 @@
 <script>
-  // Placeable-dyepack swatch chips. The backend attaches swatch:{chips:[hex...],
-  // exact:false} to any reward whose template is a placeable Swatch, computed
-  // from the house's armor dyepack palette (a PROXY, not the true placeable
-  // colors). We render the hex squares and, when exact is false, an honest
-  // "house palette" badge so the color is never misrepresented as the real one.
-  // The accurate placeable-dyepack RE extraction is a filed follow-up task.
+  // Dyepack swatch chips. The backend attaches swatch:{chips:[hex...], exact} to
+  // any reward whose template is a Swatch. exact:true = the reward's own five
+  // dyes; exact:false = the house's armor dyepack palette used as a PROXY when
+  // the reward's own dyes are unknown. We render the hex squares and, when exact
+  // is false, an honest "house palette" badge so the color is never
+  // misrepresented as the real one.
   let { swatch = null } = $props();
 
   let chips = $derived(Array.isArray(swatch?.chips) ? swatch.chips.filter(Boolean) : []);

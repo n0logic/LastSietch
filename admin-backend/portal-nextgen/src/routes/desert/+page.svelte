@@ -25,7 +25,6 @@
     { key: 'deep-desert', inst: 'pve', name: 'Deep Desert', chip: 'PvE' },
     { key: 'deep-desert', inst: 'pvp', name: 'Deep Desert', chip: 'PvP' },
     { key: 'hagga', inst: 'habbanya', name: 'Habbanya', chip: 'PvE' },
-    { key: 'hagga', inst: 'kulon', name: 'Kulon', chip: 'PvP' },
     { key: 'hagga', inst: 'amtal', name: 'Amtal', chip: 'Full PvP' },
     { key: 'arrakeen', inst: null, name: 'Arrakeen', chip: 'Social hub' },
     { key: 'harko-village', inst: null, name: 'Harko Village', chip: 'Social hub' },

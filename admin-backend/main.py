@@ -10,13 +10,17 @@ from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+import admin_shell
 import chat_retention
+import ip_retention
 import event_reminders
+import games_offline
 import market_watch
 import metrics
 import mirror
 import name_lookups
 import portal_identity
+import portal_transfer_relink
 import relay
 from auth import get_current_user
 from database import has_users, init_db
@@ -59,6 +63,12 @@ async def lifespan(app: FastAPI):
     # LASTSIETCH_CHAT_ENABLED: a switched-off feature still holds what it already took,
     # and gating retention on a feature flag is how that becomes an archive.
     chat_retention_task = asyncio.create_task(chat_retention.sync_loop(app))
+    # Transfer relink: re-points links after a Funcom character transfer.
+    # Self-disables when TRANSFER_RELINK_ENABLED is off.
+    transfer_relink_task = asyncio.create_task(portal_transfer_relink.sync_loop(app))
+    # IP retention: audit_log addresses cleared and link attempts deleted after
+    # 90 days. No kill switch, same reasoning as chat retention.
+    ip_retention_task = asyncio.create_task(ip_retention.sync_loop(app))
     try:
         yield
     finally:
@@ -66,13 +76,19 @@ async def lifespan(app: FastAPI):
         mirror_task.cancel()
         market_watch_task.cancel()
         event_reminders_task.cancel()
+        ip_retention_task.cancel()
         chat_retention_task.cancel()
-        for _task in (sampler_task, mirror_task, market_watch_task,
+        transfer_relink_task.cancel()
+        for _task in (transfer_relink_task, sampler_task, mirror_task, market_watch_task,
                       event_reminders_task, chat_retention_task):
             try:
                 await _task
             except asyncio.CancelledError:
                 pass
+        try:
+            await ip_retention_task
+        except asyncio.CancelledError:
+            pass
         # VC0 perf: close the shared httpx client opened lazily on first
         # call_relay(). Idempotent — safe even if no relay call happened.
         await relay.close_client()
@@ -119,7 +135,7 @@ _PORTAL_CSP = (
 # GLB-embedded textures (container 3D heroes, holo terrain). Blobs are page-created
 # and same-origin, so this stays low-risk. child-src blob: covers three's worker path.
 _NEXTGEN_CSP = (
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; "
     "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com; "
     "font-src 'self'; connect-src 'self' blob:; worker-src 'self' blob:; child-src blob:; manifest-src 'self'"
 )
@@ -138,6 +154,9 @@ async def security_headers(request: Request, call_next):
     else:
         response.headers["Content-Security-Policy"] = _ADMIN_CSP
     return response
+
+
+app.middleware("http")(admin_shell.make_middleware(get_current_user))
 
 
 # --- V2 next-gen portal (SvelteKit SPA static artifact) ---------------------
@@ -222,6 +241,12 @@ def _nextgen_report_lookup(edition_id):
         return None
 
 
+# The shell, the worker and the manifest must revalidate on every load. With only
+# an ETag and Last-Modified, Safari reuses a heuristically fresh copy, and an iOS
+# home-screen app keeps booting the previous build's shell.
+_SHELL_CACHE = {"Cache-Control": "no-cache"}
+
+
 @app.get("/portal/v2")
 @app.get("/portal/v2/{path:path}")
 async def portal_v2_spa(path: str = "") -> Response:
@@ -234,7 +259,9 @@ async def portal_v2_spa(path: str = "") -> Response:
             resolved = None
         if resolved and resolved.is_file():
             if resolved.suffix == ".webmanifest":
-                return FileResponse(resolved, media_type="application/manifest+json")
+                return FileResponse(resolved, media_type="application/manifest+json", headers=_SHELL_CACHE)
+            if resolved.name == "sw.js" or resolved.suffix == ".html":
+                return FileResponse(resolved, headers=_SHELL_CACHE)
             return FileResponse(resolved)
     index = base / "index.html"
     if index.is_file():
@@ -244,8 +271,8 @@ async def portal_v2_spa(path: str = "") -> Response:
         except Exception:  # noqa: BLE001
             unfurled = shell = None
         if unfurled is not None and unfurled != shell:
-            return HTMLResponse(unfurled)
-        return FileResponse(index, media_type="text/html")
+            return HTMLResponse(unfurled, headers=_SHELL_CACHE)
+        return FileResponse(index, media_type="text/html", headers=_SHELL_CACHE)
     return PlainTextResponse("portal v2 not deployed", status_code=503)
 
 
@@ -271,6 +298,13 @@ app.include_router(v2_monitor.router)
 # the path param swallows "grants" and raises 400 "account_id must be a
 # positive integer".
 app.include_router(v2_players.router)
+# Events Manager (ADMIN-02): the admin-panel door onto the same event store.
+# /v2/players/events must also register before the v2_player catch-all.
+try:
+    from routers import v2_events
+    app.include_router(v2_events.router)
+except ImportError:
+    logging.getLogger(__name__).warning("routers.v2_events absent; /v2/players/events not registered")
 app.include_router(v2_player.router)
 # Phase C moderation trio (kick/ban/unban + bans list). Lives under
 # /api/dune/v2/* alongside the player drilldown JSON endpoints.
@@ -289,6 +323,15 @@ app.include_router(v2_bases.router)
 # Every write goes through the same relay -> dispatcher -> writer chain the
 # portal uses; nothing here reaches the game DB directly.
 app.include_router(v2_karum.router)
+# Amtal rules-ledger operator page (/admin/amtal-ledger + /api/dune/v2/amtal/*). Private
+# only (retiring): the router, amtal_ledger.py and its template are not published.
+# Guarded like the wave routers: it lands on its own branch, and its absence must
+# cost only the ledger page, never the whole admin panel.
+try:
+    from routers import v2_amtal_ledger
+    app.include_router(v2_amtal_ledger.router)
+except ImportError:
+    logging.getLogger(__name__).warning("routers.v2_amtal_ledger absent; /admin/amtal-ledger not registered")
 # Wave 1 Set A (World & Maps) and Set B (Systems & Health, Economy, Social).
 # Guarded one at a time: the three wave-1 branches merge separately, and a
 # module that has not landed yet must cost its own pages, not the whole panel.
@@ -311,6 +354,13 @@ app.include_router(portal_signin.router)
 app.include_router(messages.router)
 app.include_router(portal_link.router)
 app.include_router(portal_alerts.router)
+# Public Amtal PvP board (/portal/amtal/pvp). Dark behind LASTSIETCH_AMTAL_PVP_ENABLED.
+# Guarded the same way: its absence must cost the board only, never the portal.
+try:
+    from routers import portal_amtal
+    app.include_router(portal_amtal.router)
+except ImportError:
+    logging.getLogger(__name__).warning("routers.portal_amtal absent; /portal/amtal/* not registered")
 # Fremkit wave 4 identity codes + own-activity log under /portal/settings/*.
 # Guarded like the wave-1 admin routers: this module lands on its own branch, and
 # its absence must cost the Settings panel only, never the whole portal.
@@ -383,6 +433,21 @@ try:
     app.include_router(portal_features.router)
 except ImportError:
     logging.getLogger(__name__).warning("routers.portal_features absent; /portal/features not registered")
+# Seven Nights of the Sietch under /portal/sietch/* and /v2/sietch/*. Guarded like
+# its neighbours; every route reads LASTSIETCH_SIETCH_NIGHTS_ENABLED (default off) per
+# request, so registering it changes nothing a player can see until the gate opens.
+try:
+    from routers import portal_sietch
+    app.include_router(portal_sietch.router)
+except ImportError:
+    logging.getLogger(__name__).warning("routers.portal_sietch absent; /portal/sietch/* not registered")
+# Cosmetics picker read under /portal/cosmetics. Reads LASTSIETCH_COSMETIC_TITLES_ENABLED
+# (default off) per request and answers enabled:false while it is dark.
+try:
+    from routers import portal_cosmetics
+    app.include_router(portal_cosmetics.router)
+except ImportError:
+    logging.getLogger(__name__).warning("routers.portal_cosmetics absent; /portal/cosmetics not registered")
 # QA harness minted sessions under /portal/qa/*. Guarded like its neighbours, and
 # the guard matters more here than anywhere else: the module answers a bare 404
 # unless LASTSIETCH_QA_SESSIONS is on AND the caller is pure loopback, so a box that
@@ -459,7 +524,11 @@ async def dashboard_game(request: Request, game_id: str):
     if game_id == "dune":
         # Dune dashboard retired — v2 overview is the live page (Phase B).
         return RedirectResponse(url="/admin/v2/overview", status_code=302)
-    return templates.TemplateResponse(request, "dashboard.html", {"user": user, "game_id": game_id})
+    offline, note = games_offline.read()
+    return templates.TemplateResponse(request, "dashboard.html", {
+        "user": user, "game_id": game_id,
+        "relocating": game_id in offline, "relocating_note": note,
+    })
 
 
 @app.get("/users")

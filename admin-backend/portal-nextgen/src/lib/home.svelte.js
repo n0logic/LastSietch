@@ -167,6 +167,7 @@ export async function loadStandings() {
     const r = await api.landsraad.standings();
     if (s !== seq.standings) return;
     home.raw.standings = r;
+    ctx.standingsReadAt = Date.now();
     recompute();
   } catch (e) {}
 }
@@ -231,16 +232,16 @@ function followCharacter() {
 const applied = { mapKey: null, partition: null };
 
 /** Resolve the instance from the character's partition, through the board's own
- *  instance table. Hagga's three sietches share one terrain and one friendly
+ *  instance table. Hagga's sietches share one terrain and one friendly
  *  name, so the partition is the ONLY thing that says which of them a player is
- *  standing in; reading the sietch off 'Hagga Basin' would put a Kulon player's
+ *  standing in; reading the sietch off 'Hagga Basin' would put an Amtal player's
  *  storm on the Habbanya sand. A null partition, or a board whose instances
  *  carry no partition at all (the Deep Desert), leaves the stored instance
  *  exactly where it was.
  *
  *  Applied ONCE per board and partition. The composition read repeats every 60
  *  seconds and re-applying it every time silently dragged the toggle back: a
- *  player reading Kulon while their character stands in Habbanya got one poll
+ *  player reading Amtal while their character stands in Habbanya got one poll
  *  of their pick and then the placement again. */
 function applyPartitionDim() {
   const c = (home.raw.home && home.raw.home.character) || null;

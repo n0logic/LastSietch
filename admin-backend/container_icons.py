@@ -2,7 +2,7 @@
 # /admin/static/img/containers/<name>.png. Returns None when nothing is mapped
 # or the PNG is absent, so the tile falls back to its text label. Mirrors the
 # stat_icons / item_icons helper style. Icons sourced from awakening.wiki +
-# DunePakRE client-pak extraction (full-color renders).
+# client pak extraction (full-color renders).
 
 import os
 

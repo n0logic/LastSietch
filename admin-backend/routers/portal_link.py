@@ -142,8 +142,10 @@ async def _validate_csrf_link_flow(request: Request) -> None:
     try:
         form = await request.form()
         body_token = form.get("csrf_token", "") or ""
+    except HTTPException:
+        raise
     except Exception:
-        body_token = ""
+        raise HTTPException(status_code=400, detail="Invalid form data") from None
     provided = header_token or body_token
     if not validate_csrf(provided, expected):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")

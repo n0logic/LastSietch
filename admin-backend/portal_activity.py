@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 
-DESTINATIONS = {"reward": "/rewards", "karum": "/karum", "gift": "/settings",
-                "transfer": "/settings", "rescue": "/maps", "mail": "/mailbox"}
+DESTINATIONS = {"reward": "/rewards", "karum": "/karum", "gift": "/settings?tab=transfers",
+                "transfer": "/settings?tab=transfers", "rescue": "/maps", "mail": "/mailbox"}
 
 
 def utc_stamp(value):

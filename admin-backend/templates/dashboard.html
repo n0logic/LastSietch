@@ -1,11 +1,19 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
-<div class="container">
+<div class="container{% if relocating %} is-relocating{% endif %}">
   <div style="margin-bottom:1rem;">
     <a href="/admin/" style="font-family:var(--font-mono); font-size:0.95rem; color:var(--text-muted); text-decoration:none;"
        onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'">&larr; All Servers</a>
   </div>
+  {% if relocating %}
+  <!-- Planned outage: listed in /etc/lastsietch/games-offline -->
+  <style>.is-relocating .btn-group, .is-relocating #snap-schedule-row { display:none !important; }</style>
+  <div id="relocating-banner" role="status" style="background:rgba(52,152,219,0.1); border:1px solid #3498db; border-radius:8px; padding:1rem 1.5rem; margin-bottom:1.5rem; font-family:var(--font-mono); font-size:0.8rem;">
+    <span style="color:#3498db; font-weight:600;">OFFLINE: RELOCATING</span>
+    <span style="color:var(--text-muted); margin-left:0.75rem;">{{ relocating_note }} &middot; server controls are disabled until it returns</span>
+  </div>
+  {% endif %}
   <!-- Pending Config Banner -->
   <div id="config-banner" style="display:none; background:rgba(241,196,15,0.1); border:1px solid var(--yellow); border-radius:8px; padding:1rem 1.5rem; margin-bottom:1.5rem; font-family:var(--font-mono); font-size:0.8rem;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
@@ -121,7 +129,7 @@
       <div id="snapshot-list"></div>
       <div style="margin-top:1rem; padding-top:0.75rem; border-top:1px solid var(--border);">
         <div class="card-title" style="margin-bottom:0.5rem;">Auto-Snapshot Schedule</div>
-        <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+        <div id="snap-schedule-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
           <select id="snap-schedule" style="width:auto; min-width:180px;">
             <option value="off">Disabled</option>
             <option value="weekly">Weekly (Sunday 3:00 AM)</option>
@@ -167,6 +175,8 @@
 <script>
 document.getElementById('nav-dashboard').classList.add('active');
 var GAME = '{{ game_id }}';
+var RELOCATING = {{ relocating|tojson }};
+var RELOCATING_NOTE = {{ relocating_note|tojson }};
 var GAME_META = null;  // filled by loadGameMeta()
 
 function escHtml(s) {
@@ -261,9 +271,20 @@ function refreshMemory7d() {
   }).catch(function() {});
 }
 
+// 503/504 from /api/games/* means the home relay is unreachable, not that the call broke.
+function relayDownLabel(e) {
+  return (e && (e.status === 503 || e.status === 504)) ? 'OFFLINE' : 'ERROR';
+}
+
 function refreshStatus() {
   apiCall('GET', '/admin/api/games/' + GAME + '/vm/status').then(function(d) {
     var el = document.getElementById('vm-status');
+    if (d.relocating) {
+      el.textContent = 'OFFLINE: RELOCATING';
+      el.className = 'stat-value status-unknown';
+      document.getElementById('vm-specs').textContent = d.note || '';
+      return;
+    }
     el.textContent = d.status.toUpperCase();
     el.className = 'stat-value ' + (d.status === 'running' ? 'status-running' : 'status-stopped');
     var specs = [];
@@ -271,8 +292,8 @@ function refreshStatus() {
     if (d.memory_gb) specs.push(d.memory_gb + ' GB RAM');
     if (d.cpu_type) specs.push(d.cpu_type);
     document.getElementById('vm-specs').textContent = specs.length ? specs.join(' // ') : '';
-  }).catch(function() {
-    document.getElementById('vm-status').textContent = 'ERROR';
+  }).catch(function(e) {
+    document.getElementById('vm-status').textContent = relayDownLabel(e);
     document.getElementById('vm-status').className = 'stat-value status-stopped';
   });
 
@@ -287,6 +308,12 @@ function refreshStatus() {
 
   apiCall('GET', '/admin/api/games/' + GAME + '/server/status').then(function(d) {
     var el = document.getElementById('conan-status');
+    if (d.relocating) {
+      el.textContent = 'OFFLINE: RELOCATING';
+      el.className = 'stat-value status-unknown';
+      document.getElementById('conan-detail').textContent = d.note || '';
+      return;
+    }
     el.textContent = d.running ? 'RUNNING' : 'STOPPED';
     el.className = 'stat-value ' + (d.running ? 'status-running' : 'status-stopped');
     var detail = 'PID: ' + (d.pid || '---') + ' | RAM: ' + (d.memory_mb ? fmtMB(d.memory_mb) : '---');
@@ -296,10 +323,19 @@ function refreshStatus() {
     document.getElementById('conan-detail').textContent = detail;
     extraInfo.uptime = d.uptime;
     renderExtra();
-  }).catch(function() {
-    document.getElementById('conan-status').textContent = 'ERROR';
+  }).catch(function(e) {
+    document.getElementById('conan-status').textContent = relayDownLabel(e);
     document.getElementById('conan-status').className = 'stat-value status-stopped';
+    if (e && (e.status === 503 || e.status === 504)) {
+      document.getElementById('conan-detail').textContent = 'Game host relay unreachable (home Proxmox offline?)';
+    }
   });
+
+  if (RELOCATING) {
+    document.getElementById('live-players').textContent = 'RELOCATING';
+    document.getElementById('live-detail').textContent = RELOCATING_NOTE;
+    return;
+  }
 
   apiCall('GET', '/admin/api/games/' + GAME + '/savedata').then(function(d) {
     document.getElementById('gamedb-size').textContent = d.size_mb ? d.size_mb + ' MB' : '---';
@@ -899,8 +935,12 @@ function renderUpdateJob(job) {
 
 loadGameMeta();
 refreshStatus();
-refreshSnapshots();
-loadSnapSchedule();
+if (RELOCATING) {
+  document.getElementById('snapshot-list').innerHTML = '<div class="snapshot-item">' + escHtml(RELOCATING_NOTE) + '</div>';
+} else {
+  refreshSnapshots();
+  loadSnapSchedule();
+}
 refreshMemory();
 refreshMemory7d();
 setInterval(refreshStatus, 30000);

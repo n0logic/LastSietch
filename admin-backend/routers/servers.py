@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+import games_offline
 import metrics as metrics_mod
 from auth import audit_log, get_current_user, require_admin, require_csrf
 from database import get_db
@@ -175,6 +176,7 @@ async def server_restart(request: Request, game_id: str):
 async def server_broadcast(request: Request, game_id: str, body: MessageRequest):
     user = get_current_user(request)
     require_csrf(request, user)
+    games_offline.refuse_if_offline(game_id)
     if not await _game_supports_rcon(game_id):
         raise HTTPException(501, "In-game broadcast is not supported for this server")
     result = await call_relay(f"/games/{game_id}/server/broadcast", "POST", {"message": body.message})
@@ -397,6 +399,7 @@ async def _countdown_task(game_id: str, action: str, delay: int, username: str):
 async def scheduled_stop(request: Request, game_id: str, body: ScheduledRequest):
     user = get_current_user(request)
     require_csrf(request, user)
+    games_offline.refuse_if_offline(game_id)
     if game_id in pending_ops:
         raise HTTPException(409, "An operation is already pending for this game")
     if body.delay_minutes not in (1, 5):
@@ -420,6 +423,7 @@ async def scheduled_stop(request: Request, game_id: str, body: ScheduledRequest)
 async def scheduled_restart(request: Request, game_id: str, body: ScheduledRequest):
     user = get_current_user(request)
     require_csrf(request, user)
+    games_offline.refuse_if_offline(game_id)
     if game_id in pending_ops:
         raise HTTPException(409, "An operation is already pending for this game")
     if body.delay_minutes not in (1, 5):

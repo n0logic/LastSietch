@@ -6,6 +6,10 @@
 <title>{% block title %}Admin{% endblock %} — Last Sietch Admin</title>
 <link rel="icon" type="image/x-icon" href="/assets/favicon.ico">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+{# Easier reading font: applied before first paint; the switch is in the header. #}
+<script>try { if (localStorage.getItem('ls-reading-font') === '1') document.documentElement.setAttribute('data-reading-font', 'dyslexic'); var rs = localStorage.getItem('ls-reading-size'); if (rs === 's' || rs === 'l') document.documentElement.setAttribute('data-reading-size', rs); } catch (e) {}</script>
+<link rel="stylesheet" href="/admin/static/css/reading-font.css?v=20261026-rsize">
+<script src="/admin/static/js/reading-font.js?v=20261026-rsize" defer></script>
 <style>
 :root {
   --bg: #0a0a0f;
@@ -340,6 +344,8 @@ tr:hover { background: rgba(255, 255, 255, 0.02); }
   <div class="header-right">
     <span class="header-user">{{ user.username }}</span>
     <span class="role-badge {{ user.role }}">{{ user.role }}</span>
+    <button type="button" class="btn btn-sm reading-toggle" role="switch" aria-checked="false" data-reading-font-toggle>Easier reading font<span class="reading-toggle__state" aria-hidden="true">Off</span></button>
+    <button type="button" class="btn btn-sm reading-size" data-reading-size-toggle hidden>Text size<span class="reading-toggle__state">Medium</span></button>
     <button class="btn btn-sm" onclick="doLogout()">Logout</button>
   </div>
 </div>

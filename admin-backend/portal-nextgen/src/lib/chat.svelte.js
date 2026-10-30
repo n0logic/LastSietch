@@ -17,6 +17,7 @@
 // with `white-space: pre-wrap`, never innerHTML and never {@html}: the server
 // strips links to [link] but the client must not be the thing that trusts it.
 import { api, uuidv4 } from './api.js';
+import { chatBadge, attachLive, detachLive } from './chatBadge.svelte.js';
 
 // The channel list carries unread counts and the mute state, both of which move
 // without any action from this tab, and it is the poll that notices the feature
@@ -81,6 +82,7 @@ export function backoffDelay(attempt) {
 const REFUSAL_TEXT = {
   chat_disabled: 'Chat is being fitted. Back soon.',
   not_member: 'You are not in this channel.',
+  channel_closed: 'This channel is closed. You can still read it.',
   muted: 'You are muted in this channel.',
   rate_limited: 'Too many messages just now.',
   duplicate: 'You just said that.',
@@ -293,6 +295,7 @@ export async function loadChannels() {
       return;
     }
     chat.enabled = true;
+    chatBadge.dark = false;
     chat.channels = Array.isArray(r.channels) ? r.channels : [];
     chat.me = r.me || null;
     chat.status = 'ready';
@@ -309,6 +312,7 @@ export async function loadChannels() {
 /** The flag went off (or was never on). Seal, drop the rows, end the stream. */
 function goDark() {
   chat.enabled = false;
+  chatBadge.dark = true;
   chat.channels = [];
   chat.messages = {};
   chat.local = {};
@@ -887,6 +891,14 @@ function onVisibility() {
   }
 }
 
+/** Unread over the rooms the rail holds: the top-bar badge's source while this
+ *  surface is mounted. Until the rail has a good read, the polled number holds:
+ *  a failed channel read is not "nothing unread". */
+function liveUnread() {
+  if (chat.status !== 'ready' || !chat.enabled) return chatBadge.unread;
+  return chat.channels.reduce((n, c) => n + (Number(c?.unread) || 0), 0);
+}
+
 /** Subscribe the chat surface: loads the channel list, keeps it polled while the
  *  tab is visible, and holds the stream open. Returns the teardown, so a caller
  *  can hand it straight back from $effect. */
@@ -896,11 +908,13 @@ export function watchChat() {
     document.addEventListener('visibilitychange', onVisibility);
     listening = true;
   }
+  attachLive(liveUnread);
   loadChannels();
   startPoll();
   return () => {
     subscribers = Math.max(0, subscribers - 1);
     if (subscribers > 0) return;
+    detachLive(liveUnread());
     stopPoll();
     stopCountdown();
     clearHiddenTimer();

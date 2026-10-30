@@ -2,6 +2,7 @@
   // My listings, three buckets behind a segmented control: Active / Completed /
   // History. Active rows can Cancel + Relist; the others are read-only. NO expiry
   // countdown exists in the data, so none is shown (an honest cut, per contract).
+  import { base } from '$app/paths';
   import { exchange, setOrdersTab } from '$lib/exchange.svelte.js';
   import OrderRow from './OrderRow.svelte';
 
@@ -41,6 +42,7 @@
       {:else if tab === 'completed'}No completed sales yet.
       {:else}No closed listings yet.{/if}
     </p>
+    <a class="howto" href={`${base}/help#howto-selling`}>How selling, SOLD and Take item work</a>
   {:else}
     <div class="rows">
       {#each list as o (o.order_id)}
@@ -68,5 +70,6 @@
   .seg button.on { color: var(--accent-bright); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 18%, transparent), transparent); box-shadow: inset 0 -2px 0 var(--accent); font-weight: 700; }
   .seg button.on .c { color: var(--accent-text); }
   .hint { margin: 0; font-size: var(--text-sm); color: var(--text-muted); line-height: 1.45; }
+  .howto { font-size: var(--text-sm); color: var(--accent-text); }
   .rows { display: flex; flex-direction: column; gap: var(--space-1); max-height: 24rem; overflow-y: auto; }
 </style>

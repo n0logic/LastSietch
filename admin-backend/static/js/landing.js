@@ -141,7 +141,7 @@
     }
   }
 
-  /* ── Proxmox infra banner ──────────────────────────────────────────────── */
+  /* ── Host infra banner ─────────────────────────────────────────────────── */
   function loadInfraStatus() {
     fetch('/admin/api/infra/status', { credentials: 'same-origin' })
       .then(function (r) {
@@ -149,7 +149,7 @@
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
-      .then(renderInfraBanner)
+      .then(function (d) { if (d && d.relocating) renderInfraRelocating(d); else renderInfraBanner(d); })
       .catch(renderInfraBannerError);
   }
 
@@ -233,7 +233,7 @@
     vmsEl.innerHTML = vmsHtml;
 
     /* Location / platform */
-    var loc = (d.location && d.platform) ? (d.location + ' · ' + d.platform) : 'Proxmox';
+    var loc = (d.location && d.platform) ? (d.location + ' · ' + d.platform) : 'Host';
     if (typeof d.network_speed_mbps === 'number' && d.network_speed_mbps > 0) {
       var spd = d.network_speed_mbps;
       loc += ' · ' + (spd >= 1000 ? (spd / 1000) + ' Gbps' : spd + ' Mbps');
@@ -268,11 +268,32 @@
 
     var dot = document.getElementById('infra-dot');
     dot.className = 'v2-landing__dot is-unreachable';
-    dot.setAttribute('aria-label', 'Infrastructure status: Proxmox unreachable');
+    dot.setAttribute('aria-label', 'Infrastructure status: host unreachable');
 
     document.querySelectorAll('#infra-banner .v2-landing__stat dt').forEach(function (dt) {
-      dt.textContent = 'Proxmox unreachable';
+      dt.textContent = 'Host unreachable';
     });
+  }
+
+  /* Planned outage: the panel answers for the host from /etc/lastsietch/games-offline. */
+  function renderInfraRelocating(d) {
+    restoreInfraLabels();
+    ['stat-cpu', 'stat-ram', 'stat-disk', 'stat-uptime'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) { el.textContent = '---'; el.className = 'v2-landing__stat-value'; }
+    });
+    ['stat-ram-free', 'stat-disk-free'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.textContent = '';
+    });
+    sparkBuffers.infra = [];
+    renderSpark('infra', 'infra');
+    document.getElementById('infra-vms').textContent = 'Host offline (relocating)';
+    document.getElementById('infra-location').textContent = d.note || 'Offline while we relocate';
+
+    var dot = document.getElementById('infra-dot');
+    dot.className = 'v2-landing__dot is-relocating';
+    dot.setAttribute('aria-label', 'Infrastructure status: host offline (relocating)');
   }
 
   /* ── Dune VPS banner ───────────────────────────────────────────────────── */
@@ -398,6 +419,7 @@
   /* ── Game cards ────────────────────────────────────────────────────────── */
   function deriveBatchStatus(gameData) {
     if (!gameData) return { state: 'unknown', uptime: null };
+    if (gameData.relocating) return { state: 'relocating', uptime: null, note: gameData.note };
     if (typeof gameData.provisioned !== 'undefined') {
       if (!gameData.provisioned) return { state: 'provisioned', uptime: null };
       if (!gameData.vm_running) return { state: 'offline', uptime: null };
@@ -410,7 +432,7 @@
   }
 
   function buildStatusBadge(state) {
-    var labels = { online: 'ONLINE', offline: 'OFFLINE', provisioned: 'PROVISIONED', unknown: 'UNKNOWN' };
+    var labels = { online: 'ONLINE', offline: 'OFFLINE', relocating: 'OFFLINE: RELOCATING', provisioned: 'PROVISIONED', unknown: 'UNKNOWN' };
     return '<span class="v2-landing__badge is-' + state + '" role="status">'
       + '<span class="v2-landing__badge-dot" aria-hidden="true"></span>'
       + labels[state]
@@ -429,6 +451,9 @@
 
     if (state === 'provisioned') {
       return '<div class="v2-landing__coming-soon">Provisioning in progress. Server launch pending.</div>';
+    }
+    if (state === 'relocating') {
+      return '<div class="v2-landing__coming-soon">' + escHtml(statusInfo.note || 'Offline while we relocate') + '</div>';
     }
 
     var players = '---';
@@ -455,6 +480,7 @@
     var name = meta ? meta.display_name : gameId;
     var state = statusInfo.state;
     if (state === 'provisioned') return name + ' — Provisioned, not yet available';
+    if (state === 'relocating') return name + ': offline, relocating. ' + (statusInfo.note || 'Offline while we relocate');
     if (state === 'online') {
       var players = (batchData && batchData.players != null && batchData.max_players != null)
         ? batchData.players + ' of ' + batchData.max_players + ' players'
@@ -558,12 +584,15 @@
           if (r.status === 401) { window.location = '/admin/login'; throw new Error('Unauthorized'); }
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
-        }),
+        })
+        /* The games relay is on the home games host; when it's offline the
+           Conan/Enshrouded cards go to unknown but Dune status still renders. */
+        .catch(function () { return null; }),
       fetch('/status.json').then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
       fetch('/api/dune/status').then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
     ])
       .then(function (results) {
-        var data = results[0];
+        var data = results[0] || {};
         var publicStatus = results[1];
         var duneStatus = results[2];
         if (publicStatus && publicStatus.servers) {
@@ -587,7 +616,7 @@
             var batchData = data[gameId];
             if (!batchData) return;
             var statusInfo = deriveBatchStatus(batchData);
-            if (statusInfo.state === 'provisioned') return;
+            if (statusInfo.state === 'provisioned' || statusInfo.state === 'relocating') return;
 
             var playersEl = document.getElementById('card-' + gameId + '-players');
             var uptimeEl = document.getElementById('card-' + gameId + '-uptime');

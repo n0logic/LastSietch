@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% block title %}Seven Nights{% endblock %}
+{% block content %}
+<div class="header">
+  <div class="header-title">SEVEN NIGHTS OF THE SIETCH</div>
+  <div class="header-right"><a href="/admin/">&larr; Admin</a></div>
+</div>
+
+<div style="padding: 1.5rem 2rem; max-width: 1200px; margin: 0 auto;">
+
+  <p style="color: var(--text-muted); margin-bottom: 1rem;">
+    Staff console for the Halloween 2026 event. Every write here is audited. Spot coordinates
+    are staff-only: never paste them into Discord or any player channel. Handles only, never real names.
+  </p>
+
+  <h2>Award LS Tokens</h2>
+  <div class="panel">
+    <div class="grid">
+      <label>Profile id <input id="a-profile" placeholder="32 hex characters" /></label>
+      <label>or Account id <input id="a-account" inputmode="numeric" placeholder="game account id" /></label>
+      <label>Amount (1 to 50) <input id="a-amount" type="number" min="1" max="50" value="3" /></label>
+      <label>Case id (required) <input id="a-case" placeholder="costume-2026-n7-2nd" /></label>
+    </div>
+    <label style="display:block; margin-top:0.5rem;">Reason
+      <input id="a-reason" placeholder="Costume contest, 2nd place" style="width:100%" />
+    </label>
+    <div class="btn-group" style="margin-top:0.75rem;">
+      <button class="btn btn-accent" id="btn-award">Award</button>
+      <span id="award-msg" class="msg"></span>
+    </div>
+  </div>
+
+  <h2>Ledger</h2>
+  <div class="panel">
+    <div class="btn-group">
+      <input id="l-profile" placeholder="profile id or account id" />
+      <button class="btn" id="btn-ledger">Show</button>
+      <span id="ledger-msg" class="msg"></span>
+    </div>
+    <div style="overflow-x:auto; margin-top:0.75rem;">
+      <table id="ledger"><thead><tr><th>ID</th><th>Delta</th><th>Kind</th><th>Night</th><th>Source / ref</th><th>Operator</th><th>Reason</th><th>At (UTC)</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <h2>Orders</h2>
+  <div class="panel">
+    <div class="btn-group">
+      <select id="o-status">
+        <option value="">all</option><option>queued</option><option>delivering</option><option>reconciling</option>
+        <option>failed</option><option>refunded</option><option>delivered</option>
+      </select>
+      <button class="btn" id="btn-orders">Refresh</button>
+      <span id="orders-msg" class="msg"></span>
+    </div>
+    <div style="overflow-x:auto; margin-top:0.75rem;">
+      <table id="orders"><thead><tr><th>ID</th><th>Profile</th><th>SKU</th><th>Lane</th><th>Price</th><th>Status</th><th>Tries</th><th>Error</th><th>Created</th><th>Actions</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <h2>Spots</h2>
+  <div class="panel">
+    <p style="color: var(--text-muted); margin:0 0 0.5rem;">
+      Spots as a JSON array (at most 50 per save; one bad row refuses the whole save).
+      Hagga or Deep Desert only, never Amtal. Radius 15000 is 150 m.
+      A <code>seek</code> spot must have <code>public: 0</code>. Staff only: never paste these anywhere else.
+    </p>
+    <textarea id="spots" rows="12" spellcheck="false" style="width:100%; font-family: var(--font-mono); font-size: 0.78rem;"></textarea>
+    <div class="btn-group" style="margin-top:0.5rem;">
+      <button class="btn" id="btn-spots-load">Reload</button>
+      <button class="btn btn-accent" id="btn-spots-save">Save spots</button>
+      <span id="spots-msg" class="msg"></span>
+    </div>
+  </div>
+
+  <h2>Review</h2>
+  <div class="panel">
+    <p style="color: var(--text-muted); margin:0 0 0.5rem;">Profiles that share a connection IP or several accounts. Review only; nothing here acts on its own.</p>
+    <button class="btn" id="btn-review">Load</button>
+    <div style="overflow-x:auto; margin-top:0.75rem;">
+      <table id="review"><thead><tr><th>Flag</th><th>Profiles</th><th>Accounts</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+</div>
+
+<style>
+  h2 { margin: 1.5rem 0 0.75rem; color: var(--accent); font-family: var(--font-mono); }
+  .panel { background: var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:1rem; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap:0.6rem; }
+  label { display:flex; flex-direction:column; gap:0.25rem; font-size:0.8rem; color: var(--text-muted); }
+  input, select, textarea { background: var(--bg); color: var(--text); border:1px solid var(--border);
+    border-radius:4px; padding:0.4rem; font-family: var(--font-sans); }
+  table { width:100%; border-collapse: collapse; font-size:0.85rem; }
+  th, td { text-align:left; padding:0.45rem 0.6rem; border-bottom:1px solid var(--border); vertical-align: top; }
+  th { color: var(--text-muted); font-family: var(--font-mono); font-size:0.7rem; text-transform:uppercase; }
+  tr.reconciling, tr.queued { background: rgba(241,196,15,0.06); }
+  tr.failed { background: rgba(192,57,43,0.08); }
+  .neg { color: var(--text-muted); }
+  .pos { color: var(--green, #5fcf6b); }
+  .msg { color: var(--text-muted); align-self:center; }
+  .btn-sm { font-size:0.72rem; padding:0.2rem 0.45rem; margin:0.1rem 0.1rem 0 0; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Admin endpoints (PLAN §8, admin auth). One constant so a mount change is one edit.
+var BASE = '/v2/sietch';
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
+  });
+}
+function el(id) { return document.getElementById(id); }
+function intOrNull(v) { v = String(v || '').trim(); return /^\d+$/.test(v) ? parseInt(v, 10) : null; }
+function profileOrNull(v) { v = String(v || '').trim().toLowerCase(); return /^[0-9a-f]{32}$/.test(v) ? v : null; }
+var CASE_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
+function fail(msgId) { return function(e) { el(msgId).textContent = 'error: ' + (e && e.message || e); }; }
+
+function award() {
+  var body = {
+    amount: parseInt(el('a-amount').value, 10),
+    reason: el('a-reason').value.trim(),
+    case_id: el('a-case').value.trim()
+  };
+  var p = profileOrNull(el('a-profile').value), a = intOrNull(el('a-account').value);
+  if (p) body.profile_id = p; else if (a) body.account_id = a;
+  if (!p && !a) { el('award-msg').textContent = 'give a profile id (32 hex) or an account id'; return; }
+  if (!(body.amount >= 1 && body.amount <= 50)) { el('award-msg').textContent = 'amount is 1 to 50'; return; }
+  if (body.reason.length < 3) { el('award-msg').textContent = 'a reason is required'; return; }
+  if (!CASE_RE.test(body.case_id)) { el('award-msg').textContent = 'case id: 1 to 64 of A-Z a-z 0-9 _ . : -'; return; }
+  showConfirm('Award ' + body.amount + ' LS Tokens to ' + (p ? 'profile ' + p : 'account ' + a) + '?', function() {
+    el('award-msg').textContent = 'saving...';
+    apiCall('POST', BASE + '/award', body).then(function(d) {
+      el('award-msg').textContent = (d.replay ? 'already awarded under that case id' : 'awarded') + ', balance ' + d.balance;
+      el('a-reason').value = ''; el('a-case').value = '';
+    }).catch(fail('award-msg'));
+  });
+}
+
+function ledger() {
+  var raw = el('l-profile').value, p = profileOrNull(raw), a = intOrNull(raw);
+  if (!p && !a) { el('ledger-msg').textContent = 'profile id (32 hex) or account id'; return; }
+  el('ledger-msg').textContent = 'reading...';
+  apiCall('GET', BASE + '/ledger?' + (p ? 'profile_id=' + p : 'account_id=' + a)).then(function(d) {
+    var rows = d.ledger || [];
+    el('ledger-msg').textContent = 'profile ' + d.profile_id + ', accounts ' + (d.accounts || []).join(', ') +
+      ', ' + (d.eligible ? 'eligible' : 'NOT eligible') + ', balance ' + d.balance + ', earned ' + d.earned_total +
+      ', ' + rows.length + ' rows';
+    el('ledger').querySelector('tbody').innerHTML = rows.map(function(r) {
+      return '<tr><td>' + r.id + '</td><td class="' + (r.delta < 0 ? 'neg' : 'pos') + '">' + (r.delta > 0 ? '+' : '') + r.delta + '</td>' +
+        '<td>' + esc(r.kind) + '</td><td>' + esc(r.night) + '</td><td>' + esc([r.source, r.ref, r.order_id ? 'order ' + r.order_id : ''].filter(Boolean).join(' / ')) + '</td>' +
+        '<td>' + esc(r.operator) + '</td><td>' + esc(r.reason) + '</td><td>' + esc(r.created_at) + '</td></tr>';
+    }).join('') || '<tr><td colspan="8" class="neg">No rows.</td></tr>';
+  }).catch(fail('ledger-msg'));
+}
+
+function orderActions(o) {
+  var b = '';
+  if (o.status === 'queued' || o.status === 'reconciling') {
+    b += '<button class="btn btn-sm" onclick="redrive(' + o.id + ')">Re-drive</button>';
+  }
+  if (o.status !== 'delivered' && o.status !== 'refunded') {
+    b += '<button class="btn btn-sm" onclick="refund(' + o.id + ', \'' + o.status + '\')">Refund</button>';
+  }
+  return b;
+}
+
+function orders() {
+  var s = el('o-status').value;
+  el('orders-msg').textContent = 'reading...';
+  apiCall('GET', BASE + '/orders' + (s ? '?status=' + encodeURIComponent(s) : '')).then(function(d) {
+    var rows = d.orders || [];
+    var stale = d.stale_reconciling;
+    el('orders-msg').textContent = rows.length + ' orders' +
+      (stale && (stale.length || stale > 0) ? ', STALE reconciling: ' + (stale.length != null ? stale.length : stale) : '');
+    el('orders').querySelector('tbody').innerHTML = rows.map(function(o) {
+      return '<tr class="' + esc(o.status) + '"><td>' + o.id + '</td><td>' + esc(o.profile_id) + '</td><td>' + esc(o.sku) + '</td>' +
+        '<td>' + esc(o.lane) + '</td><td>' + esc(o.price) + '</td><td>' + esc(o.status) + '</td><td>' + esc(o.attempts) + '</td>' +
+        '<td>' + esc(o.error) + '</td><td>' + esc(o.created_at) + '</td><td>' + orderActions(o) + '</td></tr>';
+    }).join('') || '<tr><td colspan="10" class="neg">No orders.</td></tr>';
+  }).catch(fail('orders-msg'));
+}
+
+function redrive(id) {
+  showConfirm('Re-drive order ' + id + ' with the SAME delivery key?', function() {
+    apiCall('POST', BASE + '/orders/' + id + '/redrive', {}).then(function(d) {
+      el('orders-msg').textContent = 'order ' + id + ': ' + d.status;
+      return orders();
+    }).catch(fail('orders-msg'));
+  });
+}
+
+function refund(id, status) {
+  var reason = prompt('Refund order ' + id + ' (' + status + '). Reason?');
+  if (!reason || reason.trim().length < 3) return;
+  var body = { reason: reason.trim() };
+  if (status === 'reconciling') {
+    // A reconciling grant may have committed in game: only refund after checking.
+    if (!confirm('Order ' + id + ' is reconciling. Have you checked in game that the grant did NOT land?')) return;
+    body.confirm_not_delivered = true;
+  }
+  apiCall('POST', BASE + '/orders/' + id + '/refund', body).then(orders).catch(fail('orders-msg'));
+}
+
+function loadSpots() {
+  el('spots-msg').textContent = 'reading...';
+  apiCall('GET', BASE + '/spots').then(function(d) {
+    el('spots').value = JSON.stringify(d.spots || [], null, 2);
+    el('spots-msg').textContent = 'loaded';
+  }).catch(fail('spots-msg'));
+}
+
+function saveSpots() {
+  var spots;
+  try { spots = JSON.parse(el('spots').value); } catch (e) { el('spots-msg').textContent = 'not valid JSON: ' + e.message; return; }
+  if (!Array.isArray(spots)) { el('spots-msg').textContent = 'expected an array'; return; }
+  if (spots.length > 50) { el('spots-msg').textContent = 'at most 50 spots per save'; return; }
+  var bad = spots.filter(function(s) { return s.kind === 'seek' && s.public !== 0; });
+  if (bad.length) { el('spots-msg').textContent = 'a seek spot must have public: 0'; return; }
+  showConfirm('Save ' + spots.length + ' spots? Players Knock against these immediately.', function() {
+    el('spots-msg').textContent = 'saving...';
+    apiCall('PUT', BASE + '/spots', { spots: spots }).then(function(d) {
+      el('spots-msg').textContent = 'saved ' + d.upserted;
+    }).catch(fail('spots-msg'));
+  });
+}
+
+function review() {
+  apiCall('GET', BASE + '/review').then(function(d) {
+    var rows = (d.multi_account || []).map(function(r) {
+      return { flag: 'several accounts', profiles: [r.profile_id], accounts: r.accounts };
+    }).concat((d.shared_ip || []).map(function(r) {
+      return { flag: 'shared IP (group ' + r.ip_group + ')', profiles: r.profiles, accounts: [] };
+    }));
+    el('review').querySelector('tbody').innerHTML = rows.map(function(r) {
+      return '<tr><td>' + esc(r.flag) + '</td><td>' + esc(r.profiles.join(', ')) + '</td><td>' + esc(r.accounts.join(', ')) + '</td></tr>';
+    }).join('') || '<tr><td colspan="3" class="neg">Nothing flagged.</td></tr>';
+  });
+}
+
+el('btn-award').addEventListener('click', award);
+el('btn-ledger').addEventListener('click', ledger);
+el('btn-orders').addEventListener('click', orders);
+el('btn-spots-load').addEventListener('click', loadSpots);
+el('btn-spots-save').addEventListener('click', saveSpots);
+el('btn-review').addEventListener('click', review);
+fetchCsrf().then(function() { orders(); loadSpots(); });
+</script>
+{% endblock %}

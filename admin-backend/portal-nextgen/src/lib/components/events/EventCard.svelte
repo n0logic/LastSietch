@@ -10,15 +10,18 @@
   //   * TIMES PRINT IN UTC, with the viewer's local reading as a hint beside
   //     them. UTC is the server's clock and the one the announcement is written
   //     against; the local line is a convenience and is labelled as one.
-  //   * IBAD BLUE IS FOR "STARTING NOW" AND NOTHING ELSE. It is the one live
+  //   * IBAD BLUE IS FOR A RUNNING EVENT AND NOTHING ELSE. It is the one live
   //     reading on this card (the wall clock has passed the start and the event
-  //     has not ended); the kind, the status and the chrome all stay amber.
+  //     has not ended; with no end time, the first hour); the kind, the status
+  //     and the chrome all stay amber.
   //
   // The description is player-facing copy written by an operator and is rendered
   // as TEXT. It is never {@html}.
   import EventBanner from './EventBanner.svelte';
   import EventKindChip from './EventKindChip.svelte';
+  import EffectChip from './EffectChip.svelte';
   import RemindToggle from './RemindToggle.svelte';
+  import { effectOf } from '$lib/weekend.js';
 
   let { event = null, reminded = null, busy = false, onToggleRemind, onOpen } = $props();
 
@@ -59,6 +62,7 @@
   let host = $derived(String(event?.host || '').trim());
   let description = $derived(String(event?.description || '').trim());
   let cancelled = $derived(event?.status === 'cancelled');
+  let effect = $derived(effectOf(event));
 
   // No timer: the route reloads the list on its own cadence and a fresh `event`
   // re-derives this. A per-card interval would be one timer per row for a state
@@ -69,9 +73,9 @@
     const s = parseUtc(ev.starts_utc);
     if (s == null) return false;
     const now = Date.now();
-    if (now < s || now - s > HOUR_MS) return false;
+    if (now < s) return false;
     const e = parseUtc(ev.ends_utc);
-    return e == null ? true : now <= e;
+    return e == null ? now - s <= HOUR_MS : now < e;
   });
 
   // A started or cancelled event has nothing left to remind anyone about.
@@ -99,7 +103,11 @@
     {#if cancelled}
       <p class="flag cancelled mono">Cancelled</p>
     {:else if live}
-      <p class="flag now mono">Starting now</p>
+      <p class="flag now mono">{event?.ends_utc ? 'Happening now' : 'Starting now'}</p>
+    {/if}
+
+    {#if effect && !cancelled}
+      <EffectChip effect={effect.effect} state={effect.state} scope={effect.scope} open={live} />
     {/if}
 
     <dl class="meta mono">

@@ -63,9 +63,10 @@
     <li>
       <span class="step-number" aria-hidden="true">01</span><div>
         <p class="step-label">In the game</p><h2>Find your sietch</h2>
-        <p>Open the PC game's server browser: <strong>Experimental</strong> tab, <strong>North America</strong>, search <strong>Last Sietch</strong>. Expand the row and choose your world.</p>
-        <ul class="worlds"><li><strong>Habbanya</strong><span>PvE</span></li><li><strong>Kulon</strong><span>PvP with safe zones</span></li><li><strong>Amtal-Full-PvP</strong><span>Full PvP outside tradeposts</span></li></ul>
-        <p class="note">A Custom Character warning is expected. Read it before confirming. Amtal's PvE zone banner is misleading; its open world is PvP. Deep Desert has separate PvE and PvP choices.</p>
+        <p>New character: <strong>New Game</strong>, <strong>Multiplayer</strong>, then <strong>Server Browser</strong> in the Recommended Server popup. Existing character: <strong>Characters</strong>, then <strong>Server Browser</strong>.</p>
+        <p>In the browser: <strong>Experimental</strong> tab, <strong>North America</strong>, search <strong>Last Sietch</strong>. Expand the row and choose your world. Existing characters see a <strong>Transfer</strong> option there.</p>
+        <ul class="worlds"><li><strong>Habbanya</strong><span>PvE</span></li><li><strong>Amtal-Full-PvP</strong><span>Full PvP incl. tradeposts · safe at Riftwatch &amp; Helius Gate</span></li></ul>
+        <p class="note">A Custom Character warning is expected. Read it before confirming. On Amtal only the Riftwatch and Helius Gate settlements are safe; tradeposts are PvP even when their banner flickers to Guild Peace. Deep Desert has separate PvE and PvP choices.</p>
         <a href={joiningUrl}>Joining guide with screenshots <span aria-hidden="true">↗</span></a>
       </div>
     </li>
@@ -79,14 +80,14 @@
           {:else if auth.status === 'authed'}Discord is connected; no linked game account is shown yet.
           {:else}Sign in to read your own account and delivery status.{/if}
         </div>
-        {#if linked}<a href={`${base}/settings`}>Check your linked account <span aria-hidden="true">↗</span></a>
-        {:else}<a href={auth.status === 'authed' ? '/settings' : '/login'} data-sveltekit-reload>{auth.status === 'authed' ? 'Continue account linking' : 'Sign in'} <span aria-hidden="true">↗</span></a>{/if}
+        {#if linked}<a href={`${base}/settings?tab=characters`}>Check your linked account <span aria-hidden="true">↗</span></a>
+        {:else}<a href={auth.status === 'authed' ? '/settings?tab=characters' : '/login?from=start'} data-sveltekit-reload>{auth.status === 'authed' ? 'Continue account linking' : 'Sign in'} <span aria-hidden="true">↗</span></a>{/if}
       </div>
     </li>
     <li>
       <span class="step-number" aria-hidden="true">03</span><div>
         <p class="step-label">Your welcome package</p><h2>Know where each part lands</h2>
-        <p>Starter equipment and supplies are sent during your first session. Anything that does not fit in your bag waits at a tradepost's <strong>CHOAM Exchange</strong>, in the <strong>Completed</strong> tab.</p>
+        <p>Starter equipment and supplies are sent during your first session. Anything that does not fit in your bag waits at a tradepost's <strong>CHOAM Exchange</strong>, in the <strong>Completed</strong> tab. On Amtal, use the Riftwatch or Helius Gate terminal: those two are in safe areas.</p>
         <p class="note">The game labels these held items <strong>CANCELED</strong>. Select <strong>Take item</strong> to collect them. Intel Points, Base Construction research and House Scrip are applied after logout.</p>
         {#if linked}
           <div class="package-reading" role="status">

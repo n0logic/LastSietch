@@ -151,6 +151,10 @@ MAX_FACTION_REP = 12_474  # icehunter parity Action #2: factionRepCap from db.go
 MAX_SPEC_XP = 44_182      # icehunter parity Action #2: maxXP per track from db.go:541
 MAX_SPEC_LEVEL = 100      # icehunter cmdMaxSpec uses 100.0 as max level (db.go ~588)
 MAX_CHAR_XP = 344_440  # G11 char_xp cap (cumulative XP for L200)
+# RMQ AwardXP Category -> EXPEarnArea: Science=0, Exploration=2, any other
+# string = Combat (the design notes (not published) section 3).
+# Only these three are accepted so a typo cannot silently land on Combat.
+AWARD_XP_CATEGORIES = ("Combat", "Science", "Exploration")
 MAX_KEYSTONE_ID = 205  # G9 catalog upper bound (icehunter keystones.go)
 
 # G20 import_blueprint + G22 import_solido_to_basebackup caps. piece_count is
@@ -168,6 +172,20 @@ MAX_G22_BLUEPRINT_PIECES = 10_000
 # G21 base-backup grants. Slot cap is game-server C++ side (DB has no
 # constraint); we enforce defensively here so the UI never lands a 4th row.
 MAX_BB_SLOTS = 3
+
+# Base-backup grants refused at the API edge until they are rebuilt for 1.5.3.
+# bb_clone (G21) and the G22 mint both INSERT into dune.actor_state, which 1.5.3
+# dropped (actor state now lives in dune.actors.state): scripts/dune-grant.sh
+# bb_clone step 13 and G22 step 16. bb_handoff has not been exercised on 1.5.3,
+# so it is frozen too (admin plan decision D3).
+FROZEN_GRANT_TYPES = {
+    "bb_clone": "bb_clone is broken since 1.5.3 (it writes the dropped "
+                "dune.actor_state table); rebuild pending",
+    "import_solido_to_basebackup": "Solido to Base Backup (G22) is broken since "
+                                   "1.5.3 (it writes the dropped dune.actor_state "
+                                   "table); rebuild pending",
+    "bb_handoff": "bb_handoff is frozen: not verified on 1.5.3; rebuild pending",
+}
 SOLIDO_API_BASE = "https://dune.layout.tools/api"
 SOLIDO_FETCH_TIMEOUT = 15
 _BLUEPRINT_UUID_RE = re.compile(
@@ -366,6 +384,8 @@ def _require_mode(detail: dict) -> str:
 def _validate_detail(catalog: dict, grant_type: str, detail: dict) -> dict:
     """Validate the per-type detail shape and hard caps. Returns the normalized
     detail dict that is forwarded to the relay. Raises 400 on any violation."""
+    if grant_type in FROZEN_GRANT_TYPES:
+        raise HTTPException(400, FROZEN_GRANT_TYPES[grant_type])
     if not isinstance(detail, dict):
         raise HTTPException(400, "detail must be an object")
 
@@ -454,6 +474,10 @@ def _validate_detail(catalog: dict, grant_type: str, detail: dict) -> dict:
             raise HTTPException(400, f"unknown or unconfirmed track_type: {track_type}")
         out = {"track_type": track_type, "mode": _require_mode(detail)}
         # xp and level are both optional but at least one must be present.
+        # dune.set_specialization_xp_and_level stores level verbatim; when level
+        # is absent or 0 and xp > 0, scripts/dune-grant.sh derives the level
+        # from the new xp on the live spec curve, so xp never lands next to a
+        # stale level.
         if "xp" in detail:
             out["xp"] = _require_int(detail, "xp", 0, MAX_SPEC_XP)
         if "level" in detail:
@@ -465,7 +489,7 @@ def _validate_detail(catalog: dict, grant_type: str, detail: dict) -> dict:
     if grant_type == "char_xp":
         # G11 char_xp. Adds XP, credits TotalSkillPoints + UnspentSkillPoints
         # by levels_gained delta in the same SQL transaction. Offline-gated.
-        # See docs/dune-research/CHAR-XP-GRANT-SPEC.md. The script-side gate
+        # See the design notes (not published). The script-side gate
         # on force_wipe_points_ack was dropped 2026-05-23 after empirical
         # validation (grant_id=11); the flag is now an optional audit field.
         # target_level (1..200) takes precedence over raw amount: the bash
@@ -495,6 +519,13 @@ def _validate_detail(catalog: dict, grant_type: str, detail: dict) -> dict:
         out = {"amount": amount, "force_wipe_points_ack": bool(ack)}
         if target_level:
             out["target_level"] = target_level
+        # Live delivery only: the AwardXP earn area. The offline DB path has no
+        # category and ignores it.
+        if "category" in detail:
+            if detail["category"] not in AWARD_XP_CATEGORIES:
+                raise HTTPException(
+                    400, "char_xp category must be one of " + ", ".join(AWARD_XP_CATEGORIES))
+            out["category"] = detail["category"]
         return out
 
     if grant_type == "keystone":
@@ -581,7 +612,7 @@ def _validate_detail(catalog: dict, grant_type: str, detail: dict) -> dict:
 
     if grant_type == "import_blueprint":
         # G20 — materialize a BuildingBlueprint_CopyDevice from Solido Market
-        # or inline JSON. See docs/dune-research/G20-IMPORT-BLUEPRINT-BUILD-PLAN.md.
+        # or inline JSON. See the design notes (not published).
         delivery = detail.get("delivery")
         if delivery not in ("backpack", "bank"):
             raise HTTPException(400, "detail.delivery must be 'backpack' or 'bank'")
@@ -813,7 +844,7 @@ def _validate_detail(catalog: dict, grant_type: str, detail: dict) -> dict:
         # coverage and MTX placeable refuse are enforced server-side in the
         # bash builder (it has live access to dune.ls_solido_class_defaults);
         # this validator only checks shape + bytes + piece count + recipient.
-        # See docs/dune-research/ITEM-G22-BUILD-SPEC.md §2.
+        # See the design notes (not published) §2.
         recipient = detail.get("recipient_account_id")
         if isinstance(recipient, bool) or not isinstance(recipient, int) or recipient <= 0:
             raise HTTPException(
@@ -1280,9 +1311,15 @@ async def grant_vehicle_packages(request: Request):
 @router.get("/grant/catalog")
 async def grant_catalog(request: Request):
     """Serve the version-controlled grant catalog (file read, in-memory cache).
-    Admin-only — entry labels and ids are operational, not public."""
+    Admin-only — entry labels and ids are operational, not public. Frozen
+    grant types are left out so no picker offers them."""
     require_admin(request)
-    return _load_catalog()
+    catalog = _load_catalog()
+    return {
+        **catalog,
+        "grant_types": [g for g in catalog.get("grant_types", [])
+                        if g.get("id") not in FROZEN_GRANT_TYPES],
+    }
 
 
 @router.get("/grant/keystones")
@@ -1379,8 +1416,12 @@ def _rmq_plan(grant_type: str, detail: dict) -> tuple[str, dict] | None:
             amt = detail.get("amount")
             if amt is None:
                 return None
-            # Category is ignored by the live server; experience drives native level-up.
-            return ("award-xp", {"category": "Combat", "experience": int(amt)})
+            # AwardXP maps Category to the earn area (Science, Exploration, else
+            # Combat); experience drives the native level-up either way.
+            category = detail.get("category", "Combat")
+            if category not in AWARD_XP_CATEGORIES:
+                return None
+            return ("award-xp", {"category": category, "experience": int(amt)})
     except (TypeError, ValueError):
         return None
     return None

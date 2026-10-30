@@ -5761,3 +5761,37 @@ body.portal-page .storage-detail__head {
 }
 body.portal-page .storage-detail__head .portal-card__title { margin: 0; }
 body.portal-page .storage-repair__box-btn[hidden] { display: none; }
+
+/* --- Landsraad: reigning house + active decree ------------------------- */
+body.portal-page .lb__decree {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .5rem .75rem;
+  margin-top: .65rem;
+  padding: .55rem .7rem;
+  border: 1px solid var(--portal-border, rgba(255,255,255,.12));
+  border-radius: 6px;
+  background: rgba(255,255,255,.03);
+}
+body.portal-page .lb__decree-house {
+  font-weight: 600;
+  letter-spacing: .01em;
+  padding: .1rem .45rem;
+  border-radius: 4px;
+  border-left: 3px solid transparent;
+}
+body.portal-page .lb__decree-house--atreides  { border-left-color: var(--lb-atreides); }
+body.portal-page .lb__decree-house--harkonnen { border-left-color: var(--lb-harkonnen); }
+body.portal-page .lb__decree-body { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .6rem; }
+body.portal-page .lb__decree-name { font-weight: 600; }
+body.portal-page .lb__decree-desc { opacity: .85; }
+body.portal-page .lb__decree-src {
+  font-size: .78em;
+  opacity: .6;
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+}
+@media (max-width: 560px) {
+  body.portal-page .lb__decree { flex-direction: column; gap: .35rem; }
+}

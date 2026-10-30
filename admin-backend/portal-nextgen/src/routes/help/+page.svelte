@@ -103,9 +103,24 @@
             {#if g.steps}
               <ol class="steps">
                 {#each g.steps as step}
-                  <li class="mono">{step}</li>
+                  {#if typeof step === 'string'}
+                    <li class="mono">{step}</li>
+                  {:else}
+                    <!-- A step with text to paste: the <pre> keeps its line breaks
+                         and lets one long line scroll instead of wrapping. -->
+                    <li class="mono">
+                      {step.text}
+                      <pre class="paste">{step.code}</pre>
+                      {#if step.note}<span class="pnote">{step.note}</span>{/if}
+                    </li>
+                  {/if}
                 {/each}
               </ol>
+            {/if}
+            {#if g.after}
+              {#each g.after as para}
+                <p class="para after">{para}</p>
+              {/each}
             {/if}
           </CarvedSlab>
         </section>
@@ -174,6 +189,14 @@
   .steps { margin: var(--space-3) 0 0; padding: 0 0 0 1.4em; display: flex; flex-direction: column; gap: var(--space-1); max-width: 70ch; }
   .steps li { font-size: var(--text-sm); color: var(--text-muted); line-height: 1.55; }
   .steps li::marker { color: var(--accent); }
+  .paste {
+    margin: var(--space-1) 0; padding: var(--space-2) var(--space-3);
+    background: var(--metal-0); border: 1px solid var(--edge); border-radius: var(--radius-sm);
+    color: var(--text); font-size: var(--text-xs); white-space: pre; overflow-x: auto;
+    user-select: all;
+  }
+  .pnote { display: block; }
+  .after { margin-top: var(--space-3); }
 
   @media (max-width: 40rem) {
     .rel { padding-left: var(--space-3); }

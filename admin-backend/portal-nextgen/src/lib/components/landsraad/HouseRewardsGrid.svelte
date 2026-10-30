@@ -60,11 +60,12 @@
             {:else}
               <span class="monogram mono" aria-hidden="true">{h.monogram || h.short?.slice(0, 2) || '??'}</span>
             {/if}
+            {#if h.has_rewards}
+              <!-- on the crest's corner, so the house name keeps the whole row -->
+              <span class="badge mono">{h.reward_count}</span>
+            {/if}
           </div>
           <span class="hname">{h.short || h.name}</span>
-          {#if h.has_rewards}
-            <span class="badge mono">{h.reward_count}</span>
-          {/if}
         </button>
 
         {#if sw.state !== 'none'}
@@ -102,7 +103,7 @@
 
 <style>
   .panel-kicker { margin: 0 0 var(--space-3); color: var(--accent); text-transform: uppercase; letter-spacing: .18em; font-size: var(--text-xs); }
-  .hgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--space-2); align-items: start; }
+  .hgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: var(--space-2); align-items: start; }
   .house { border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--metal-0); overflow: hidden; }
   .house:not(.has) { opacity: .5; }
   .house.has:hover { border-color: var(--edge-hi); }
@@ -114,11 +115,15 @@
   }
   .hbtn:disabled { cursor: default; }
   .hbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .crest-wrap { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .crest-wrap { position: relative; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
   .crest { max-width: 100%; max-height: 100%; object-fit: contain; }
   .monogram { font-size: var(--text-sm); font-weight: 700; color: var(--text-muted); }
   .hname { flex: 1 1 auto; font-size: var(--text-sm); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .badge { flex: 0 0 auto; font-size: var(--text-xs); color: var(--bg-deep); background: var(--accent); border-radius: 999px; padding: 0 var(--space-2); min-width: 1.4rem; text-align: center; }
+  .badge {
+    position: absolute; top: -6px; right: -9px; font-size: 10px; line-height: 15px; color: var(--bg-deep);
+    background: var(--accent); border-radius: 999px; padding: 0 4px; min-width: 15px; text-align: center;
+    box-shadow: 0 0 0 2px var(--metal-0);
+  }
   .swatch-tag {
     display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
     padding: 0 var(--space-3) var(--space-2);

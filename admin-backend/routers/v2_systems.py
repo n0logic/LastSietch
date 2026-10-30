@@ -1,6 +1,6 @@
 """Admin wave 1, Set B: Systems & Health, Economy reads, Social reads.
 
-Reference: docs/dune-research/admin-panel/ADMIN-WAVE1-PLAN-2026-09-03.md section 3, 6.
+Reference: the design notes (not published) section 3, 6.
 
 EVERY route here is READ-ONLY. Nothing writes, nothing restarts, nothing touches
 dune.* directly; the only game-side reads go through the relay, exactly as
@@ -40,6 +40,7 @@ from pydantic import BaseModel
 
 import config
 import feature_flags
+import flag_registry
 import rewards
 from auth import (audit_log, get_current_user, require_admin, require_csrf,
                   require_owner)
@@ -334,6 +335,8 @@ RUNTIME_GATES = (
      "the Ingot Refinery: trading refined ingots and Spice Melange for spiced dust (the game-host file flag is the authority; this only opens the door in the portal)"),
     ("LASTSIETCH_CHAT_ENABLED", "0",
      "portal chat: reading and posting in every channel, and the moderation queue. Retention keeps running while this is off, so turning it off stops new messages and never stops the 30-day sweep"),
+    ("LASTSIETCH_WEEKEND_REMIND_ENABLED", "0",
+     "the weekend reminder opt-in: the switch in Settings and on Events, and the inbox notice an hour before each weekend event"),
 )
 
 # Family 1b, the same process, IMPORT time. config.py resolves these once at
@@ -375,6 +378,10 @@ HOST_FLAGS = (
      "on for a transfer to move anything: this file AND the process gate "
      "LASTSIETCH_ITEM_TRANSFER_ENABLED above. While either is off the writer answers "
      "deferred and nothing leaves a bank."),
+    ("landsraad-claim-enabled",
+     "the Landsraad portal claim writer. Off stops every claim at once. On from "
+     "here only creates an EMPTY file, which admits nobody: who may claim is set by "
+     "editing the file on the game host (account ids, or '*' for everyone)."),
     ("refinery-enabled", "the Ingot Refinery writer: every ingot and melange exchange"),
 )
 
@@ -683,6 +690,244 @@ def _host_flag_envelope(payload: dict) -> dict:
 async def _host_flag_states() -> dict:
     results = await _gather(call_relay("/dune/flags", timeout=_PER_SOURCE_TIMEOUT))
     return _host_flag_envelope(_envelope(results[0])).get("states", {})
+
+
+# --------------------------------------------------------------------------- #
+# E1: the flag registry, read only
+# --------------------------------------------------------------------------- #
+
+def _registry_rows(host_states) -> dict:
+    """The registry snapshot, secret-named env entries dropped by name before any
+    value is read, and each row told whether a Systems toggle reaches it. The
+    toggles themselves stay on the two allowlists above."""
+    withheld = [e["name"] for e in flag_registry.ENTRIES
+                if e["name"].startswith(("LASTSIETCH_", "CIELAGO_")) and is_secret_name(e["name"])]
+    rows = []
+    for row in flag_registry.snapshot(config, host_states, skip=withheld):
+        row["toggle"] = (row["name"] in RUNTIME_GATE_NAMES
+                         or row.get("relay") in HOST_FLAG_NAMES)
+        rows.append(row)
+    return {"rows": rows, "withheld": withheld}
+
+
+@router.get("/api/dune/v2/systems/registry")
+async def systems_registry(request: Request):
+    """Every gate on the stack with owner, default, scope, restart, where it lives
+    and its current state. READ ONLY: no route here writes, and nothing opens a
+    new SSH path. <game-host> files the relay flag-list does not cover read
+    "unknown", never "off"."""
+    require_admin(request)
+    results = await _gather(call_relay("/dune/flags", timeout=_PER_SOURCE_TIMEOUT))
+    relay = _envelope(results[0])
+    host_states = None
+    if relay.get("available") is not False:
+        host_states = _host_flag_envelope(relay).get("states", {})
+    body = await asyncio.to_thread(_cached, "registry_local",
+                                   lambda: _registry_rows(host_states))
+    if body.get("available") is False:
+        return JSONResponse(body)
+    counts = {}
+    for row in body["rows"]:
+        counts[row["state"]] = counts.get(row["state"], 0) + 1
+    return JSONResponse({
+        "available": True,
+        "generated_at": int(time.time()),
+        "relay_available": host_states is not None,
+        "relay_error": relay.get("error") if host_states is None else None,
+        "counts": counts,
+        "withheld": body["withheld"],
+        "rows": body["rows"],
+    })
+
+
+# --------------------------------------------------------------------------- #
+# H4: server build card, read only
+# --------------------------------------------------------------------------- #
+
+# The hotfix watcher runs on THIS host (<web-host>) as a root system unit. Its
+# baseline lives in the unit's Environment and its result in a log file; both
+# are read here, read only. systemctl show is preferred over the unit file: it
+# is what systemd actually loaded, and a file edited without daemon-reload is
+# not what the next run will use.
+HOTFIX_UNIT = "lastsietch-dune-hotfix-watch.service"
+HOTFIX_TIMER = "lastsietch-dune-hotfix-watch.timer"
+HOTFIX_UNIT_FILE = "/etc/systemd/system/lastsietch-dune-hotfix-watch.service"
+HOTFIX_DIR = os.environ.get("LASTSIETCH_HOTFIX_WATCH_DIR", "/opt/lastsietch-timers/dune-update-auto")
+HOTFIX_LOG = os.path.join(HOTFIX_DIR, "hotfix-watch.log")
+HOTFIX_MARKER = os.path.join(HOTFIX_DIR, "hotfix-notified.marker")
+HOTFIX_ENV_KEYS = ("DUNE_HFW_BASE_BUILDID", "DUNE_HFW_BASE_TIMEUPDATED",
+                   "DUNE_HFW_CLIENT_BASE_BUILDID")
+_HOTFIX_LOG_TAIL = 65536
+
+# What the last window installed, per set. There is NO read path from this
+# process to the cluster's images (no dispatcher token reads the BattleGroup
+# spec), so this is the window record and the card labels it "recorded", never
+# live. Bump it in the same PR as each window's runbook.
+SERVER_BUILD_RECORD = {
+    "server_buildid": "26223037",
+    "image_tag": "2168446-0-shipping",
+    "client_buildid": "26224975",
+    "recorded": "2026-10-30",
+    "runbook": "docs/08-updates.md",
+    "sets": [
+        {"set": "all", "map": "every set", "tag": "2168446-0-shipping", "note": "stock"},
+    ],
+    "skipped": [],
+}
+
+_HFW_LINE = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) (.*)$")
+_HFW_NO_CHANGE = re.compile(r"^no change \(buildid=(\d+) timeupdated=(\d+)(?: client=([0-9?]*))?\)")
+_HFW_NEW = re.compile(r"^NEW BUILD (\d+) \(was (\d+)\)(?:; client (\d*))?")
+_HFW_REPUSH = re.compile(r"^RE-PUSH of (\d+) \(timeupdated (\d+) -> (\d+)\)")
+
+
+def _parse_hotfix_log(text: str) -> dict:
+    """The newest poll result in the watcher log. A poll result is the only line
+    that names the Steam build; "already notified" means the watcher has fired
+    and stopped polling, so its Steam reading is as old as the last result."""
+    out = {"last_line_at": None, "last_line": None, "last_result_at": None,
+           "result": None, "steam_server_buildid": None, "steam_timeupdated": None,
+           "steam_client_buildid": None}
+    for line in text.splitlines():
+        m = _HFW_LINE.match(line.strip())
+        if not m:
+            continue
+        at, rest = m.group(1), m.group(2)
+        out["last_line_at"] = at
+        out["last_line"] = rest[:200]
+        nc = _HFW_NO_CHANGE.match(rest)
+        new = _HFW_NEW.match(rest)
+        rp = _HFW_REPUSH.match(rest)
+        if nc:
+            client = nc.group(3)
+            out.update(result="no change", last_result_at=at,
+                       steam_server_buildid=nc.group(1), steam_timeupdated=nc.group(2),
+                       steam_client_buildid=client if client and client != "?" else None)
+        elif new:
+            out.update(result="new build", last_result_at=at,
+                       steam_server_buildid=new.group(1), steam_timeupdated=None,
+                       steam_client_buildid=new.group(3) or None)
+        elif rp:
+            out.update(result="re-push", last_result_at=at,
+                       steam_server_buildid=rp.group(1), steam_timeupdated=rp.group(3),
+                       steam_client_buildid=None)
+    return out
+
+
+def _parse_unit_env(text: str) -> dict:
+    """DUNE_HFW_* out of `systemctl show -p Environment` or the unit file. Only
+    the three named keys are kept, and only as digits: anything else in that
+    environment is never emitted."""
+    out = {}
+    for key in HOTFIX_ENV_KEYS:
+        m = re.search(r"(?:^|[\s=\"'])" + key + r"=(\d+)", text, re.M)
+        out[key] = m.group(1) if m else None
+    return out
+
+
+def build_verdict(record: dict, steam_server, steam_client, client_base) -> dict:
+    """installed vs Steam -> one sentence the operator can act on. The 10-30
+    lesson: a server build can move while the client does not, and can even
+    ship under the SAME image tag, so "new build" alone says nothing about
+    whether players are locked out or whether there is anything to install."""
+    installed = record["server_buildid"]
+    client_ref = client_base or record.get("client_buildid")
+    if not steam_server:
+        return {"code": "unknown", "tone": "absent",
+                "text": "The watcher has not reported a Steam build."}
+    if steam_server == installed:
+        return {"code": "current", "tone": "good",
+                "text": "Installed server build " + installed + " is the latest on Steam."}
+    if steam_client and client_ref and steam_client != client_ref:
+        return {"code": "client_moved", "tone": "bad",
+                "text": ("Server build moved (" + installed + " to " + steam_server
+                         + ") and the CLIENT moved too (" + client_ref + " to " + steam_client
+                         + "): players on the new client likely cannot join until we update.")}
+    client_text = ("the client did not move (still " + steam_client + "), so players can still join."
+                   if steam_client else "the client build is unknown: check players can join.")
+    for skip in record.get("skipped", []):
+        if skip["server_buildid"] == steam_server:
+            return {"code": "skipped", "tone": "warn",
+                    "text": ("Server build moved to " + steam_server + ", client did not. "
+                             "Same image tag " + skip["image_tag"] + " as live: importing it "
+                             "would replace the running images under the live tag. Skipped "
+                             + skip["decided"] + ": " + skip["why"] + ".")}
+    return {"code": "server_only", "tone": "warn",
+            "text": ("Server build moved (" + installed + " to " + steam_server + "), "
+                     + client_text + " Diff the intake before deciding.")}
+
+
+def _hotfix_watch() -> dict:
+    out = {"available": True, "generated_at": int(time.time())}
+
+    env_src = "systemd (loaded)"
+    try:
+        proc = subprocess.run(["systemctl", "show", "-p", "Environment,NeedDaemonReload,LoadState",
+                               HOTFIX_UNIT], capture_output=True, text=True, timeout=5)
+        shown = proc.stdout
+    except Exception as exc:  # noqa: BLE001
+        shown = ""
+        out["systemctl_error"] = f"{type(exc).__name__}: {exc}"
+    if "LoadState=loaded" not in shown:
+        env_src = "unit file on disk"
+        try:
+            shown = _read_text(Path(HOTFIX_UNIT_FILE), 16384)
+        except Exception as exc:  # noqa: BLE001
+            shown = ""
+            env_src = "unreadable"
+            out["unit_error"] = f"{type(exc).__name__}: {exc}"
+    out["baseline"] = _parse_unit_env(shown)
+    out["baseline_from"] = env_src
+    out["need_daemon_reload"] = "NeedDaemonReload=yes" in shown
+
+    try:
+        props = flag_registry.systemctl_timer(HOTFIX_TIMER)
+        timer = flag_registry.timer_state(props)
+    except Exception as exc:  # noqa: BLE001
+        props = {}
+        timer = {"state": "unknown", "source": f"systemctl failed: {type(exc).__name__}"}
+    out["timer"] = {**timer, "last_trigger": props.get("LastTriggerUSec") or None}
+
+    try:
+        size = os.path.getsize(HOTFIX_LOG)
+        with open(HOTFIX_LOG, "r", encoding="utf-8", errors="replace") as fh:
+            if size > _HOTFIX_LOG_TAIL:
+                fh.seek(size - _HOTFIX_LOG_TAIL)
+                fh.readline()
+            text = fh.read()
+        out["log"] = {"available": True, "path": HOTFIX_LOG, **_parse_hotfix_log(text)}
+    except Exception as exc:  # noqa: BLE001
+        out["log"] = {"available": False, "path": HOTFIX_LOG,
+                      "error": f"{type(exc).__name__}: {exc}"}
+
+    try:
+        os.stat(HOTFIX_MARKER)
+        out["notified"] = True
+    except FileNotFoundError:
+        out["notified"] = False
+    except OSError as exc:
+        out["notified"] = None
+        out["notified_error"] = type(exc).__name__
+
+    log = out["log"]
+    out["record"] = SERVER_BUILD_RECORD
+    out["verdict"] = build_verdict(SERVER_BUILD_RECORD,
+                                   log.get("steam_server_buildid"),
+                                   log.get("steam_client_buildid"),
+                                   out["baseline"].get("DUNE_HFW_CLIENT_BASE_BUILDID"))
+    base = out["baseline"].get("DUNE_HFW_BASE_BUILDID")
+    out["baseline_matches_installed"] = (base == SERVER_BUILD_RECORD["server_buildid"]
+                                         if base else None)
+    return out
+
+
+@router.get("/api/dune/v2/systems/build")
+def systems_build(request: Request):
+    """H4. Installed vs latest Steam build, the client build, and the image tag
+    per set. Every value is a local read on <web-host> (the watcher's unit and
+    log) or the window record; nothing here reaches the game host."""
+    require_admin(request)
+    return JSONResponse(_cached("build", _hotfix_watch))
 
 
 def _version_sources() -> dict:

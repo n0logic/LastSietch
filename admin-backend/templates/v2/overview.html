@@ -1,4 +1,5 @@
 {% extends "v2/base.html" %}
+{% from "v2/_includes/guide.html" import guide_card with context %}
 {% block title %}Overview{% endblock %}
 {% block extra_css %}
 {# The admin edge sends no Cache-Control, so the ?v= key IS the cache-bust
@@ -7,6 +8,8 @@
 {% endblock %}
 {% block content %}
 <main class="v2-overview" id="v2-overview">
+  {{ guide_card("overview-tour", "New here?",
+      "The main menu (down the left side on a computer, along the bottom on a phone) opens each section. The tabs under the banner are that section's other pages. Nothing on this page changes the game; every change happens inside a page that asks you to confirm.") }}
 
   <div class="v2-overview__hero" role="banner">
     <div class="v2-overview__hero-inner">

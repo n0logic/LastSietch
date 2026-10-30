@@ -3,33 +3,36 @@
   //
   // Fully PUBLIC. A signed-out visitor reads both windows exactly as a linked
   // player does. The only thing a session buys is the reminder toggle, and the
-  // only thing the admin ROLE buys is the composer. Neither is decided here: the
-  // gate below hides controls that would 404 anyway, because the server is the
-  // one place a role is decided and the browser is not a trust boundary.
+  // only thing the admin ROLE buys is a link to the Events Manager in the admin
+  // panel, where events are written since 2.22.0. The link is a convenience, not
+  // a gate: the admin panel has its own login.
   //
   // Two windows, one board. Upcoming leads because that is what a player came
   // for; Past sits under it because a gathering nobody can attend any more is
   // still the answer to "did I miss it". A board with neither seals to ONE panel
   // rather than two empty headings: two seals in a row read as two failures.
-  //
-  // The composer is mounted only inside the admin branch, not merely hidden by
-  // it. A form that exists in the DOM for every visitor is a form a visitor can
-  // find, and its submit would be a request we already know the answer to.
-  import { onMount, untrack } from 'svelte';
+  import { onMount } from 'svelte';
   import { base } from '$app/paths';
   import { goto } from '$app/navigation';
   import { useAuthGate } from '$lib/authGate.svelte.js';
-  import {
-    EVENT_BANNERS, EVENT_KINDS, cancelEvent, closeComposer, eventAdmin, eventRemind,
-    events, loadAdminList, openComposer, remindedFor, submitComposer, subscribe,
-    toggleRemind,
-  } from '$lib/events.svelte.js';
+  import { eventRemind, events, remindedFor, subscribe, toggleRemind } from '$lib/events.svelte.js';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Notice from '$lib/components/Notice.svelte';
   import SealedPanel from '$lib/components/SealedPanel.svelte';
   import EventCard from '$lib/components/events/EventCard.svelte';
   import EventList from '$lib/components/events/EventList.svelte';
-  import EventComposer from '$lib/components/events/EventComposer.svelte';
+  import WeekendCard from '$lib/components/events/WeekendCard.svelte';
+  import EventsNext from '$lib/components/events/EventsNext.svelte';
+  import { shell, loadShell, shellExpectedNext } from '$lib/shellNext.svelte.js';
+
+  const MANAGER_URL = 'https://admin.lastsietch.com/admin/v2/players/events';
+
+  // The public calendar feed (the same published rows as this board). webcal://
+  // asks a calendar app to SUBSCRIBE rather than import once; it needs the host,
+  // so the https path stands in until the page is in a browser.
+  const FEED_PATH = '/portal/events.ics';
+  let feedUrl = $state(FEED_PATH);
+  onMount(() => { feedUrl = `webcal://${location.host}${FEED_PATH}`; });
 
   // Role gate, server-granted. `allowed` is authed AND the role, and it fails
   // closed on an absent roles field.
@@ -38,14 +41,13 @@
   // One subscriber, one timer, one visibility listener for the whole page.
   onMount(subscribe);
 
-  // The admin list is the only read that can see drafts, and it 404s for anyone
-  // without the role. Asked once, and only once the gate says yes.
-  let adminRead = false;
-  $effect(() => {
-    if (!admin.allowed || adminRead) return;
-    adminRead = true;
-    untrack(loadAdminList);
-  });
+  // The rebuilt page is dark behind the Home switch (shell.next). The shipped page
+  // below draws whenever the switch is off or still unread, so a flag-off viewer
+  // sees exactly what they saw before.
+  onMount(() => { if (shell.status !== 'ready') loadShell(); });
+  // Until the switch is read, hold a small panel only when the override or the last
+  // read says it is on. Otherwise the shipped page draws at once, so flag-off never waits.
+  const expectNext = shell.status !== 'ready' && shellExpectedNext();
 
   // The card callbacks hand back an ID, not the row.
   function openEvent(eventId) {
@@ -59,7 +61,7 @@
   }
 
   let empty = $derived(
-    events.status === 'ready' && events.upcoming.length === 0 && events.past.length === 0
+    events.status === 'ready' && events.live.length === 0 && events.upcoming.length === 0 && events.past.length === 0
   );
 
   // Upcoming carries the toggles, so the route mounts its cards itself and owns
@@ -69,29 +71,42 @@
   let upcomingPhase = $derived(
     events.status === 'ready' && events.upcoming.length === 0 ? 'empty' : events.status
   );
-
-  // Drafts and cancellations never reach the public windows, so the admin rows
-  // are the only place they can be reopened for editing.
-  let adminRows = $derived(Array.isArray(eventAdmin.rows) ? eventAdmin.rows : []);
 </script>
 
 <svelte:head>
   <title>Events | Last Sietch</title>
 </svelte:head>
 
+{#if shell.status === 'ready' && shell.next}
+  <EventsNext {feedUrl} feedPath={FEED_PATH} managerUrl={MANAGER_URL} admin={admin.allowed} />
+{:else if shell.status !== 'ready' && expectNext}
+  <div class="page"><SealedPanel status="loading" loadingText="loading" /></div>
+{:else}
 <div class="page">
   <PageHeader
     kicker="Last Sietch | Sietch events"
     title="Events"
-    sub="What the sietch is doing next, and what it has just done."
+    sub="What the sietch is doing next, and what it has just done. Every weekend has an event, Friday 12:00 AM to Monday 12:00 AM Eastern: double XP on the 1st Friday of the month, double Landsraad on the 2nd, crafting on the 3rd and harvest on the 4th."
   >
+    <a class="feed mono" href={`${base}/help#howto-weekend-events`}>How weekends work</a>
+    <a class="btn ghost" href={feedUrl} data-sveltekit-reload title="Add the events board to your calendar app">Subscribe (calendar)</a>
+    <a class="feed mono" href={FEED_PATH} data-sveltekit-reload title="The feed address, for calendars that ask for a URL">ICS link</a>
     {#if admin.allowed}
-      <button class="btn" type="button" onclick={() => openComposer(null)}>New event</button>
+      <a class="btn" href={MANAGER_URL} target="_blank" rel="noopener">Manage events ↗</a>
     {/if}
   </PageHeader>
 
   {#if eventRemind.notice}
     <Notice tone={eventRemind.noticeTone} text={eventRemind.notice} />
+  {/if}
+
+  <!-- The rotation shows even on an empty board: a weekend with nothing
+       published yet still reads as planned. Held until the first list read. -->
+  {#if events.status === 'ready'}
+    <section class="band weekend-band">
+      <h2 class="band-title mono">Weekend events</h2>
+      <WeekendCard events={[...events.live, ...events.upcoming]} month={true} />
+    </section>
   {/if}
 
   {#if events.status === 'error'}
@@ -105,6 +120,23 @@
       emptyText="Nothing is on the board. When the sietch calls a gathering, it is posted here first."
     />
   {:else}
+    {#if events.live.length > 0}
+      <section class="band">
+        <h2 class="band-title mono">Happening now</h2>
+        <div class="cards">
+          {#each events.live as ev (ev.id)}
+            <EventCard
+              event={ev}
+              reminded={remindedFor(ev.id)}
+              busy={busyFor(ev.id)}
+              onToggleRemind={toggleRemind}
+              onOpen={openEvent}
+            />
+          {/each}
+        </div>
+      </section>
+    {/if}
+
     <section class="band">
       <h2 class="band-title mono">Upcoming</h2>
       {#if upcomingPhase === 'ready'}
@@ -140,53 +172,7 @@
     </section>
   {/if}
 
-  {#if admin.allowed}
-    <section class="band">
-      <h2 class="band-title mono">All events</h2>
-      {#if eventAdmin.status === 'error'}
-        <SealedPanel
-          status="error" width="prose"
-          errorText="The full event list could not be read. The public board above is unaffected."
-        />
-      {:else if eventAdmin.status === 'ready' && adminRows.length === 0}
-        <SealedPanel
-          status="empty" action="none" width="prose"
-          emptyText="No events exist yet, drafts included."
-        />
-      {:else if adminRows.length}
-        <ul class="admin">
-          {#each adminRows as row (row.id)}
-            <li>
-              <button class="row" type="button" onclick={() => openComposer(row)}>
-                <span class="rtitle">{row.title}</span>
-                <span class="rmeta mono">
-                  <span class="rstatus">{row.status}</span>
-                  {#if row.starts_utc}<time datetime={row.starts_utc}>{row.starts_utc} UTC</time>{/if}
-                </span>
-              </button>
-            </li>
-          {/each}
-        </ul>
-      {:else}
-        <SealedPanel status="loading" loadingText="reading every event" />
-      {/if}
-    </section>
-  {/if}
 </div>
-
-{#if admin.allowed && eventAdmin.open}
-  <EventComposer
-    open={eventAdmin.open}
-    mode={eventAdmin.mode}
-    event={eventAdmin.target}
-    kinds={EVENT_KINDS}
-    banners={EVENT_BANNERS}
-    busy={eventAdmin.busy}
-    error={eventAdmin.error}
-    onSubmit={submitComposer}
-    onCancelEvent={cancelEvent}
-    onClose={closeComposer}
-  />
 {/if}
 
 <style>
@@ -214,17 +200,13 @@
     border-radius: var(--radius-sm); cursor: pointer;
     color: var(--bg-deep); background: var(--accent); border: 1px solid var(--accent);
   }
+  .btn { text-decoration: none; }
   .btn:hover { filter: brightness(1.08); }
-
-  .admin { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
-  .row {
-    width: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3);
-    text-align: left; cursor: pointer; padding: var(--space-2) var(--space-3);
-    color: var(--text); background: var(--metal-1); border: 1px solid var(--edge);
-    border-radius: var(--radius-sm);
+  .btn.ghost { color: var(--accent); background: transparent; display: inline-block; margin: 0 var(--space-2) var(--space-2) 0; }
+  .feed {
+    font-size: var(--text-xs); letter-spacing: .1em; text-transform: uppercase;
+    color: var(--text-muted); margin-right: var(--space-3);
   }
-  .row:hover { border-color: var(--accent); }
-  .rtitle { font-size: var(--text-sm); min-width: 0; overflow-wrap: anywhere; }
-  .rmeta { display: flex; flex-wrap: wrap; gap: var(--space-2); font-size: 10px; color: var(--text-muted); }
-  .rstatus { text-transform: uppercase; letter-spacing: .1em; }
+  .feed:hover { color: var(--accent); }
+
 </style>

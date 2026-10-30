@@ -342,8 +342,8 @@ async def _players_layer(request: Request, map_key: str, m: dict, inst: dict) ->
 
 
 async def _vehicles_layer(request: Request, map_key: str, m: dict, inst: dict) -> dict:
-    from routers.dune import vehicles_payload
-    payload = await vehicles_payload()
+    from routers.dune import vehicles_raw_payload
+    payload = await vehicles_raw_payload()
     if not isinstance(payload, dict):
         return {"available": False, "error": "vehicle feed returned no object"}
     points = []

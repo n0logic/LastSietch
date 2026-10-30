@@ -22,11 +22,14 @@ parameters = [
 ops = [
   { grant_type = "char_xp",            detail = { amount = 344440, force_wipe_points_ack = false } },
   { grant_type = "intel",              detail = { amount = 2000 } },
-  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", level = 0, track_type = "Crafting"    } },
-  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", level = 0, track_type = "Gathering"   } },
-  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", level = 0, track_type = "Exploration" } },
-  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", level = 0, track_type = "Combat"      } },
-  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", level = 0, track_type = "Sabotage"    } },
+  # spec_xp ops carry no level: the writer derives it from xp on the live
+  # spec curve (2000 xp = level 14.19). An explicit level 0 used to be stored
+  # verbatim next to 2000 xp, leaving every track at a stale level 0.
+  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", track_type = "Crafting"    } },
+  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", track_type = "Gathering"   } },
+  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", track_type = "Exploration" } },
+  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", track_type = "Combat"      } },
+  { grant_type = "spec_xp",            detail = { xp = 2000, mode = "set", track_type = "Sabotage"    } },
   { grant_type = "faction_rep",        detail = { mode = "set", amount = 11975, faction_id = "{{faction_id}}" } },
   { grant_type = "progression_preset", detail = { preset = "rank19_eligible", faction = "{{faction}}" } },
 ]

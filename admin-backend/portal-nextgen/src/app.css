@@ -23,6 +23,23 @@
 @font-face { font-family: 'JetBrains Mono'; font-weight: 600; font-style: normal; font-display: swap;
   src: url('/fonts/jbmono-600.woff2') format('woff2'); }
 
+/* Easier reading font (Settings, Display). OpenDyslexic, SIL OFL 1.1: licence in
+ * static/fonts/OFL-opendyslexic.txt. Only the body face swaps. Display headings
+ * keep Saira Condensed (OpenDyslexic is wide and overruns the HUD headings) and
+ * mono keeps figures and code. Unlayered, so it outranks the primitives layer. */
+@font-face { font-family: 'OpenDyslexic'; font-weight: 400; font-style: normal; font-display: swap;
+  src: url('/fonts/opendyslexic-400.woff2') format('woff2'); }
+@font-face { font-family: 'OpenDyslexic'; font-weight: 400; font-style: italic; font-display: swap;
+  src: url('/fonts/opendyslexic-400-italic.woff2') format('woff2'); }
+@font-face { font-family: 'OpenDyslexic'; font-weight: 700; font-style: normal; font-display: swap;
+  src: url('/fonts/opendyslexic-700.woff2') format('woff2'); }
+:root[data-reading-font='dyslexic'] { --font-sans: 'OpenDyslexic', 'Saira', system-ui, sans-serif; }
+/* Reading size (Settings, Display): Medium is the default and the absent
+ * data-reading-size; Large is the unchanged scale. Only the body tokens move:
+ * --text-lg and up carry the headings and stay put. */
+:root[data-reading-font='dyslexic']:not([data-reading-size]) { --text-base: 14px; --text-sm: 12px; --text-xs: 12px; }
+:root[data-reading-font='dyslexic'][data-reading-size='s'] { --text-base: 12px; --text-sm: 11px; --text-xs: 11px; }
+
 @layer primitives, surface, accent, components;
 
 /* ---- primitives: invariant ------------------------------------------------ */
@@ -347,6 +364,34 @@ a:hover { color: var(--accent-bright); }
     stroke: color-mix(in srgb, var(--ls-ibad) 75%, transparent);
     stroke-width: 3; stroke-linecap: round; pointer-events: none;
   }
+  /* Reader v2 footprint: the storm's real zone ellipses in dust tones (owner
+     2.26.2: no blue/cyan here; Ibad is reserved for the player's own pip).
+     Damage zones = rust/ochre dust with a red-orange danger edge on the core; the
+     stormwall/top layers inside it stay quiet; the gust front ahead is a soft
+     dashed dust rim; the route is a muted sand/rust dash. */
+  .map-storm-zone { pointer-events: none; }
+  .map-storm-zone--damage {
+    fill: rgba(150, 82, 38, .30);
+    stroke: var(--ls-red, #e8502e); stroke-width: 3.2;
+  }
+  .map-storm-zone--damage[data-zone="stormwall"], .map-storm-zone--damage[data-zone="top"] {
+    fill: rgba(150, 82, 38, .14);
+    stroke: rgba(196, 112, 56, .55); stroke-width: 1.4;
+  }
+  .map-storm-zone--gust {
+    fill: rgba(226, 190, 130, .12);
+    stroke: rgba(214, 170, 110, .80); stroke-width: 2.4; stroke-dasharray: 9 7;
+  }
+  .map-storm-route {
+    stroke: rgba(176, 120, 76, .75);
+    stroke-width: 2.4; stroke-dasharray: 3 9; stroke-linecap: round; pointer-events: none;
+  }
+  .map-storm-layer--footprint .map-storm-center { fill: var(--ls-red, #e8502e); stroke: rgba(40, 20, 10, .8); }
+  .map-storm-layer--footprint .map-storm-heading { stroke: var(--ls-orange, #f08a2c); }
+  /* An estimate (polls missing for 2 min+) fades the dust and dashes the danger edge
+     instead of recolouring it. */
+  .map-storm-layer--footprint .map-storm-track.is-extrapolated { opacity: .7; }
+  .map-storm-layer--footprint .map-storm-track.is-extrapolated .map-storm-zone--damage { stroke-dasharray: 10 6; }
   /* Dead-reckoned storm track (.is-extrapolated toggled by the engine while
      the position is an estimate, not a real RAM fix): estimates are AMBER,
      only fresh fixes earn Ibad (honesty rule). */
@@ -396,6 +441,16 @@ a:hover { color: var(--accent-bright); }
     fill: var(--accent-soft); filter: none;
   }
   .map-me-pin.is-stale .map-me-pulse { display: none; }
+  /* Seven Nights lantern skin: the art carries its own glow; the ring stays Ibad
+     (live) and a stale or estimated fix dims the lantern instead of recolouring. */
+  .map-me-pin--lantern .map-me-pin__lantern { pointer-events: none; }
+  .map-sn-door { pointer-events: none; }
+  .map-sn-door__ring {
+    fill: rgba(40, 18, 70, .55); stroke: #b98cff; stroke-width: 2.5; stroke-dasharray: 5 3;
+    pointer-events: none;
+  }
+  .map-me-pin--lantern.is-estimated .map-me-pin__lantern,
+  .map-me-pin--lantern.is-stale .map-me-pin__lantern { opacity: .7; }
   @keyframes me-ring-breathe {
     0%, 100% { opacity: .25; transform: scale(.85); transform-box: fill-box; transform-origin: center; }
     50% { opacity: .8; transform: scale(1.15); transform-box: fill-box; transform-origin: center; }

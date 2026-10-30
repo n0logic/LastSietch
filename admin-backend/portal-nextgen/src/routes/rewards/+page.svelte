@@ -9,7 +9,8 @@
   // LASTSIETCH_REWARD_ENABLED, so a deferred claim reads honestly as "not yet enabled".
   // Reads are never gated (a signed-in player can always browse); signed-out seals
   // to an honest Connect-Discord panel.
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
+  import { resetDateText } from '$lib/server-time.js';
   import { useAuthGate } from '$lib/authGate.svelte.js';
   import { rewards, loadAll, claimDaily, claimWeekly, closeReveal } from '$lib/rewards.svelte.js';
   import CarvedSlab from '$lib/components/CarvedSlab.svelte';
@@ -43,6 +44,11 @@
     return d.toISOString();
   }
   let resetTarget = $derived(rewards.nextClaimUtc || nextUtcMidnight());
+  let localZone = $state(null);
+  onMount(() => { localZone = Intl.DateTimeFormat().resolvedOptions().timeZone; });
+  let rewardDay = $derived(today?.date ? new Intl.DateTimeFormat('en-US', {
+    weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC',
+  }).format(new Date(`${today.date}T00:00:00Z`)) : null);
 </script>
 
 <svelte:head>
@@ -85,12 +91,17 @@
             <span class="rib-lbl">day streak</span>
           </div>
           <div class="rib-reset">
-            <span class="rib-cap mono">Next reward in</span>
+            <span class="rib-cap mono">Next daily reset in</span>
             <LiveCountdown target={resetTarget} />
           </div>
           <div class="rib-claim">
             <ClaimAction {today} />
           </div>
+        </div>
+        <div class="reset-note">
+          {#if rewardDay}<p>Current reward day: <strong>{rewardDay} (UTC)</strong>.</p>{/if}
+          <p>Reward days and calendar dates use UTC. The day changes at 00:00 UTC, which may be the previous evening for you.</p>
+          {#if localZone}<p>Next reset in your time: <strong>{resetDateText(Date.parse(resetTarget), localZone)}</strong>.</p>{/if}
         </div>
       </CarvedSlab>
 
@@ -147,6 +158,9 @@
 </div>
 
 <style>
+  .reset-note { padding-top: var(--space-3); color: var(--text-muted); font-size: var(--text-sm); line-height: 1.6; overflow-wrap: anywhere; }
+  .reset-note p { margin: 0; }
+  .reset-note strong { color: var(--text); font-weight: 500; }
   .page { max-width: var(--content-max); margin: 0 auto; padding: var(--space-6) var(--space-4) var(--space-8); }
   .stack { margin-top: var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
 

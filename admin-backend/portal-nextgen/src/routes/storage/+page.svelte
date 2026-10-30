@@ -11,7 +11,7 @@
   import { untrack } from 'svelte';
   import { base } from '$app/paths';
   import { useAuthGate } from '$lib/authGate.svelte.js';
-  import { storage, loadAll, selectedContainer } from '$lib/storage.svelte.js';
+  import { storage, loadAll, selectedContainer, selectContainer } from '$lib/storage.svelte.js';
   import { getPref, setPref } from '$lib/prefs.svelte.js';
   import CarvedSlab from '$lib/components/CarvedSlab.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
@@ -54,6 +54,20 @@
   // a change made on the Settings page lands here without a reload, and write at
   // identity scope so it follows the player to any browser or character.
   let storageView = $derived(getPref('storage_view') === 'list' ? 'list' : 'grid');
+
+  // Phone and tablet: the rail stacks above the contents, so picking a tile meant
+  // scrolling past every other tile to see inside it. The jump picker selects and
+  // scrolls straight to the contents. Hidden on the three-column desktop layout.
+  function jumpTo(value) {
+    const c = storage.containers.find((x) => String(x.id) === value);
+    if (!c) return;
+    selectContainer(c.id);
+    document.getElementById('storage-contents')?.scrollIntoView({ block: 'start' });
+  }
+  const jumpLabel = (c) => {
+    const n = Number(c.item_count) || 0;
+    return `${c.name || c.type || 'Container'} (${n} item${n === 1 ? '' : 's'})`;
+  };
 
   let loaded = false;
   $effect(() => {
@@ -121,6 +135,23 @@
       {/if}
     </div>
 
+    {#if storage.containers.length > 0}
+      <div class="jump">
+        <label class="jump-label mono" for="storage-jump">Open container</label>
+        <select
+          id="storage-jump"
+          value={storage.selectedId == null ? '' : String(storage.selectedId)}
+          onchange={(e) => jumpTo(e.currentTarget.value)}
+        >
+          {#if storage.selectedId == null}<option value="" disabled>Pick a container</option>{/if}
+          {#each storage.containers as c (c.id)}
+            <option value={String(c.id)}>{jumpLabel(c)}</option>
+          {/each}
+        </select>
+        <a class="jump-link mono" href="#storage-contents">Show contents</a>
+      </div>
+    {/if}
+
     <div class="grid">
       <!-- LEFT: CHOAM bank -->
       <div class="col left">
@@ -172,7 +203,7 @@
           <ItemLocator />
         </CarvedSlab>
         <CarvedSlab sharp={true}>
-          <p class="panel-kicker mono">
+          <p class="panel-kicker mono" id="storage-contents">
             <!-- `name` is the player's CUSTOM name and is EMPTY for the bank + every
                  vehicle (dune-containers.py emits '' AS name for those branches; only
                  placeables carry permission_actor.actor_name). Falling straight through
@@ -260,6 +291,10 @@
   }
   .col { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
 
+  .jump { display: none; }
+  /* Clears the sticky topbar when the jump scrolls the contents into view. */
+  #storage-contents { scroll-margin-top: 140px; }
+
   .panel-kicker { margin: 0 0 var(--space-3); color: var(--accent); text-transform: uppercase; letter-spacing: .18em; font-size: var(--text-xs); }
   .sub-count { color: var(--text-muted); letter-spacing: normal; }
   .access {
@@ -281,6 +316,23 @@
 
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
+    .jump {
+      display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3);
+      margin-top: var(--space-3); padding: var(--space-3);
+      border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--metal-0);
+    }
+    .jump-label { flex: 1 0 100%; color: var(--accent); text-transform: uppercase; letter-spacing: .18em; font-size: var(--text-xs); }
+    .jump select {
+      flex: 1 1 12rem; min-width: 0;
+      font-family: var(--font-sans); font-size: var(--text-base); color: var(--text);
+      background: var(--metal-1); border: 1px solid var(--edge);
+      border-radius: var(--radius-sm); padding: var(--space-2);
+    }
+    .jump-link {
+      color: var(--accent-text); text-decoration: none; white-space: nowrap;
+      font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .1em;
+    }
+    .jump-link:hover { color: var(--accent-bright); }
   }
   @media (prefers-reduced-motion: reduce) {
     .col > :global(*) { opacity: 1; transform: none; animation: none; }

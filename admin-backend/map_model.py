@@ -19,8 +19,8 @@ tracking + dune.gaming.tools cross-check 2026-06-09):
     Large spice candidate sites are auto-discovered per cycle from the RAM
     reader and injected by the /data route (fallback list below).
   Hagga Basin: HAGGA_CAL origin -457200 span 812800 (matches the live 8K image);
-    real static terrain image HaggaBasin.webp as the backdrop. One terrain, three
-    sietch instances (Habbanya / Kulon / Amtal) split by partition.
+    real static terrain image HaggaBasin.webp as the backdrop. One terrain, two
+    sietch instances (Habbanya / Amtal) split by partition.
 """
 import json
 import logging
@@ -80,26 +80,28 @@ MAPS = {
         "grid": None,                  # open world, no survey grid
         "backdrop": {"type": "image", "src": "/assets/HaggaBasin.webp",
                      "w": 8192, "h": 8192},
-        # Three live Hagga sietches share the same terrain + static markers
+        # Two live Hagga sietches share the same terrain + static markers
         # (dimension_index=-1), split by partition_id: 1=Habbanya (PvE),
-        # 32=Kulon (PvP), 33=Amtal (full PvP; browser name "Amtal-Full-PvP").
+        # 33=Amtal (full PvP; browser name "Amtal-Full-PvP"). Kulon (partition
+        # 32, dim 1) closed 2026-10-28 and its bases moved to Amtal; its
+        # leftover rows sit on partition NULL / dim 1, which no instance here
+        # matches, so they route nowhere instead of onto a live tab.
         # `part` is the discriminator the /me self-marker and the public
         # /api/dune/positions player layer filter on (positions carries only
         # `p`=partition, so partition is the ground truth). `dim` is the real
         # dune.actors.dimension_index, not a token: verified live 2026-08-27,
-        # partition 1 -> dim 0, 32 -> dim 1, 33 -> dim 2, with no row breaking
-        # the pairing. The V1 map JS has no `part` and filters its me-layer on
-        # `dim` alone, so that correspondence is what keeps V1 correct.
+        # partition 1 -> dim 0, 33 -> dim 2, with no row breaking the pairing
+        # (the Kulon close kept Amtal on dim 2, leaving a gap at 1). The V1 map
+        # JS has no `part` and filters its me-layer on `dim` alone, so that
+        # correspondence is what keeps V1 correct.
         "instances": [
             {"key": "habbanya", "label": "Habbanya", "mode": "PvE",
              "dim": 0, "part": 1},
-            {"key": "kulon", "label": "Kulon", "mode": "PvP",
-             "dim": 1, "part": 32},
             {"key": "amtal", "label": "Amtal", "mode": "Full PvP",
              "dim": 2, "part": 33},
         ],
         "has_spice": False,
-        # All three sietches storm independently (Amtal's autospawn is off today,
+        # Both sietches storm independently (Amtal's autospawn is off today,
         # so its layer stays empty until it is re-enabled -- no code change needed).
         "has_storms": True,
         "spice_candidates": [],
@@ -111,7 +113,7 @@ MAPS = {
     # ±56750 streaming square, but the walkable hub is a small central island,
     # so the cal below is a tighter VIEW WINDOW around the marker cloud
     # (markers + live overlays stay consistent — same linear projection).
-    # Detail: docs/dune-research/HUB-MAPS-EXTRACTION-2026-06-12.md.
+    # Detail: the design notes (not published).
     # Hub backdrops are OUR orthographic renders of the game's cartography
     # diorama meshes (the AO bakes were packed UV atlases — unalignable). The
     # cal below is the render_cal fit from 15 ground-truth anchors
@@ -182,7 +184,7 @@ _EXCLUDE = {"SurveyPoint", "NoIcon"}
 
 # Social-hub marker types (Arrakeen / Harko Village). Authoritative category
 # assignments from DT_MapLegend{Arrakeen,HarkoVillage}; see
-# docs/dune-research/hub-marker-names-20260612.json.
+# the design notes (not published).
 _HUB_SERVICES = {
     "CHOAMExchange", "Bank", "ImperialConsulate",
     "ArrakeenRecustomization", "HarkoRecustomization",

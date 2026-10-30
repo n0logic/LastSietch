@@ -106,7 +106,7 @@ function lc(s) { return (s || '').toLowerCase(); }
 // The baked GLB albedos for ML_* layered materials are the engine's dev checker
 // card (flat grey) — Funcom's real surface color lives in the material-instance
 // layer stack, resolved offline into material-tints.json (linear RGB keyed by
-// GLB material.name; see docs/dune-research/PIECE-TINT-EXTRACTION-2026-06-12.md).
+// GLB material.name; see the design notes (not published)).
 // Fetched lazily on the first textured render only.
 function fetchTints() {
   if (!_tintsPromise) {
@@ -124,7 +124,7 @@ function fetchTints() {
 // wall banners/art carry Yaw -90 + a push-off-the-wall, couches lateral
 // offsets, corner pieces Yaw -45. Without it pieces render turned 90°,
 // floating, or stacked. Resolved offline from the BP CDOs; see
-// docs/dune-research/PLACEABLE-OFFSETS-2026-06-12.md.
+// the design notes (not published).
 function fetchOffsets() {
   if (!_offsetsPromise) {
     _offsetsPromise = fetch('/admin/static/data/placeable-mesh-offsets.json',

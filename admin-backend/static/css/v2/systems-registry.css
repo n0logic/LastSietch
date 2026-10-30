@@ -1,0 +1,27 @@
+/* Systems & Health: the flag registry (E1) and the server build card (H4).
+   Additions only; everything else on these cards is a sys-* class from
+   systems.css. */
+
+.sys-reg__group {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sys-reg__verdict {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--border-strong);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.sys-reg__verdict--good { border-left-color: var(--green); }
+.sys-reg__verdict--warn { border-left-color: var(--yellow); }
+.sys-reg__verdict--bad  { border-left-color: var(--red); }
+
+/* Grid items default to min-width: auto, so a wide table would stretch the card
+   (and the page) past a phone screen instead of scrolling inside its wrap. */
+.sys-card[data-reg-card] { min-width: 0; }

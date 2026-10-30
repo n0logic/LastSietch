@@ -6,8 +6,9 @@
  * ~163 claims, so hovering is instant and costs the game host nothing.
  *
  * THE ONE RULE THIS FILE EXISTS TO ENFORCE: exactly one dimension is drawn at a
- * time. Habbanya (dim 0, PvE) and Kulon (dim 1, PvP) are different worlds
- * sharing one coordinate space. Drawing both would put two unrelated bases on
+ * time. Habbanya (dim 0, PvE) and Amtal (dim 2, full PvP) are different worlds
+ * sharing one coordinate space. Dim 1 was Kulon, closed 2026-10-28: its
+ * leftovers (held bases, backups) keep a "Kulon · closed" button for admins. Drawing both would put two unrelated bases on
  * the same pixel and invite precisely the wrong-owner answer that the
  * bases-near dimension bug produced on 2026-07-27. The instance switcher is
  * therefore a switch, never a pair of checkboxes.
@@ -223,9 +224,8 @@
   // listed first. Adopting is the heavier hammer.
   //
   // Read-only. This renders the decision and its blockers; it does not fire
-  // anything. The write paths sit behind environment flags on the game host and
-  // are not reachable from the browser at all, which is the correct place for
-  // an irreversible act to live until someone has read the blockers.
+  // anything. The buttons below it do: each POSTs after a typed or confirm()
+  // check, and the host script refuses again on any blocker it finds.
   function loadOptions(totemId) {
     fetch('/admin/api/dune/v2/claims/' + encodeURIComponent(totemId) + '/options',
           { credentials: 'same-origin' })

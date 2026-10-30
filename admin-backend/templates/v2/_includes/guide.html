@@ -1,0 +1,34 @@
+{# Guided Desk help panels (H0, direction C). Opt in per page:
+
+     {% from "v2/_includes/guide.html" import guide_card, how_panel with context %}
+     {{ guide_card("tour", "New here?", "Plain-language text.") }}
+     {{ how_panel("How this works", ["First step.", "Second step."], "Footnote.") }}
+
+   Both render nothing unless the new shell is on, so a page that opts in is
+   unchanged on the shipped chrome. `with context` is what lets them see the
+   request. Copy lives with the page that uses the panel, not here. #}
+
+{% macro guide_card(key, lead, text, link_href=none, link_label=none) %}
+{% if request and (request.state|default(none)).admin_shell|default(none) %}
+<div class="ls-guide" data-guide="{{ key }}" role="note">
+  <div class="ls-guide__body"><b>{{ lead }}</b> {{ text }}{% if link_href %}<a href="{{ link_href }}">{{ link_label }}</a>{% endif %}</div>
+  <button type="button" class="ls-guide__x">Got it</button>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro how_panel(title, steps, note=none) %}
+{% if request and (request.state|default(none)).admin_shell|default(none) %}
+<aside class="ls-how" aria-label="{{ title }}">
+  <h2>{{ title }}</h2>
+  <ol>
+    {% for s in steps %}<li>{% if s is string %}{{ s }}{% else %}<b>{{ s[0] }}</b> {{ s[1] }}{% endif %}</li>{% endfor %}
+  </ol>
+  {% if note %}<p>{{ note }}</p>{% endif %}
+</aside>
+{% endif %}
+{% endmacro %}
+
+{% macro inline_help(text) %}
+{% if request and (request.state|default(none)).admin_shell|default(none) %}<p class="ls-inline-help">{{ text }}</p>{% endif %}
+{% endmacro %}

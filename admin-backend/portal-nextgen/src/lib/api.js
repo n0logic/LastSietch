@@ -226,6 +226,8 @@ const NAMESPACES = {
   server: {
     // Public server status, drives the header online/offline pill.
     duneStatus: () => getJSON('/api/dune/status'),
+    // Top 10 (crew left out server-side) + level spread. No online flag.
+    standings: () => getJSON('/api/dune/standings'),
     overview: () => getJSON('/portal/server/overview'),
     announcement: () => getJSON('/portal/announcement'),
     // Sietch traffic + the live gameplay-settings board. Both are shaped from the
@@ -276,6 +278,8 @@ const NAMESPACES = {
     },
     // JSON-negotiated rescue: {ok, state, message, cooldown_remaining_s?}.
     rescue: () => postRescue(),
+    // Read-only destination preview for the confirm sheet: {ok, state, message, destination?}.
+    rescuePreview: () => getJSON('/portal/rescue/preview'),
   },
 
   // --- V2 Guilds (all session-gated; the player is resolved server-side, so no
@@ -644,13 +648,19 @@ const NAMESPACES = {
   // of the contract: {board, rewards, active_character_name, rewards_error}. `board`
   // is the term-global great-house board (tiles + rails + term countdown anchor);
   // `rewards` is the player's own pending house rewards. Either half may be null
-  // and each renders independently. Placeable-swatch reward rows carry an optional
-  // .swatch:{chips:[hex], exact:false} the backend attaches inline (no 2nd fetch).
+  // and each renders independently. Swatch reward rows carry an optional
+  // .swatch:{chips:[hex], exact:bool} the backend attaches inline (no 2nd fetch).
   // standings() is the older PUBLIC feed, left untouched; it is a sibling, not a
   // replacement. -------------------------------------------------------------------
   landsraad: {
     overview: () => getJSON('/portal/landsraad/v2'),
     standings: () => getJSON('/portal/landsraad/standings'),
+    // Portal claim (the one WRITE on this surface, CSRF-gated). body = {mode}:
+    // 'preview' runs the real transaction and rolls it back, 'apply' commits. The
+    // character is resolved server-side. Ships dark: overview().claim_enabled gates
+    // the panel, and the route answers error 'disabled' while it is off.
+    claim: (mode) =>
+      sendCsrfJSON('POST', '/portal/landsraad/claim', { mode, csrf_token: readCookie(CSRF_COOKIE) }),
   },
 
   // --- V2 Login Rewards (session-gated; account resolved server-side, never sent
@@ -702,6 +712,8 @@ const NAMESPACES = {
   // client uuid so a retry after a dropped response never posts twice. -------
   chat: {
     channels: () => getJSON('/portal/chat/channels'),
+    // The top-bar badge: {unread: N} over the rooms channels() would list.
+    unread: () => getJSON('/portal/chat/unread'),
     messages: (channel, { before = null, limit = 50 } = {}) =>
       getJSON(`/portal/chat/${encodeURIComponent(channel)}/messages?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`),
     send: (channel, body, clientKey) =>
@@ -735,24 +747,13 @@ const NAMESPACES = {
   // reminders" and "you have no reminders" are different sentences, and only one
   // of them is ours to say.
   //
-  // The admin verbs are role-gated SERVER-side and answer 404 to everyone else.
-  // The UI gate only hides controls that would 404; the browser grants nothing.
-  // create/update/cancel are the composer's three writes, and cancel carries the
-  // typed CANCEL token as `confirm` because a cancellation mails every reminded
-  // player and cannot be taken back.
+  // Events are written in the admin panel (Events Manager, 2.22.0), not here.
   events: {
     list: (window) => getJSON(`/portal/events?window=${encodeURIComponent(window)}&limit=50`),
     detail: (id) => getJSON(`/portal/events/${encodeURIComponent(id)}`),
     mine: () => getJSON('/portal/events/mine'),
     remind: (id) => sendCsrfJSON('POST', `/portal/events/${encodeURIComponent(id)}/remind`),
     unremind: (id) => sendCsrfJSON('POST', `/portal/events/${encodeURIComponent(id)}/unremind`),
-    adminList: () => getJSON('/portal/events/admin/list'),
-    adminCreate: (body) => sendCsrfJSON('POST', '/portal/events/admin/create', body),
-    adminUpdate: (id, body) =>
-      sendCsrfJSON('POST', `/portal/events/admin/${encodeURIComponent(id)}/update`, body),
-    adminCancel: (id, confirm, reason) =>
-      sendCsrfJSON('POST', `/portal/events/admin/${encodeURIComponent(id)}/cancel`,
-        { confirm, reason }),
   },
 
   // --- Deliveries (wave 12). The packages the server sent this account: the
@@ -761,6 +762,13 @@ const NAMESPACES = {
   // off /portal/home/v2 instead.
   deliveries: {
     list: () => getJSON('/portal/deliveries/v2'),
+  },
+
+  // --- Amtal. Public, no session.
+  amtal: {
+    // Kill boards + kill streaks (dark behind LASTSIETCH_AMTAL_PVP_ENABLED). Public: names,
+    // counts and spice only, crew marked staff.
+    pvp: () => getJSON('/portal/amtal/pvp'),
   },
 };
 

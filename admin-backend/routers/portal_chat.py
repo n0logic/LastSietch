@@ -1,10 +1,11 @@
 """Portal chat, the player-facing half (Fremkit wave 11, lane A).
 
-Five routes: the channel rail, one channel's history, a send, a read mark, and
-the live stream. Moderation (report, delete, mute, the queues) is
-routers/portal_chat_mod.py; retention is chat_retention.py. Everything here is
-admin.db plus the membership helpers in portal_chat_channels; zero game-DB
-touch, and the only game reads are the ones those helpers already make.
+Six routes: the channel rail, the top-bar unread badge, one channel's history,
+a send, a read mark, and the live stream. Moderation (report, delete, mute, the
+queues) is routers/portal_chat_mod.py; retention is chat_retention.py.
+Everything here is admin.db plus the membership helpers in
+portal_chat_channels; zero game-DB touch, and the only game reads are the ones
+those helpers already make.
 
 Five properties matter more than the feature:
 
@@ -67,6 +68,7 @@ router = APIRouter()
 _TEXT = {
     "chat_disabled": "Chat is being fitted. Back soon.",
     "not_member": "You are not in that channel.",
+    "channel_closed": "This channel is closed. You can still read it.",
     "muted": "You cannot post right now.",
     "rate_limited": "You are sending messages too quickly. Wait a moment.",
     "duplicate": "You just sent that.",
@@ -119,10 +121,11 @@ def _seconds_ago(seconds: int) -> str:
         "%Y-%m-%d %H:%M:%S")
 
 
-def public_message(row, account_id: int, with_channel: bool = False) -> dict:
+def public_message(row, account_id: int, with_channel: bool = False, titles=None) -> dict:
     """One row as the client sees it. A deleted row KEEPS its place in the list
     and loses its body here, on the way out, rather than in the table: the
-    moderation queue still needs to show what was said."""
+    moderation queue still needs to show what was said. `titles` is the
+    _titles map for the page; a row gains `title` only when its author wears one."""
     deleted = row["deleted_utc"] is not None
     out = {
         "id": int(row["id"]),
@@ -139,7 +142,29 @@ def public_message(row, account_id: int, with_channel: bool = False) -> dict:
     }
     if with_channel:
         out["channel"] = row["channel"]
+    title = (titles or {}).get(int(row["account_id"]))
+    if title and not deleted:
+        out["title"] = {"key": title["key"], "name": title["name"]}
     return out
+
+
+def _titles(rows, conn=None):
+    """{account_id: title} for the authors of `rows` (COSMETICS-MAP-ICONS-PLAN
+    P0.2). The import is lazy and every failure is {}: a title must never cost a
+    message. Gate off = no connection opened at all."""
+    try:
+        import cosmetics
+        if not rows or not cosmetics.enabled():
+            return {}
+        handle, close = _borrow(conn)
+        try:
+            return cosmetics.titles_for_accounts(handle, [r["account_id"] for r in rows])
+        finally:
+            if close:
+                handle.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("chat: titles skipped: %s", exc)
+        return {}
 
 
 _ROW_COLUMNS = ("id, channel, account_id, char_name, body, kind, created_utc, "
@@ -423,11 +448,14 @@ def poll_frames(account_id, subscribed, last_id, since_utc, mute_sig):
 
 def _poll_frames(conn, account_id, subscribed, last_id, since_utc, mute_sig):
     frames = []
-    for row in messages_after(subscribed, last_id, conn=conn):
+    fresh = messages_after(subscribed, last_id, conn=conn)
+    titles = _titles([r for r in fresh if r["deleted_utc"] is None], conn)
+    for row in fresh:
         last_id = max(last_id, int(row["id"]))
         if row["deleted_utc"] is not None:
             continue  # deleted before it was ever sent: nothing to remove
-        frames.append(("message", public_message(row, account_id, with_channel=True),
+        frames.append(("message", public_message(row, account_id, with_channel=True,
+                                                 titles=titles),
                        int(row["id"])))
 
     # The delete cursor is a CLOCK, not a row stamp, and it is wound back one
@@ -530,6 +558,22 @@ async def portal_chat_channels_list(request: Request):
     })
 
 
+@router.get("/portal/chat/unread")
+async def portal_chat_unread(request: Request):
+    """The top-bar badge: unread summed over the rooms `channels_for` lists, so a
+    room the player has left stops counting when the rail drops it. Polled about
+    once a minute per visible tab, so it skips the name and mute reads the
+    channel list makes. Auth: linked session."""
+    _gate, early = _require_linked_session_json(request)
+    if early is not None:
+        return early
+    if not _chat_enabled():
+        return _err("chat_disabled")
+
+    rows = await channels.channels_for(request)
+    return _v2_ok({"unread": sum(int(r.get("unread") or 0) for r in rows)})
+
+
 @router.get("/portal/chat/{channel}/messages")
 async def portal_chat_messages(request: Request, channel: str):
     """One channel's history, oldest-first, `before` walking backwards from an
@@ -554,8 +598,9 @@ async def portal_chat_messages(request: Request, channel: str):
         before = None
 
     rows, has_more = load_messages(channel, before, limit)
+    titles = _titles(rows)
     return _v2_ok({"channel": channel, "has_more": has_more,
-                   "messages": [public_message(r, account_id) for r in rows]})
+                   "messages": [public_message(r, account_id, titles=titles) for r in rows]})
 
 
 @router.post("/portal/chat/{channel}/send")
@@ -574,6 +619,8 @@ async def portal_chat_send(request: Request, channel: str):
         return _err("chat_disabled")
     if not await channels.can_access(request, channel):
         return _err("not_member")
+    if channel in channels.CLOSED_CHANNEL_IDS:
+        return _err("channel_closed")
 
     client_key = body.get("client_key")
     if client_key is not None:
@@ -595,7 +642,7 @@ async def portal_chat_send(request: Request, channel: str):
                                 _selected_ctrl(request, account_id),
                                 char_name, body.get("body"), client_key)
     if token in ("ok", "replay"):
-        return _v2_ok({"message": public_message(value, account_id),
+        return _v2_ok({"message": public_message(value, account_id, titles=_titles([value])),
                        "replay": token == "replay"})
     if token == "muted":
         return _err("muted", until_utc=value.get("until_utc"))

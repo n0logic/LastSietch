@@ -1,0 +1,42 @@
+/* Easier reading font (the switch in the user menu). OpenDyslexic, SIL OFL 1.1:
+ * licence in static/fonts/OFL-opendyslexic.txt. Each page's head sets
+ * data-reading-font on <html> before first paint; this file only reacts to it. */
+@font-face { font-family: 'OpenDyslexic'; font-weight: 400; font-style: normal; font-display: swap;
+  src: url('../fonts/opendyslexic-400.woff2') format('woff2'); }
+@font-face { font-family: 'OpenDyslexic'; font-weight: 400; font-style: italic; font-display: swap;
+  src: url('../fonts/opendyslexic-400-italic.woff2') format('woff2'); }
+@font-face { font-family: 'OpenDyslexic'; font-weight: 700; font-style: normal; font-display: swap;
+  src: url('../fonts/opendyslexic-700.woff2') format('woff2'); }
+
+:root[data-reading-font="dyslexic"] {
+  --font-sans: 'OpenDyslexic', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* The v2 panel's body default is mono. Moving only that default to the reading
+   face leaves every element that asks for mono by name (figures, IDs, inputs,
+   code) on mono, and display headings on Saira Condensed. */
+:root[data-reading-font="dyslexic"] body.admin-page {
+  font-family: var(--font-sans);
+}
+
+/* Reading size (the Text size button beside the switch): 12 / 14 / 16px body
+   text, Medium the default and the absent data-reading-size. Only the body
+   rule moves, in px: headings and spacing are rem tokens and stay where they
+   are, and text that inherits the body size follows it. The v2 body is 14px
+   today, so Medium is no change there; the legacy page body is 16px. */
+:root[data-reading-font="dyslexic"] body { font-size: 14px; }
+:root[data-reading-font="dyslexic"][data-reading-size="s"] body { font-size: 12px; }
+:root[data-reading-font="dyslexic"][data-reading-size="l"] body { font-size: 16px; }
+
+.reading-size[hidden] { display: none !important; }
+
+.reading-toggle__state {
+  margin-left: var(--space-2, 0.5rem);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.reading-toggle[aria-checked="true"] .reading-toggle__state { color: var(--accent); }
+.reading-size .reading-toggle__state { color: var(--accent); }

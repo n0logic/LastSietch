@@ -87,6 +87,8 @@ body.admin-page .v2-landing__dot.is-healthy {
 
 body.admin-page .v2-landing__dot.is-degraded { background: var(--accent); animation: none; }
 body.admin-page .v2-landing__dot.is-unreachable { background: var(--red); animation: none; }
+/* Planned outage (/etc/lastsietch/games-offline), not a fault. */
+body.admin-page .v2-landing__dot.is-relocating { background: #3498db; animation: none; }
 
 /* Stats grid — 4 across */
 body.admin-page .v2-landing__stats {
@@ -353,6 +355,12 @@ body.admin-page .v2-landing__badge.is-provisioned {
   background: rgba(136, 136, 153, 0.10);
   border: 1px solid rgba(136, 136, 153, 0.25);
   color: var(--text-muted);
+}
+
+body.admin-page .v2-landing__badge.is-relocating {
+  background: rgba(52, 152, 219, 0.12);
+  border: 1px solid rgba(52, 152, 219, 0.35);
+  color: #5dade2;
 }
 
 body.admin-page .v2-landing__badge.is-unknown {

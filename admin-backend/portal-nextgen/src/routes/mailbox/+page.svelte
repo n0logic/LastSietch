@@ -75,7 +75,7 @@
       <PlayerDirectory />
       <!-- The visibility toggle moved to Settings in wave 4. The directory is
            right above this line, so say where its switch went. -->
-      <p class="dir-note">Whether you appear in this directory, and the line you show beside your name, are set in <a href={`${base}/settings`}>Settings</a>.</p>
+      <p class="dir-note">Whether you appear in this directory, and the line you show beside your name, are set in <a href={`${base}/settings?tab=privacy`}>Settings</a>.</p>
     </div>
   {/if}
 </div>

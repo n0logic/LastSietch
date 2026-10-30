@@ -29,6 +29,7 @@ New for the cart:
 
 from routers.dune_grant import (
     _load_catalog,
+    AWARD_XP_CATEGORIES,
     MAX_CHAR_XP,
     MAX_FACTION_REP,
     MAX_HOUSE_SCRIP,
@@ -203,6 +204,10 @@ def _fields_for(grant_type: str, catalog: dict) -> list:
                 "required": False,
                 "help": "Acknowledge already-spent skill points may be redistributed.",
             },
+            _choice_field("category", list(AWARD_XP_CATEGORIES), required=False,
+                          default="Combat",
+                          help="Live delivery only: the AwardXP earn area. "
+                               "The offline path ignores it."),
         ]
 
     if grant_type == "spec_xp":
@@ -210,7 +215,8 @@ def _fields_for(grant_type: str, catalog: dict) -> list:
         return [
             _choice_field("track_type", tracks),
             _int_field("xp", 0, MAX_SPEC_XP, 2000),
-            _int_field("level", 0, MAX_SPEC_LEVEL, 0, required=False, help="Level checkpoint; usually 0."),
+            _int_field("level", 0, MAX_SPEC_LEVEL, 0, required=False,
+                       help="Leave 0 to derive the level from XP on the live curve."),
             _choice_field("mode", list(_MODE_CHOICES), default="set"),
         ]
 

@@ -18,8 +18,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from auth import audit_log, require_admin, require_csrf
+import base_directory
 import base_vault
-from cache import ttl_cache
 from relay import call_relay
 
 router = APIRouter(prefix="/api/dune/v2")
@@ -30,20 +30,14 @@ router = APIRouter(prefix="/api/dune/v2")
 # so a 5-minute TTL costs the game host at most one query per 5 minutes no
 # matter how many admins have the page open. max_stale keeps the page serving
 # (flagged stale) for another 30 minutes if the relay is briefly unreachable,
-# which is the right failure mode for a lookup nobody is paged by.
-_BASES_TTL = 300
-_BASES_MAX_STALE = 1800
+# which is the right failure mode for a lookup nobody is paged by. The cached
+# read lives in base_directory so the A0 directory shares the same entry.
+_cached_bases = base_directory.cached_bases
 
 # One totem per claim, ~166 live. Bounded by the dispatcher at 25.
 _NEAR_MAX = 25
 
 _MAP_RE = re.compile(r"^[A-Za-z0-9_]{1,40}$")
-
-
-@ttl_cache("dune.bases", ttl=_BASES_TTL, max_stale=_BASES_MAX_STALE)
-async def _cached_bases() -> dict:
-    # 70s: the relay itself allows the game-host command 60s.
-    return await call_relay("/dune/bases", timeout=70)
 
 
 @router.get("/bases")
@@ -71,6 +65,22 @@ async def v2_bases(request: Request):
                 "error": str(exc)[:300]}
 
 
+@router.get("/bases/directory")
+async def v2_bases_directory(request: Request):
+    """Base directory (plan A0): one row per totem across the claims directory,
+    the BRT backup headers and the Base Vault catalog. Status is Placed, Packed
+    (with the owner's n/3 slots), Held (partition NULL, loaded by no server),
+    Orphaned or Archived only (in the vault, gone from the game DB). Also
+    residency, vault coverage, owner BaseBackupTool count and backup slots.
+
+    Admin-only, read-only, no CSRF. Each source is cached on its own and may be
+    missing; `sources` says which answered, and a missing field is null, never
+    a guess.
+    """
+    require_admin(request)
+    return JSONResponse(await base_directory.load(), headers={"Cache-Control": "no-store"})
+
+
 @router.get("/bases/near")
 async def v2_bases_near(request: Request, map_name: str, dim: int, x: float,
                         y: float, limit: int = 5):
@@ -81,9 +91,10 @@ async def v2_bases_near(request: Request, map_name: str, dim: int, x: float,
     the game host; they keep a world transform but nothing stands there.
 
     `dim` is required. A Hagga map view is always showing ONE instance, so the
-    caller already knows which (0 = Habbanya PvE, 1 = Kulon PvP) and must say
-    so: the two share a coordinate space, and a lookup without the dimension
-    will happily return a PvP base as the nearest thing to a PvE click. The
+    caller already knows which (0 = Habbanya PvE, 2 = Amtal full PvP; 1 was
+    Kulon until 2026-10-28) and must say so: they share a coordinate space, and
+    a lookup without the dimension will happily return a PvP base as the
+    nearest thing to a PvE click. The
     response echoes `dimension_index` back for the same reason.
     """
     require_admin(request)
@@ -141,6 +152,51 @@ async def v2_claim_vault_capture(request: Request, totem_id: int):
                   _ip(request), details=json.dumps({'request_id': identity, 'status': error.status_code}), success=False)
         raise
     audit_log(user['id'], user['username'], 'dune_vault_capture', str(totem_id), _ip(request),
+              details=json.dumps({'request_id': identity, 'status': result.get('operation', {}).get('status')}),
+              success=result.get('operation', {}).get('status') in ('pending', 'running', 'completed'))
+    return JSONResponse(result, status_code=202, headers={'Cache-Control': 'no-store'})
+
+
+async def _capture_body(request: Request):
+    raw = b''
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > 1024:
+            raise HTTPException(400, 'Capture request is too large')
+    try:
+        return json.loads(raw)
+    except (ValueError, UnicodeError):
+        raise HTTPException(400, 'Invalid capture request')
+
+
+@router.get("/base-backups/{backup_id}/vault")
+async def v2_backup_vault(request: Request, backup_id: int):
+    """Snapshot history of a packed native BRT backup (VAULT-03)."""
+    user = require_admin(request)
+    base_vault.validate_backup(backup_id)
+    result = await base_vault.call({'action': 'backup_history', 'backup_id': backup_id})
+    audit_log(user['id'], user['username'], 'dune_vault_backup_history', str(backup_id),
+              _ip(request), details=json.dumps({'snapshots': result.get('total_snapshots', 0)}))
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+
+@router.post("/base-backups/{backup_id}/vault/snapshots")
+async def v2_backup_vault_capture(request: Request, backup_id: int):
+    """Capture a packed native backup as it is. Never packs, places or recycles anything."""
+    user = require_admin(request)
+    require_csrf(request, user)
+    base_vault.validate_backup(backup_id)
+    identity = base_vault.validate_capture(await _capture_body(request))
+    audit_log(user['id'], user['username'], 'dune_vault_backup_capture_requested', str(backup_id),
+              _ip(request), details=json.dumps({'request_id': identity}))
+    try:
+        result = await base_vault.call({'action': 'backup_capture', 'backup_id': backup_id,
+                                        'request_id': identity, 'admin_id': user['id']})
+    except HTTPException as error:
+        audit_log(user['id'], user['username'], 'dune_vault_backup_capture', str(backup_id),
+                  _ip(request), details=json.dumps({'request_id': identity, 'status': error.status_code}), success=False)
+        raise
+    audit_log(user['id'], user['username'], 'dune_vault_backup_capture', str(backup_id), _ip(request),
               details=json.dumps({'request_id': identity, 'status': result.get('operation', {}).get('status')}),
               success=result.get('operation', {}).get('status') in ('pending', 'running', 'completed'))
     return JSONResponse(result, status_code=202, headers={'Cache-Control': 'no-store'})

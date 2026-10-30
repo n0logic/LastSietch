@@ -16,6 +16,7 @@
   const COOLDOWN_LS = 'ls-rescue-until';
 
   let confirming = $state(false);
+  let preview = $state(null); // null = loading; { ok, message } once the server answers
   let busy = $state(false);
   let result = $state(null); // { ok, message }
   let cooldownUntil = $state(0);
@@ -67,6 +68,20 @@
     }
   }
 
+  // Ask the server where the rescue would land before the player commits. The
+  // POST re-checks everything, so this is information, never the gate.
+  async function openConfirm() {
+    preview = null;
+    confirming = true;
+    try {
+      const d = await api.maps.rescuePreview();
+      preview = { ok: !!d.ok, message: d.message || '' };
+      if (d.cooldown_remaining_s > 0) startCooldown(d.cooldown_remaining_s);
+    } catch (e) {
+      preview = { ok: true, message: '', unknown: true };
+    }
+  }
+
   function onKeydown(e) {
     if (e.key === 'Escape') confirming = false;
   }
@@ -90,7 +105,7 @@
     disabled={disabled}
     aria-busy={busy}
     title={reason || undefined}
-    onclickcapture={() => { if (!disabled) { result = null; confirming = true; } }}
+    onclickcapture={() => { if (!disabled) { result = null; openConfirm(); } }}
   >
     <span class="beacon" class:armed={!disabled} aria-hidden="true"></span>
     {#if busy}Sending...{:else if cooldownLeft > 0}Rescue in {Math.max(1, Math.ceil(cooldownLeft / 60))}m{:else}Help! I'm stuck{/if}
@@ -114,16 +129,24 @@
     <div class="scrim" aria-hidden="true" onclickcapture={() => { confirming = false; }}></div>
     <div class="confirm" role="dialog" aria-modal="true" aria-label="Confirm self-rescue">
       <h2 class="confirm-title">Send a rescue?</h2>
+      {#if preview === null}
+        <p class="confirm-body confirm-where mono" aria-busy="true">Finding your destination...</p>
+      {:else if preview.unknown}
+        <p class="confirm-body">
+          This teleports your character to your own nearest base. We could not
+          preview the exact spot right now.
+        </p>
+      {:else}
+        <p class="confirm-body confirm-where" class:refused={!preview.ok}>{preview.message}</p>
+      {/if}
       <p class="confirm-body">
-        This teleports your character to your own nearest base totem. The
-        destination is chosen by the server; you cannot pick it.
-      </p>
-      <p class="confirm-body">
-        Works about once per hour, only while you are logged in to the game,
-        and never in the Deep Desert.
+        The server picks the destination; you cannot choose it. Works about once
+        per hour, only while you are logged in to the game, on Habbanya and the
+        Deep Desert PvE instance (never on PvP maps).
       </p>
       <div class="confirm-row">
-        <button class="confirm-go mono" onclickcapture={send}>Send rescue</button>
+        <button class="confirm-go mono" disabled={preview === null || !preview.ok}
+          onclickcapture={() => { if (preview && preview.ok) send(); }}>Send rescue</button>
         <button class="confirm-no mono" onclickcapture={() => { confirming = false; }}>Cancel</button>
       </div>
     </div>
@@ -131,6 +154,9 @@
 {/if}
 
 <style>
+  .confirm-where { color: var(--text); font-weight: 600; }
+  .confirm-where.refused { color: var(--text-dim, var(--text)); }
+  .confirm-go:disabled { opacity: .5; cursor: not-allowed; }
   .rescue {
     display: flex; flex-direction: column; gap: var(--space-1);
     align-items: flex-start; max-width: 240px;

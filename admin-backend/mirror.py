@@ -8,7 +8,7 @@ internet to the game DB on each page load.
 The sync loop always runs (so the mirror stays warm); only the get_* readers are
 gated by config.PORTAL_MIRROR_READS. A row older than config.MIRROR_MAX_STALE is
 treated as a miss so a stalled collector/sync degrades to the live relay path,
-never to ancient data. See docs/dune-research/PHASE-1-MIRROR-CONTRACT-2026-06-05.md.
+never to ancient data. See the design notes (not published).
 """
 from __future__ import annotations
 
@@ -410,9 +410,20 @@ def _is_stale(src_synced_at, max_stale=None):
         return True
 
 
-def get_section(account_id, section):
+def _synced_after(src_synced_at, when):
+    try:
+        a, b = datetime.fromisoformat(src_synced_at), datetime.fromisoformat(str(when))
+        a = a if a.tzinfo else a.replace(tzinfo=timezone.utc)
+        b = b if b.tzinfo else b.replace(tzinfo=timezone.utc)
+        return a > b
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def get_section(account_id, section, newer_than=None):
     """Parsed section payload from the local mirror, or None on flag-off / miss /
-    stale / parse error (caller then falls back to the live relay)."""
+    stale / parse error (caller then falls back to the live relay). newer_than (UTC,
+    ISO or 'YYYY-MM-DD HH:MM:SS'): also None when the snapshot predates it."""
     if not config.PORTAL_MIRROR_READS:
         return None
     col = _SECTION_COL.get(section)
@@ -430,6 +441,8 @@ def get_section(account_id, section):
         log.warning("mirror: get_section(%s,%s) failed: %s", account_id, section, exc)
         return None
     if not row or not row["blob"] or _is_stale(row["src_synced_at"]):
+        return None
+    if newer_than and not _synced_after(row["src_synced_at"], newer_than):
         return None
     try:
         return json.loads(row["blob"])

@@ -39,10 +39,10 @@ export function mapKeyFor(currentMap) {
 }
 
 /** The dimension a partition sits in, read off the board's OWN instance table
- *  (/data instances: {key, label, dim, part}). Hagga's three sietches share the
+ *  (/data instances: {key, label, dim, part}). Hagga's sietches share the
  *  terrain and are told apart ONLY by partition_id, so the sietch is never
  *  guessed from the friendly map name: 'Hagga Basin' names the terrain, not
- *  which of Habbanya, Kulon or Amtal a player is standing in.
+ *  which of Habbanya or Amtal a player is standing in.
  *
  *  Returns null when the partition is unknown, the board has not been read yet,
  *  or the board's instances carry no `part` at all (the Deep Desert, whose two
@@ -107,10 +107,15 @@ export function readSignals(raw, ctx) {
   const wormList = (live && live.worms && live.worms.dimensions
     && live.worms.dimensions[dimKey] && live.worms.dimensions[dimKey].worms) || [];
 
+  // Real reader state only (2.26.1): reader v2's storm_state 'active' / 'clear'
+  // wins; a pre-v2 relay (no storm_state) still counts a fresh scanned sector.
+  // Never a timing guess.
   const scanned = ms(stormRaw && stormRaw.storm_scanned_utc);
+  const stormState = (stormRaw && stormRaw.storm_state) || null;
   const stormSector = (stormRaw && stormRaw.storm_sector) || null;
-  const stormActive = !!(stormSector && scanned != null
-    && now - scanned >= 0 && now - scanned < STORM_SCAN_FRESH_MS);
+  const stormActive = stormState === 'active' || (stormState == null && !!(stormSector && scanned != null
+    && now - scanned >= 0 && now - scanned < STORM_SCAN_FRESH_MS));
+  const stormEndsUtc = (stormActive && stormRaw.ends_utc) || null;
 
   const status = (r.overview && r.overview.status) || null;
   const ann = (r.announcement && r.announcement.active) ? r.announcement : null;
@@ -161,6 +166,7 @@ export function readSignals(raw, ctx) {
 
     stormActive,
     stormSector,
+    stormEndsUtc,
     stormHeading: compass(stormRaw && stormRaw.heading_yaw),
     stormNextEtaUtc: (stormRaw && stormRaw.next_eta_utc) || null,
     storm: stormRaw,
@@ -175,6 +181,9 @@ export function readSignals(raw, ctx) {
     announcement: ann,
     termEndUtc: (standings && standings.term && standings.term.end_utc) || null,
     standings,
+    // Our clock at the last standings read that ANSWERED (not the last attempt),
+    // so the Landsraad card can say how old a decree it is still showing is.
+    standingsReadAt: c.standingsReadAt != null ? c.standingsReadAt : null,
 
     charName: character ? (character.name || null) : null,
     charOnline,
@@ -256,13 +265,14 @@ export function deriveVerdict(signals, gate) {
   // 3. Storm on the map the player is actually on (Ibad).
   if (s.stormActive) {
     const here = s.charOnline === true && s.charMap ? ` on ${s.charMap}` : '';
+    const ends = s.stormEndsUtc || null;
     if (s.stormSector && s.stormHeading) {
-      return v(3, `Sandstorm over ${s.stormSector}${here}, heading ${s.stormHeading}. Make for rock.`, 'danger', null);
+      return v(3, `Sandstorm over ${s.stormSector}${here}, heading ${s.stormHeading}. Make for rock.`, 'danger', ends);
     }
     if (s.stormSector) {
-      return v(3, `Sandstorm over ${s.stormSector}${here}. Make for rock.`, 'danger', null);
+      return v(3, `Sandstorm over ${s.stormSector}${here}. Make for rock.`, 'danger', ends);
     }
-    return v(3, `Sandstorm sweeping ${s.mapLabel}. Make for rock.`, 'danger', null);
+    return v(3, `Sandstorm on ${s.mapLabel}. Make for rock.`, 'danger', ends);
   }
 
   // 4. Operator alert or planned maintenance.

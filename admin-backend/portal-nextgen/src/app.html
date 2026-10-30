@@ -22,13 +22,15 @@
     <meta name="twitter:description" content="Deep Desert maps, the community blueprint market, guild rosters and reward tracking for the Last Sietch Dune: Awakening servers." />
     <meta name="twitter:image" content="https://portal.lastsietch.com/og-fremkit.jpg?v=20260902" />
     <script>
-      // No-FOUC theme boot: apply the saved mode + house before first paint.
+      // No-FOUC theme boot: apply the saved mode, house, reading font and its size before first paint.
       (function () {
         try {
           var t = localStorage.getItem('ls-theme');
           if (t) document.documentElement.setAttribute('data-theme', t);
           var h = localStorage.getItem('ls-house');
           if (h) document.documentElement.setAttribute('data-house', h);
+          if (localStorage.getItem('ls-reading-font') === '1') document.documentElement.setAttribute('data-reading-font', 'dyslexic');
+          var rs = localStorage.getItem('ls-reading-size'); if (rs === 's' || rs === 'l') document.documentElement.setAttribute('data-reading-size', rs);
         } catch (e) {}
       })();
     </script>

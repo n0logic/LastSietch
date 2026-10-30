@@ -900,7 +900,7 @@ SKILL_JOBS = [
 _JOB_LABELS = dict(SKILL_JOBS)
 
 # Spec XP caps (mirror routers.dune_grant; "Max track" preset is the only
-# validated XP target, OQ-3). spec_xp itself is online-safe (Funcom proc).
+# validated XP target, OQ-3). spec_xp is offline-gated: the track is RAM-loaded on login.
 SPEC_XP_MAX = 44182
 SPEC_LEVEL_MAX = 100
 

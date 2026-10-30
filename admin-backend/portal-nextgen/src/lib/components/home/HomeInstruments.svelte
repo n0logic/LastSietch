@@ -58,7 +58,11 @@
       karumOpen={s.karumOpen ?? null} />
   {/if}
   <StormInstrument storm={s.storm ?? null} mapLabel={s.mapLabel ?? null} now={s.now ?? null} />
-  <LandsraadInstrument standings={s.standings ?? null} myContribution={s.myContribution ?? null} />
+  <LandsraadInstrument
+    standings={s.standings ?? null}
+    myContribution={s.myContribution ?? null}
+    readAt={s.standingsReadAt ?? null}
+    now={s.now ?? null} />
 </div>
 
 {#if linked}
@@ -87,9 +91,12 @@
 {/if}
 
 <style>
+  /* align-items: start: an expanded instrument grows alone. The default stretch
+     pulled its row neighbour into a tall, empty card. */
   .instruments {
     display: grid; gap: var(--space-4);
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    align-items: start;
     margin: 0 0 var(--space-5);
   }
   .personal { display: grid; gap: var(--space-4); grid-template-columns: 1fr; }

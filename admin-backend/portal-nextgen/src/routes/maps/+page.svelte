@@ -1,14 +1,14 @@
 <script>
   // Maps hub: five planning-board cards. There is no JSON endpoint listing maps
   // (V1's hub is server-rendered), so the board set is a static descriptor kept
-  // in step with map_model.MAPS; live player counts come from /players per key.
+  // in step with map_model.MAPS. Owner ruling 2026-09-30: total population only,
+  // so the cards carry no per-world count; one server-wide figure sits on top.
   import { onMount } from 'svelte';
   import { base } from '$app/paths';
   import LiveDot from '$lib/components/LiveDot.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import ServerSchedule from '$lib/components/ServerSchedule.svelte';
-  import SealedPanel from '$lib/components/SealedPanel.svelte';
-  import { api, getJSON } from '$lib/api.js';
+  import { api } from '$lib/api.js';
 
   // KEEP IN SYNC with admin-backend/map_model.py MAPS (keys, names, card art).
   // All four registry maps are listed (retention contract: no feature loss vs
@@ -24,23 +24,16 @@
       blurb: 'The contested sand. Same board, harder rules.',
       art: '/img/v3/plates/dd-pvp-dusk-clear-small.jpg', spice: true,
     },
-    // Three live Hagga sietches share the terrain, split by partition (the public
-    // positions feed tags each player with p=1 Habbanya / p=32 Kulon / p=33
-    // Amtal), so each card carries its own live count.
+    // Two live Hagga sietches share the terrain, split by partition.
     {
       key: 'hagga', inst: 'habbanya', name: 'Habbanya', region: 'Hagga Basin', chip: 'PvE', part: 1,
       blurb: 'Habbanya, home turf. Every cave and wreck at true position.',
       art: '/img/v3/plates/habbanya-dusk-clear-small.jpg', spice: false,
     },
     {
-      key: 'hagga', inst: 'kulon', name: 'Kulon', region: 'Hagga Basin', chip: 'PvP', part: 32,
-      blurb: 'Kulon, the contested basin. Same ground, harder rules.',
-      art: '/img/v3/plates/kulon-dusk-clear-small.jpg', spice: false,
-    },
-    {
       key: 'hagga', inst: 'amtal', name: 'Amtal', region: 'Hagga Basin', chip: 'Full PvP', part: 33, untracked: true,
-      blurb: 'Amtal, no sanctuary. PvP everywhere but the tradeposts, and no map tracks you. Storms never drop shields here: you are safe at home while yours holds, so keep the generators fed.',
-      warn: 'The in-game banner out there reads PvE. It lies. Full PvP everywhere outside the tradeposts.',
+      blurb: 'Amtal, no sanctuary. PvP everywhere, tradeposts included, and no map tracks you. The Riftwatch and Helius Gate settlements are the only safe areas. Storms never drop shields here: you are safe at home while yours holds, so keep the generators fed.',
+      warn: 'Tradepost banners can flicker to Guild Peace. Tradeposts are still PvP.',
       art: '/img/v3/plates/amtal-dusk-clear-small.jpg', spice: false,
     },
     {
@@ -55,22 +48,14 @@
     },
   ];
 
-  let players = $state({}); // key -> /players payload
-  // Per-partition live Hagga counts from the public positions feed (p=1/32).
-  let hagga = $state({ available: false, counts: {} });
+  let online = $state(null); // server-wide total, the only live count shown
   let artFailed = $state({});
 
   async function poll() {
-    for (const board of BOARDS.filter((item) => item.part == null)) {
-      try { players[board.key + (board.inst || '')] = await api.maps.players(board.key, board.dim); }
-      catch (e) { players[board.key + (board.inst || '')] = null; }
-    }
     try {
-      const d = await getJSON('/api/dune/positions');
-      const counts = {};
-      for (const p of (d.players || [])) counts[p.p] = (counts[p.p] || 0) + 1;
-      hagga = { available: d.available !== false, counts };
-    } catch (e) { hagga = { available: false, counts: {} }; }
+      const s = await api.server.duneStatus();
+      online = s && s.available !== false && typeof s.online_players === 'number' ? s.online_players : null;
+    } catch (e) { online = null; }
   }
 
   onMount(() => {
@@ -83,16 +68,6 @@
     return `${base}/maps/${b.key}${b.inst ? `?inst=${b.inst}` : ''}`;
   }
 
-  // Live count for a card: per-partition for the three Hagga sietches, else the
-  // whole-map count. Returns null when no live figure is available yet.
-  function liveCount(b) {
-    // Amtal (owner, 2026-08-27): positions are server-filtered for the full-PvP
-    // sietch, so a count here would read a hardcoded 0, so hide it instead.
-    if (b.untracked) return null;
-    if (b.part != null) return hagga.available ? (hagga.counts[b.part] || 0) : null;
-    const reading = players[b.key + (b.inst || '')];
-    return reading?.available ? (reading.map_players ?? null) : null;
-  }
 </script>
 
 <svelte:head>
@@ -108,9 +83,14 @@
 
   <ServerSchedule />
 
+  <p class="worldlink"><a href="{base}/world">See the whole world on the Sand Table</a></p>
+
+  {#if online != null}
+    <p class="online mono"><LiveDot tone="live" /> {online} {online === 1 ? 'player' : 'players'} online across the server</p>
+  {/if}
+
   <div class="grid">
     {#each BOARDS as b (b.key + (b.inst ?? ''))}
-      {@const live = liveCount(b)}
       <a class="card" href={href(b)}>
         <div class="art" aria-hidden="true">
           {#if b.art && !artFailed[b.key]}
@@ -128,20 +108,7 @@
           {#if b.warn}<p class="warn mono">⚠ {b.warn}</p>{/if}
           <div class="chips">
             {#if b.spice}<span class="chip chip-spice mono">Live spice</span>{/if}
-            {#if live != null}
-              <span class="chip chip-players mono">
-                <LiveDot tone="live" /> {live} on this map
-              </span>
-            {/if}
           </div>
-          <!-- Untracked sietch: the count is ABSENT, not zero. Saying so where the
-               count would have been is the only way a reader can tell the two apart. -->
-          {#if b.untracked}
-            <SealedPanel
-              status="empty" action="none" art="untracked"
-              emptyText="No live count on this sietch. The position feed is filtered out here, so nothing on this page can tell you who is on the sand."
-            />
-          {/if}
         </div>
         <span class="brackets" aria-hidden="true"></span>
       </a>
@@ -155,6 +122,7 @@
 
 <style>
   .page { max-width: var(--content-max); margin: 0 auto; padding: var(--space-6) var(--space-4) var(--space-8); }
+  .online { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-4); font-size: var(--text-sm); color: var(--text-muted); }
   .warn { margin: var(--space-1) 0 0; font-size: 0.78rem; line-height: 1.4; color: var(--ls-red); }
 
   .grid {
@@ -234,4 +202,7 @@
     .grid > .card { opacity: 1; transform: none; animation: none; }
   }
   @keyframes rise { to { opacity: 1; transform: none; } }
+  .worldlink { margin: 0 0 var(--space-4); }
+  .worldlink a { color: var(--accent-text); letter-spacing: .08em; text-transform: uppercase; font-size: var(--text-sm); text-decoration: none; border-bottom: 1px solid var(--accent-soft); padding-bottom: 2px; }
+  .worldlink a:hover, .worldlink a:focus-visible { color: var(--accent-bright); border-bottom-color: var(--accent-bright); }
 </style>

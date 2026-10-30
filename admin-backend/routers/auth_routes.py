@@ -20,6 +20,10 @@ from rate_limit import check_rate_limit
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
+# Unknown users and locked accounts still pay for one bcrypt check and get the same 401 as a
+# bad password, so neither the status nor the response time says whether a username exists.
+_DUMMY_HASH = hash_password("not-a-real-password")
+
 
 @router.get("/login")
 async def login_page(request: Request):
@@ -49,6 +53,7 @@ async def login(request: Request):
 
     if not user:
         conn.close()
+        verify_password(password, _DUMMY_HASH)
         audit_log(None, username, "login_failed", None, ip, "Unknown user", success=False)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -57,8 +62,9 @@ async def login(request: Request):
         locked = datetime.fromisoformat(user["locked_until"])
         if locked > datetime.now(timezone.utc):
             conn.close()
+            verify_password(password, _DUMMY_HASH)
             audit_log(user["id"], username, "login_blocked", None, ip, "Account locked", success=False)
-            raise HTTPException(status_code=423, detail="Account locked. Try again later.")
+            raise HTTPException(status_code=401, detail="Invalid credentials")
         else:
             conn.execute("UPDATE users SET locked_until = NULL, failed_attempts = 0 WHERE id = ?", (user["id"],))
             conn.commit()

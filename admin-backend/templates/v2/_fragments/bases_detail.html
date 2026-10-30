@@ -56,3 +56,17 @@
     <p class="v2-bases-detail__hint">No linked-actor breakdown available for this backup.</p>
   {% endif %}
 {% endif %}
+<section class="bv-backup" data-backup-vault="{{ backup_id }}" aria-labelledby="bv-backup-title-{{ backup_id }}">
+  <div class="bv-section-head">
+    <h3 id="bv-backup-title-{{ backup_id }}">Base Vault</h3>
+    <span class="bv-note">Packed backup #{{ backup_id }}</span>
+  </div>
+  <p class="bv-note">A snapshot archives this packed backup exactly as it is. It does not place, recycle or change it, and it does not use a BRT slot. It records the parked location and the stored claim origin (where the BRT rebuilds it). Member ranks and the layout at the original site exist only in a live-base snapshot of the same totem.</p>
+  <div class="bv-origin" data-bv-backup-origin></div>
+  <div class="bv-actions">
+    <button type="button" class="btn btn-accent btn-sm" data-bv-backup-capture disabled>Take snapshot</button>
+    <button type="button" class="btn btn-sm" data-bv-backup-refresh>Check status</button>
+  </div>
+  <p class="bv-status" data-bv-backup-status role="status" aria-live="polite" aria-atomic="true">Loading vault status...</p>
+  <div data-bv-backup-history aria-busy="true"></div>
+</section>

@@ -10,7 +10,7 @@ sector is letter+number, e.g. 'F1' = row F, column 1. We track the SET of
 large/medium/small surveyed sites for the cycle, and (when available) overlay the
 LIVE active Large field per dimension, located by clustering harvester positions
 against the authoritative DD map bounds. See
-docs/dune-research/SPICE-LIVE-ACTIVE-FIELD-RESEARCH-2026-06-03.md.
+the design notes (not published).
 """
 import json
 import logging

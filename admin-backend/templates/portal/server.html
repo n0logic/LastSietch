@@ -52,8 +52,8 @@
     <div class="portal-stat">
       <span class="portal-stat__label">{{ m.name }}</span>
       <span class="portal-stat__value">
-        {% if m.players is not none %}{{ m.players }}{% else %}—{% endif %}
-        {% if not m.up %}<span class="portal-pill portal-pill--offline" style="margin-left:.5rem;">down</span>{% endif %}
+        {# no per-map count: total population only (owner ruling 2026-09-30) #}
+        {% if m.up %}up{% elif m.on_demand %}on travel{% else %}<span class="portal-pill portal-pill--offline">down</span>{% endif %}
       </span>
     </div>
     {% endfor %}

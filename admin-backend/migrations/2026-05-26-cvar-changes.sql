@@ -2,7 +2,7 @@
 -- write. Lives in the DUNE Postgres database (NOT admin-backend SQLite) so
 -- the relay can INSERT transactionally with the file write.
 --
--- Schema source of truth: docs/dune-research/P8-EXECUTION-BRIEF.md Appendix B.5.
+-- Schema source of truth: the design notes (not published) Appendix B.5.
 --
 -- OWNER dune is MANDATORY per the custom-table ownership rule —
 -- Funcom's pre-update pg_dump halts the entire game update if any custom

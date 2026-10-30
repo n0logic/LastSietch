@@ -59,7 +59,7 @@
     <p class="context">
       {#if signals.charName}{signals.charName} · {signals.charOnline === true ? 'online' : signals.charOnline === false ? 'offline' : 'status unavailable'}{:else}The Last Sietch Portal{/if}
     </p>
-    <a class="bronze" href={appearance.href}>Open the war-table <span aria-hidden="true">↗</span></a>
+    <a class="bronze" href={appearance.href}>Open the Sand Table <span aria-hidden="true">↗</span></a>
   </div>
 </section>
 

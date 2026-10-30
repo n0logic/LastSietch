@@ -26,7 +26,7 @@
 </h1>
 
 {#if v.timerUtc}
-  <p class="timer mono"><LiveCountdown target={v.timerUtc} /></p>
+  <p class="timer mono"><LiveCountdown target={v.timerUtc} prefix={v.rank === 3 ? 'clears in' : ''} clock={v.rank === 3} /></p>
 {/if}
 
 {#if lines.length}

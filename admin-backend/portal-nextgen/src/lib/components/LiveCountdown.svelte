@@ -1,17 +1,22 @@
 <script>
   // Ticking countdown to an absolute ISO instant. Ibad blue (live data). Ticks at
   // minute resolution (cheap, battery-friendly); the target is absolute so a stale
-  // cache never skews it.
-  let { target = null, label = '', prefix = '' } = $props();
+  // cache never skews it. clock = short mm:ss form ticking every second (storm
+  // "clears in"), for countdowns that are minutes long.
+  let { target = null, label = '', prefix = '', clock = false } = $props();
 
   let now = $state(Date.now());
   $effect(() => {
-    const id = setInterval(() => { now = Date.now(); }, 30000);
+    const id = setInterval(() => { now = Date.now(); }, clock ? 1000 : 30000);
     return () => clearInterval(id);
   });
 
   function fmt(ms) {
     if (ms <= 0) return null;
+    if (clock) {
+      const t = Math.floor(ms / 1000);
+      return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+    }
     let s = Math.floor(ms / 1000);
     const d = Math.floor(s / 86400); s -= d * 86400;
     const h = Math.floor(s / 3600); s -= h * 3600;

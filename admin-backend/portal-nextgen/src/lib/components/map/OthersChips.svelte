@@ -1,11 +1,13 @@
 <script>
-  // Live other-player / world-vehicle layer toggles (Hagga only). Public data
-  // (the same anonymous coords the public board shows), so this is NOT auth
-  // gated. `count` is the number of other players in the SELECTED sietch. The
+  // Live other-player / world-vehicle layer toggles (Hagga only). Owner ruling
+  // 2026-09-30: live positions and vehicles are for signed-in players only, so
+  // a signed-out visitor sees a sign-in prompt instead of an empty layer. The
   // route owns persistence + engine wiring; this is presentational.
+  import { LOGIN_URL } from '$lib/auth.svelte.js';
   let {
     count = null,
     show = { players: true, vehicles: true },
+    signedIn = true,
     onchange,
   } = $props();
 
@@ -16,6 +18,9 @@
 
 <div class="others" role="group" aria-label="Live players layer">
   <span class="label mono">Live players</span>
+  {#if !signedIn}
+    <a class="signin mono" href={LOGIN_URL} data-sveltekit-reload>Sign in to see other players</a>
+  {:else}
   <button
     class="chip mono"
     class:off={!show.players}
@@ -34,9 +39,11 @@
     <span class="swatch swatch-vehicle" aria-hidden="true"></span>
     Vehicles
   </button>
+  {/if}
 </div>
 
 <style>
+  .signin { font-size: var(--text-xs); letter-spacing: .06em; color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; }
   .others {
     display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2);
   }

@@ -122,6 +122,7 @@ async def start_sampler(app):
                     game_ids = [
                         gid for gid, info in (games or {}).items()
                         if isinstance(info, dict) and info.get("provisioned") is True
+                        and not info.get("relocating")
                     ]
                     # Drop any un-provisioned games that previously slipped into _first_seen.
                     for stale in list(_first_seen.keys()):

@@ -2,7 +2,7 @@
 // /api/dune/positions + /api/dune/vehicles feeds (coords + partition/type only,
 // PII-safe: no names, no account ids), the same data the public lastsietch.com
 // board shows. Each entity is filtered to the drawn MAP and then to the selected
-// sietch by partition (1=Habbanya / 32=Kulon / 33=Amtal), projected world ->
+// sietch by partition (1=Habbanya / 33=Amtal), projected world ->
 // normalized here, and drawn as a sprite token (icons.js): a vehicle by its
 // class `t` and subtype `st` (world ids, not identity), a player as the
 // anonymous badge. Unknown vehicle classes keep the old dot. No per-marker
@@ -25,7 +25,7 @@ const ENGINE_MAP = {
 // Since 2026-07-27 both feeds cover EVERY map (they were hardcoded to
 // HaggaBasin, which hid everyone elsewhere). Partition alone must NOT be
 // trusted to keep maps apart: it worked only because Hagga's partitions
-// (1, 32, 33) happen not to collide with Deep Desert's (8, 31), and partMatch
+// (1, 33; 32 until Kulon closed) happen not to collide with Deep Desert's (8, 31), and partMatch
 // below returns true whenever the instance has no `part` at all, which is
 // every non-Hagga map in the registry. Without this gate, turning the feed on
 // for those pages would draw the entire world on each of them.

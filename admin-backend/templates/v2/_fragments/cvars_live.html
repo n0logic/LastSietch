@@ -130,17 +130,8 @@
                   {% if s.per_map %}<span class="badge badge--muted">per-map</span>{% endif %}
                 </td>
                 <td class="v2-cvars-live__action">
-                  {% if s.per_map %}
-                    <button type="button" class="btn btn-sm" disabled aria-disabled="true"
-                            title="Per-map — deferred to slice 2">Edit</button>
-                  {% else %}
-                    <button type="button" class="btn btn-sm cvars-edit-trigger"
-                            data-cvar-section="{{ s.section }}"
-                            data-cvar-key="{{ s.key }}"
-                            data-cvar-old="{{ s.current_value if s.current_value is not none else '' }}"
-                            data-cvar-layer="{{ s.source }}"
-                            data-cvar-type="{{ s.inferred_type or '' }}">Edit</button>
-                  {% endif %}
+                  <button type="button" class="btn btn-sm" disabled aria-disabled="true"
+                          title="cvars do not apply from INI files">Edit</button>
                 </td>
               </tr>
             {% endfor %}

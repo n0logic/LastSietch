@@ -87,19 +87,73 @@
     <CarvedSlab>
       <p class="kicker mono">Conduct</p>
       <h2 class="gname">Rules of the Sietch</h2>
-      <p class="cintro">Live by the code and the spice will flow. The same seven rules are pinned in the Discord.</p>
-      <ol class="rules">
-        <li><b>Respect the tribe.</b> Treat every member with respect. No harassment, hate speech, slurs, or personal attacks.</li>
-        <li><b>Stronger together.</b> Share knowledge and resources; help new survivors find their footing.</li>
-        <li>
-          <b>Play fair.</b> No cheating, exploiting bugs, or griefing friendly players. Report problems to staff.
-          <span class="sub">Griefing is using game mechanics, or grouping up, to deliberately target players or groups who are obviously less powerful than you. Think of the school bully: picking a fight against someone who cannot win it. A fair fight between capable players is PvP working as intended.</span>
-        </li>
-        <li><b>Stay on-topic.</b> Use the right channel; coordinate Deep Desert runs in the Discord.</li>
-        <li><b>No spam or ads.</b> No spam, self-promotion, or unsolicited DMs.</li>
-        <li><b>Follow Discord's rules.</b> You must follow Discord's Terms of Service and Community Guidelines.</li>
-        <li><b>Staff have the final say.</b> Listen to the Naib and Gatekeepers; their decisions are final.</li>
-      </ol>
+      <p class="cintro">Live by the code and the spice will flow. The same code is pinned in #rules on the Discord. Rules are numbered straight through, so staff can point to one by number.</p>
+
+      <section class="zero" aria-labelledby="rules-zero">
+        <h3 class="rgroup" id="rules-zero">Zero tolerance</h3>
+        <p class="zintro">Any of these is an instant, permanent ban. No warning, no second chance.</p>
+        <ul class="zlist">
+          <li>Doxxing: sharing anyone's real-world details.</li>
+          <li>Threats, or stalking a player in game or out of it.</li>
+          <li>Slurs, even as a joke.</li>
+          <li>Cheats or hacks.</li>
+          <li>Real-money trading: buying or selling items, Solari or accounts for real money.</li>
+          <li>DDoS, or any attempt to crash or disrupt the servers.</li>
+        </ul>
+      </section>
+
+      <section aria-labelledby="rules-tribe">
+        <h3 class="rgroup" id="rules-tribe">The tribe</h3>
+        <ol class="rules" start="1">
+          <li><b>Respect the tribe.</b> Treat every member with respect. No harassment, hate speech, or personal attacks.</li>
+          <li><b>Stronger together.</b> Share knowledge and resources; help new survivors find their footing.</li>
+          <li><b>Wear an honest name.</b> No offensive character, guild or Discord names. Do not pose as staff or as another player.</li>
+          <li><b>Stay on-topic.</b> Use the right channel; coordinate Deep Desert runs in the Discord.</li>
+          <li><b>No spam or ads.</b> No spam, self-promotion, or unsolicited DMs.</li>
+          <li><b>Mind the voice channels.</b> No soundboard spam or yelling. Let people finish speaking.</li>
+          <li><b>Stream clean.</b> Follow your platform's rules. No stream-sniping. If a player asks you to blur or hide their name, do it.</li>
+          <li><b>Follow Discord's rules.</b> You must follow Discord's Terms of Service and Community Guidelines. You must be 13 or older, as Discord's Terms require; #nsfw is age-gated 18+.</li>
+        </ol>
+      </section>
+
+      <section aria-labelledby="rules-fair">
+        <h3 class="rgroup" id="rules-fair">Play fair</h3>
+        <ol class="rules" start="9">
+          <li>
+            <b>Play fair.</b> No cheating, and no griefing friendly players.
+            <span class="sub">Griefing is using game mechanics, or grouping up, to deliberately target players or groups who are obviously less powerful than you. Think of the school bully: picking a fight against someone who cannot win it. A fair fight between capable players is PvP working as intended.</span>
+          </li>
+          <li><b>Report exploits, never use them.</b> Found a bug or an exploit? Report it with /report. Using one to get ahead is cheating, and staff treat it that way.</li>
+        </ol>
+      </section>
+
+      <section aria-labelledby="rules-bases">
+        <h3 class="rgroup" id="rules-bases">Bases, by sietch</h3>
+        <ol class="rules" start="11">
+          <li>
+            <b>Habbanya (PvE).</b> An unclaimed build with no fief is fair game.
+            <span class="sub">Inactive bases: if a base owner has not played for 30 days, they get a notice in their portal mailbox and on Discord, then 14 days of grace. After that the base is saved to the owner's Base Vault, opened for a timed public salvage event, then demolished. A returning owner can ask staff about restoring it from the Vault.</span>
+          </li>
+          <li><b>Amtal (PvP).</b> Keep your generators fueled. Getting in through an exploit is banned: glitching through walls, terrain or shields.</li>
+        </ol>
+      </section>
+
+      <section aria-labelledby="rules-trade">
+        <h3 class="rgroup" id="rules-trade">Trading</h3>
+        <ol class="rules" start="13">
+          <li><b>Honour your trades.</b> No scams. Staff do not insure trades, so screenshot the big ones. Trade in #karum on the Discord or through the Karum.</li>
+        </ol>
+      </section>
+
+      <section aria-labelledby="rules-staff">
+        <h3 class="rgroup" id="rules-staff">Staff and appeals</h3>
+        <ol class="rules" start="14">
+          <li><b>Staff make the call.</b> Listen to the Naib and Gatekeepers. To appeal a ban or penalty, open a private staff ticket from the /report panel within 7 days. Once an appeal is reviewed, the decision is final.</li>
+          <li><b>Changes are announced first.</b> New or changed rules are posted in #announcements before they apply.</li>
+        </ol>
+      </section>
+
+      <p class="spirit">The spirit of the code outranks its letter. Hunting for gaps in it to hurt the sietch counts as breaking it.</p>
     </CarvedSlab>
   </div>
 
@@ -150,7 +204,7 @@
 
     {#if config}
       <section class="group config" aria-labelledby="config-h">
-        <h2 class="gname" id="config-h">Land claim, from server config</h2>
+        <h2 class="gname" id="config-h">Rates and tuning, from server config</h2>
         <p class="note">{config.note}</p>
         <ul class="rows" role="list">
           {#each config.rows as row (row.key)}
@@ -181,6 +235,15 @@
   .rules li::marker { color: var(--accent); font-family: var(--font-mono); }
   .rules b { color: var(--accent-text); font-weight: 600; }
   .sub { display: block; margin-top: var(--space-1); color: var(--text-muted); }
+  .rgroup {
+    margin: var(--space-5) 0 var(--space-2); font-size: var(--text-sm);
+    text-transform: uppercase; letter-spacing: .06em; color: var(--accent-text);
+  }
+  .zero { max-width: 68ch; }
+  .zintro { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--text); line-height: 1.55; }
+  .zlist { margin: 0; padding: 0 0 0 1.2em; display: flex; flex-direction: column; gap: var(--space-1); }
+  .zlist li { font-size: var(--text-sm); color: var(--text); line-height: 1.55; }
+  .spirit { margin: var(--space-5) 0 0; font-size: var(--text-sm); color: var(--text-muted); font-style: italic; max-width: 62ch; line-height: 1.55; }
 
   .groups { display: flex; flex-direction: column; gap: var(--space-6); }
   .group {

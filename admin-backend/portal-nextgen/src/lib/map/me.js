@@ -17,8 +17,7 @@ function dimVisible(dim, selectedDim) {
 }
 
 // A marker is visible on the selected instance when its partition matches (the
-// authoritative sietch discriminator, e.g. Hagga 1=Habbanya / 32=Kulon /
-// 33=Amtal); when the instance declares no partition we fall back to the
+// authoritative sietch discriminator, e.g. Hagga 1=Habbanya / 33=Amtal); when the instance declares no partition we fall back to the
 // dimension (DD 0/1).
 function instVisible(entity, selDim, selPart) {
   if (selPart !== null && selPart !== undefined) {
@@ -29,7 +28,7 @@ function instVisible(entity, selDim, selPart) {
 }
 
 // p: { authed, me, show: {self,bases,vehicles}, dim, viewUnits, els,
-//      reckoner, intervalMs, fresh }. els is the engine-owned record map (self
+//      reckoner, intervalMs, fresh, skin }. els is the engine-owned record map (self
 //      pin element survives redraws so mid-glide position is never lost).
 // fresh = the /me feed freshness (chrome's meFresh clock, pushed through
 // engine.setMeFresh): stale drops the pin to is-stale (amber, breathe killed
@@ -74,13 +73,14 @@ export function drawMe(svg, p) {
     let rec = els.self;
     let snap = false;
     let moved = false;
-    if (!rec || rec.online !== online || rec.unit !== unit) {
+    const skin = p.skin || null;
+    if (!rec || rec.online !== online || rec.unit !== unit || rec.skin !== skin) {
       // First sight, presence flip, or map-scale change: rebuild + snap
       // (no glide on first sight, V1 semantics).
       if (rec && rec.g && rec.g.parentNode) rec.g.parentNode.removeChild(rec.g);
-      const g = mePin(layer, 15 * unit, online);
+      const g = skin === 'lantern' ? meLantern(layer, 15 * unit, online) : mePin(layer, 15 * unit, online);
       g.setAttribute('transform', 'translate(' + s.nx + ',' + s.ny + ')');
-      rec = els.self = { g: g, online: online, unit: unit, x: s.nx, y: s.ny };
+      rec = els.self = { g: g, online: online, unit: unit, skin: skin, x: s.nx, y: s.ny };
       snap = true;
     } else {
       // Keep the live node (and its mid-glide transform): move it into the
@@ -152,6 +152,32 @@ function mePin(parent, r, online) {
   dot.setAttribute('r', r * 0.34);
   dot.setAttribute('class', 'map-me-pin__dot');
   g.appendChild(dot);
+  parent.appendChild(g);
+  return g;
+}
+
+// Seven Nights "Lantern" own-dot skin (a Token Stall purchase). The marker art is
+// 32x40 with the dot centre at (16,22); that point sits on the position. The
+// pulse ring and the is-stale / is-estimated classes behave as on the stock pin.
+const LANTERN_SRC = '/img/sietch-nights/lantern-marker.svg?v=20261024a';
+function meLantern(parent, r, online) {
+  const g = document.createElementNS(SVGNS, 'g');
+  g.setAttribute('class', 'map-me-pin map-me-pin--lantern' + (online ? ' is-online' : ' is-offline'));
+  if (online) {
+    const pulse = document.createElementNS(SVGNS, 'circle');
+    pulse.setAttribute('cx', 0); pulse.setAttribute('cy', 0);
+    pulse.setAttribute('r', r * 0.95);
+    pulse.setAttribute('class', 'map-me-pulse');
+    g.appendChild(pulse);
+  }
+  // A touch taller than the stock pin: the art spends a third of its box on glow.
+  const k = (r * 3.2) / 40;
+  const img = document.createElementNS(SVGNS, 'image');
+  img.setAttribute('href', LANTERN_SRC);
+  img.setAttribute('x', -16 * k); img.setAttribute('y', -22 * k);
+  img.setAttribute('width', 32 * k); img.setAttribute('height', 40 * k);
+  img.setAttribute('class', 'map-me-pin__lantern');
+  g.appendChild(img);
   parent.appendChild(g);
   return g;
 }

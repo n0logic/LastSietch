@@ -72,6 +72,7 @@
       field('Owner', base.owner_name || 'No owner on record');
       field('Owner controller', base.owner_controller_id);
       field('Map instance', mapName(base));
+      if (id(base.backup_id)) field('Packed as backup', '#' + base.backup_id + ' (open it from BRT backups to capture)');
     } else {
       field('Placed base', 'Not available. Existing snapshot history is retained.');
     }
@@ -91,6 +92,7 @@
     }
     rows.forEach(function (row) {
       var article = el('article', 'bv-snapshot');
+      var packed = row.kind === 'native_backup';
       var heading = el('h4', '', row.label || 'Base snapshot');
       var saved = el('p', 'bv-note', 'Persisted state captured: ');
       var time = el('time', '', stamp(row.captured_at));
@@ -106,6 +108,11 @@
       var lab = el('span', 'bv-check', tested + (validation.completed_at ? ' / ' + stamp(validation.completed_at) : ''));
       lab.dataset.status = validation.status || 'not_run';
       checks.append(verified, lab);
+      if (packed) {
+        var badge = el('span', 'bv-check', 'Packed backup #' + (id(row.root_backup_id) || '?'));
+        badge.dataset.status = 'packed';
+        checks.append(badge);
+      }
       article.append(checks);
       var counts = row.counts || {}, tables = Object.keys(counts);
       var total = tables.reduce(function (sum, key) { return sum + (Number.isSafeInteger(counts[key]) ? counts[key] : 0); }, 0);
@@ -119,7 +126,9 @@
         details.append(el('p', 'bv-note', entry[0]), el('code', '', entry[1] || 'Not recorded'));
       });
       article.append(details);
-      if (uuid(row.snapshot_id)) {
+      if (packed) {
+        article.append(el('p', 'bv-note', 'Captured as a packed backup at its parked location. Restore for packed backups is planned separately (Hagga: BRT placement; Deep Desert: scheduled replant).'));
+      } else if (uuid(row.snapshot_id)) {
         snapshots[row.snapshot_id] = row;
         var stage = el('button', 'btn btn-sm bv-stage', 'Stage for restore');
         stage.type = 'button';

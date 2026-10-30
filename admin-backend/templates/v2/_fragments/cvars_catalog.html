@@ -81,20 +81,8 @@
                     {% if f.confirmed == false %}<span class="badge badge--muted" title="Unconfirmed in da-tweakables schema">unconfirmed</span>{% endif %}
                   </td>
                   <td class="v2-cvars-catalog__action">
-                    {% if f.per_map %}
-                      <button type="button" class="btn btn-sm" disabled aria-disabled="true"
-                              title="Per-map — deferred to slice 2">Per-map</button>
-                    {% else %}
-                      <button type="button" class="btn btn-sm cvars-edit-trigger"
-                              data-cvar-section="{{ f.section }}"
-                              data-cvar-key="{{ f.key }}"
-                              data-cvar-old="{{ f.effective_value if f.effective_value is not none else '' }}"
-                              data-cvar-layer="{{ f.source_layer or '' }}"
-                              data-cvar-category="{{ cat.id or cat.label }}"
-                              data-cvar-type="{{ f.type or '' }}"
-                              data-cvar-min="{{ f.min if f.min is not none else '' }}"
-                              data-cvar-max="{{ f.max if f.max is not none else '' }}">Edit</button>
-                    {% endif %}
+                    <button type="button" class="btn btn-sm" disabled aria-disabled="true"
+                            title="cvars do not apply from INI files">Edit</button>
                   </td>
                 </tr>
               {% endfor %}

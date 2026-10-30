@@ -48,7 +48,7 @@
   // Severity ordering: an active storm outranks everything, then a live spice
   // blow, then worm danger. Calm cells keep the base spice/storm/coriolis/worms
   // order. Rendered via flex `order` so DOM order (and tab order) stays stable.
-  let stormActive = $derived(storm?.state === 'centered' || storm?.state === 'sweeping');
+  let stormActive = $derived(storm?.state === 'centered');
   let spiceRank = $derived(spice?.active ? 3 : 0);
   let stormRank = $derived(stormActive ? 4 : 0);
   let wormRank = $derived(worms?.danger ? 2 : 0);
@@ -76,12 +76,12 @@
         </p>
         <p class="sub mono">
           {#if spice.blows?.length > 1}{spice.blows.length} blows up{/if}
-          {#if spice.mediumTotal}{spice.blows?.length > 1 ? ' | ' : ''}{spice.mediumTotal} medium fields{#if spice.mediumActive} ({spice.mediumActive} erupting){/if}{/if}
+          {#if spice.mediumTotal}{spice.blows?.length > 1 ? ' | ' : ''}{spice.mediumActive} medium blows active | {spice.mediumTotal} sites{/if}
         </p>
         {#if spiceStale}<span class="chip-stale mono">last read</span>{/if}
       {:else}
         <p class="value calm">No active blow</p>
-        {#if spice.mediumTotal}<p class="sub mono">{spice.mediumTotal} medium fields up</p>{/if}
+        {#if spice.mediumTotal}<p class="sub mono">{spice.mediumActive} medium blows active | {spice.mediumTotal} sites</p>{/if}
         {#if spiceStale}<span class="chip-stale mono">last read</span>{/if}
       {/if}
     </div>
@@ -93,16 +93,13 @@
       {:else if storm.state === 'centered'}
         <p class="value danger">
           <LiveDot tone="danger" />
-          {storm.sector ? `Over ${storm.sector}` : 'Sweeping now'}
+          {storm.sector ? `Over ${storm.sector}` : 'On the board'}
         </p>
         <p class="sub mono">{storm.heading ? `drifting ${storm.heading} (est) | make for rock` : 'make for rock'}</p>
+        {#if storm.endsUtc}<p class="sub mono">clears in <LiveCountdown target={storm.endsUtc} clock /></p>{/if}
         <!-- Storm rides the same /live poll as spice, so spice's receipt stamp
              is the transport-staleness proxy: a dead poller freezes this cell,
              and the chip discloses it (danger red stays; threat != freshness). -->
-        {#if spiceStale}<span class="chip-stale mono">last read</span>{/if}
-      {:else if storm.state === 'sweeping'}
-        <p class="value danger"><LiveDot tone="danger" /> Sweeping now</p>
-        <p class="sub mono">make for rock</p>
         {#if spiceStale}<span class="chip-stale mono">last read</span>{/if}
       {:else if storm.state === 'eta' && storm.etaUtc}
         <p class="value"><LiveCountdown target={storm.etaUtc} /></p>

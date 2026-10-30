@@ -1129,7 +1129,7 @@ def _slug_filename(stem: str, default: str) -> str:
 # server-side re-export via the ownership-gated relay (never a client blueprint),
 # import fires the shared G20 executor, rolling-24h caps + online/offline gates +
 # CSRF are unchanged. Downloads + thumb.png stay on the V1 binary endpoints.
-# Contract: docs/dune-research/v2-portal/V2-MODULE-PORTS-BUILD-CONTRACT-2026-07-15.md
+# Contract: the design notes (not published)
 # ============================================================================
 
 

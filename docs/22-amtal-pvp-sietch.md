@@ -5,8 +5,8 @@ tradeposts, safe only inside two faction settlements. This doc covers what makes
 around it. [16-pvp-maps.md](16-pvp-maps.md) covers adding the partition and the per-partition PvP opt-in; read it
 first.
 
-Partition `33` below is ours. Since v0.8, map instance names and partition ids are configuration, not code: set yours in the map instance
-config.
+Partition `33` below is ours. The Amtal jobs under `ops/amtal/` still carry it as a constant: change it to yours
+before installing them.
 
 ## The ruleset we run
 

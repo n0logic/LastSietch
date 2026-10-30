@@ -57,8 +57,6 @@ switch.
   [23-events-runner.md](23-events-runner.md).
 - **Help rotation and rules.** The help section carries the weekend rotation and an expanded rules page. Player
   copy never promises more than the server enforces; keep yours the same way.
-- **Map instances from config.** Map instance names and partitions come from configuration and a status endpoint,
-  so the front end holds no instance names. A closed map's old links fall back to an open map.
 - **Fixes** from running the 1.5.x schema: the currency enum, exchange expiry, Claims, and the 1.5.3 schema readers.
 
 ## How it is built

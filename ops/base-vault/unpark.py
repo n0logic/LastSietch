@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Deep Desert unpark (VAULT-04 mode A): return a parked native backup to its original
-Deep Desert partition, the proven capture-based replant of ops/dd-base-replant/README.md.
+Deep Desert partition, the proven capture-based Deep Desert replant.
 
 Inputs are two VERIFIED vault archives:
   * the native capture of the packed backup (what is parked now), and

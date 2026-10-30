@@ -306,7 +306,7 @@ These remain explicit production blockers:
   behavior and live trigger/function effects remain unverified.
 - A controlled in-game restoration canary has not been completed for this path.
 
-The historical [Deep Desert replant](../dd-base-replant/README.md) demonstrates
+The historical Deep Desert replant demonstrates
 why a reusable lifecycle fence is necessary: its first insert raced map loading.
 It also documents terrain changes outside the shield wall. Original coordinates
 alone are therefore insufficient placement proof. Do not reuse the older BRT

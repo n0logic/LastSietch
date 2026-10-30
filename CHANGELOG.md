@@ -5,13 +5,12 @@ history; where the history does not mark a version boundary, the range is groupe
 
 ## v0.8: post-1.5 snapshot (unreleased)
 
-Tested against server build `2168446` (Update 1.5.15.3) on k3s 1.35.9. The private commit this snapshot is cut from
-is recorded here at release.
+Tested against server build `2168446` (Update 1.5.15.3) on k3s 1.35.9. Cut from private commit
+`3a146b82` (freeze sha).
 
 v0.8 brings the stack up to the post-1.5 game (1.5.15.x). It documents the in-game Custom Settings screen and
 per-map rates, adds a second sietch run as a full PvP map with safe settlements, a weekend events runner, a base
-backup and restore tool, and a large portal update (new Home, Sand Table maps, titles, self-rescue). Map instance
-names are now configuration, not code.
+backup and restore tool, and a large portal update (new Home, Sand Table maps, titles, self-rescue).
 
 **Docs**
 
@@ -34,8 +33,6 @@ names are now configuration, not code.
   panel, 1.5.x schema fixes.
 - Full PvP map jobs: runtime PvP flag watcher, arrival placer, arrival whisper, title roles, streak bounties.
 - Events runner, Base Vault, per-map rates tooling, config watch v2, welcome pack v1.8.
-- Map instance names and partition ids moved from code to configuration across the portal, API server, relay and
-  Discord bot.
 - Publication gate hardening.
 
 ## v0.7: player portal (2026-09-17)

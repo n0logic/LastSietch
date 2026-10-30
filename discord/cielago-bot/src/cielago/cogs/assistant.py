@@ -403,7 +403,7 @@ class Assistant(commands.Cog):
         # quote-reply, so in a general-chat channel it turns every stray "this is
         # broken" into a bot interruption in the middle of a conversation -- those
         # channels were designed for players talking to each other. Monitor them
-        # silently: the ticket still opens and still surfaces in mod-ops, the
+        # silently: the ticket still opens and still surfaces in the mod channel, the
         # reporter just isn't answered by a bot in a room meant for people.
         if live and message.channel.id not in self._ack_ids():
             live = False
@@ -438,7 +438,7 @@ class Assistant(commands.Cog):
     async def _handle_lead(self, message, category, severity, title, body,
                            live: bool = True) -> None:
         """Record the detection and mark the message. NOTHING is posted to
-        mod-ops and NOTHING is said in the channel.
+        the mod channel and NOTHING is said in the channel.
 
         The reaction is the entire player-facing surface, and it is deliberately
         not an acknowledgement: it means "a bot noticed this", not "this is
@@ -856,7 +856,8 @@ class Assistant(commands.Cog):
                                 ticket=t.id)
         await self._post_ticket(t)
         await interaction.response.send_message(
-            f"L{lead_id} promoted to ticket **#{t.id}** and posted to mod-ops.",
+            f"L{lead_id} promoted to ticket **#{t.id}** and posted to "
+            f"{settings.cielago_assistant_mod_channel_name}.",
             ephemeral=True)
         log.info("assistant.lead_promoted", lead=ld.id, ticket=t.id)
 
@@ -987,7 +988,7 @@ class Assistant(commands.Cog):
 
         The age bound is not what keeps the sweep quiet -- `live=False` is, and it
         held on 07-26 with zero player-facing output. This bounds the mod-side
-        noise: stale tickets in mod-ops that nobody can action any more.
+        noise: stale tickets in the mod channel that nobody can action any more.
         """
         if not self.enabled:
             return

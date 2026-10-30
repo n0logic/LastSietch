@@ -26,6 +26,7 @@ import structlog
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from cielago import map_instances
 from cielago.audit import audit
 from cielago.config import settings
 from cielago.permissions import admin_only
@@ -141,6 +142,21 @@ def _f_new_players(d: dict) -> str:
     return _clip(body)
 
 
+_COUNT_WORDS = ("no", "one", "two", "three", "four", "five", "six")
+
+
+def _sietch_line() -> str:
+    """'**Habbanya** (PvE) and **Amtal** (full PvP) are our two Hagga Basin maps',
+    from the open sietches in the map instance config."""
+    rows = map_instances.sietches()
+    names = [f"**{r['name']}** ({map_instances.mode_phrase(r['mode'])})" for r in rows]
+    joined = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    count = _COUNT_WORDS[len(rows)] if len(rows) < len(_COUNT_WORDS) else str(len(rows))
+    if len(rows) == 1:
+        return f"{joined} is our one Hagga Basin map"
+    return f"{joined} are our {count} Hagga Basin maps"
+
+
 def _f_worlds(d: dict) -> str:
     online = d.get("online_total", 0)
     hagga = d.get("hagga_players", 0)
@@ -150,8 +166,7 @@ def _f_worlds(d: dict) -> str:
     if elsewhere > 0:
         where += f", +{elsewhere} elsewhere"
     lines = [
-        "**Habbanya** (PvE) and **Amtal** (full PvP) are our two Hagga Basin "
-        "maps; the Deep Desert runs in PvP and PvE flavors.",
+        f"{_sietch_line()}; the Deep Desert runs in PvP and PvE flavors.",
         "\u26a0\ufe0f On Amtal only the **Riftwatch** and **Helius Gate** settlements "
         "are safe. Tradeposts are PvP even when their banner flickers to Guild Peace.",
         "A quiet hour on the sands right now." if online == 0

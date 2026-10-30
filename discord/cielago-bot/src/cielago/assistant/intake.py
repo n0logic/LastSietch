@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import re
 
+from cielago import map_instances
+
 SURFACE_PORTAL = "portal"
 SURFACE_GAME = "game"
 SURFACE_BOTH = "both"
@@ -45,18 +47,14 @@ _PORTAL = ("portal", "website", "web site", "site", "webpage", "web page",
 _GAME = ("game", "in-game", "ingame", "server", "client", "world",
          "hagga", "deep desert", "arrakis")
 
-# Canonical server / sietch names, so the queue can be filtered. See
-# the canonical server identity: these are THE names, and players use a
-# dozen spellings of each.
-_SERVERS = {
-    "Habbanya (PvE)": ("habbanya", "habanya", "habbanaya", "pve", "hagga pve"),
-    # Kulon closed 2026-10-28 and its bases moved to Amtal. Checked before Amtal so a
-    # report that still says "Kulon" (a missing or moved base, most likely) keeps the
-    # player's reference instead of reading as an ordinary Amtal ticket.
-    "Kulon (closed, now Amtal)": ("kulon",),
-    "Amtal-Full-PvP": ("amtal", "pvp"),
-    "Deep Desert": ("deep desert", "deepdesert", "dd", "the deep"),
-}
+# Canonical server / sietch names, so the queue can be filtered: each map
+# instance's `label` and the `aliases` players use for it (cielago/map_instances.py),
+# closed instances included so a report that still names one keeps the player's
+# reference. Checked in config order, so an instance listed earlier wins a word two
+# of them share. Instances sharing a label (the two Deep Desert modes) merge.
+_SERVERS: dict[str, tuple[str, ...]] = {}
+for _row in map_instances.instances():
+    _SERVERS[_row["label"]] = _SERVERS.get(_row["label"], ()) + _row["aliases"]
 
 _WS = re.compile(r"\s+")
 

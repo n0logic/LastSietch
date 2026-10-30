@@ -75,9 +75,9 @@
       "name": "ADMIN",
       "private": true,
       "channels": [
-        {"emoji": "🛡️", "name": "mod-ops", "type": "text", "topic": "Staff coordination."},
+        {"emoji": "🛡️", "name": "mod-channel", "type": "text", "topic": "Staff coordination."},
         {"emoji": "📓", "name": "cielago-audit", "type": "text", "topic": "Cielago bot audit log."},
-        {"emoji": "⚙️", "name": "admin-commands", "type": "text", "topic": "Run Cielago admin commands here."}
+        {"emoji": "⚙️", "name": "bot-commands", "type": "text", "topic": "Run Cielago admin commands here."}
       ]
     }
   ]

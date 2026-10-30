@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS qa_cache (
 -- broken" into a bot interruption mid-conversation.
 --
 -- A lead is the same detection, demoted: recorded, reacted to, reviewable, but
--- NOT a ticket and NOT posted to mod-ops individually. A mod promotes the ones
+-- NOT a ticket and NOT posted to the mod channel individually. A mod promotes the ones
 -- that matter, which is the only step that mints a real ticket. Structured
 -- reports come through /report instead.
 CREATE TABLE IF NOT EXISTS leads (

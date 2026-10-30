@@ -79,12 +79,16 @@ class Settings(BaseSettings):
     cielago_assistant_db_path: str = Field(
         alias="CIELAGO_ASSISTANT_DB_PATH", default="data/support.sqlite"
     )
-    # Where ticket / feature-request embeds are posted — the 🛡️｜mod-ops channel
-    # in the ADMIN category. Unset = surfacing disabled.
+    # Where ticket / feature-request embeds are posted: the staff mod channel.
+    # Unset = surfacing disabled.
     cielago_assistant_mod_channel_id: int | None = Field(
         alias="CIELAGO_ASSISTANT_MOD_CHANNEL_ID", default=0
     )
     # CSV of channel ids to watch. Blank falls back to the feedback channel.
+    # How staff-facing replies name that channel.
+    cielago_assistant_mod_channel_name: str = Field(
+        alias="CIELAGO_ASSISTANT_MOD_CHANNEL_NAME", default="the mod channel"
+    )
     cielago_assistant_watch_channel_ids: str = Field(
         alias="CIELAGO_ASSISTANT_WATCH_CHANNEL_IDS", default=""
     )
@@ -98,7 +102,7 @@ class Settings(BaseSettings):
     # WATCHER MODE. False (default) = the passive channel watcher records a LEAD
     # and reacts, but does NOT open a ticket and does NOT reply in channel. A mod
     # promotes the ones worth acting on. True = the old behaviour, where every
-    # detection became a ticket in mod-ops.
+    # detection became a ticket in the mod channel.
     #
     # Why the default flipped (2026-08-04): the watcher is a keyword classifier,
     # so its tickets carry no in-game name, no surface, no server and a guessed
@@ -147,7 +151,7 @@ class Settings(BaseSettings):
         alias="CIELAGO_ANNOUNCEMENTS_CHANNEL_ID", default=0
     )
 
-    # Staff-only infra/monitoring channel (⚙️｜server-logs). Cielago posts the
+    # Staff-only infra/monitoring channel (the staff log channel). Cielago posts the
     # Dune server-build watch (Steam buildid changes) here, and the <game-host>
     # pod-watcher reposts pod restart/disappearance alerts here as Cielago. This
     # replaces the Dune half of the old personal-Last Sietch "server monitor" bot; Conan
@@ -156,7 +160,7 @@ class Settings(BaseSettings):
         alias="CIELAGO_SERVER_LOGS_CHANNEL_ID", default=0
     )
     # Dune Steam build watcher (self-host server appid 4754530 + live client
-    # 1172710). Disabled (loop never starts) when the server-logs channel is unset.
+    # 1172710). Disabled (loop never starts) when the staff log channel is unset.
     cielago_buildwatch_enabled: bool = Field(
         alias="CIELAGO_BUILDWATCH_ENABLED", default=True
     )

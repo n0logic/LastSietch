@@ -53,7 +53,8 @@ declared in `config.py`. Add to `/opt/cielago/.env`:
 ```ini
 CIELAGO_ASSISTANT_ENABLED=true
 CIELAGO_ASSISTANT_DB_PATH=data/support.sqlite
-CIELAGO_ASSISTANT_MOD_CHANNEL_ID=                          # default 🛡️｜mod-ops (baked in)
+CIELAGO_ASSISTANT_MOD_CHANNEL_ID=                          # default: the live mod channel (baked in)
+CIELAGO_ASSISTANT_MOD_CHANNEL_NAME=                        # how replies name it (default: the mod channel)
 CIELAGO_ASSISTANT_WATCH_CHANNEL_IDS=                       # blank = help-and-feedback
 CIELAGO_ASSISTANT_ACK_CHANNEL_IDS=                         # blank = ack in every watched channel
 CIELAGO_ASSISTANT_OWNER_ID=<the owner's user id>             # Escalate-to-owner ping
@@ -62,7 +63,7 @@ CIELAGO_ASSISTANT_EMBED_MODEL_DIR=                         # blank = hashing fal
 CIELAGO_ASSISTANT_DUP_THRESHOLD=                           # blank = backend default
 ```
 
-No env is strictly required: the mod channel defaults to **🛡️｜mod-ops**
+No env is strictly required: the mod channel defaults to the live staff mod channel
 (`<discord-id>`) and watching defaults to **💡｜help-and-feedback**
 (`<discord-id>`), both baked into `config.py`. Set `OWNER_ID` so
 Escalate-to-owner pings you by name (else it pings the admin ids). The Discord
@@ -75,7 +76,7 @@ reporter (reaction + quote-reply). The ack list is intersected with the watch li
 so it can only ever narrow where the bot speaks, never widen where it listens.
 Live as of 2026-07-25: five channels watched, acks only in 💡｜help-and-feedback
 and ❓｜dune-help. 🏜️｜dune-general, 💬｜general and 🪱｜deep-desert are monitored
-silently — tickets still open and still surface in mod-ops, but the bot does not
+silently — tickets still open and still surface in the mod channel, but the bot does not
 reply in rooms designed for players talking to each other.
 
 ## 2. Resource caps (Phase 0 non-interference contract)

@@ -3,6 +3,7 @@ import structlog
 from discord import app_commands
 from discord.ext import commands
 
+from cielago import map_instances
 from cielago.audit import audit
 from cielago.permissions import admin_only
 
@@ -16,9 +17,11 @@ DEFAULT_ROLES = [
     ("Naib", 0xF4A148, True),
     ("At The Gate", 0x5A5752, False),
     ("Founder", 0x3A7BD5, False),
-    # Opt-in sietch roles, self-assigned from the welcome card (cogs/onboarding.py).
-    ("Habbanya", 0x7FA67F, False),
-    ("Amtal", 0xB83A3A, False),
+] + [
+    # Opt-in sietch roles, self-assigned from the welcome card (cogs/onboarding.py):
+    # one per open sietch in the map instance config, red for PvP, green for PvE.
+    (r["name"], 0xB83A3A if r["pvp"] else 0x7FA67F, False)
+    for r in map_instances.sietches()
 ]
 
 

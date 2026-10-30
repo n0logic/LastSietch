@@ -1,7 +1,7 @@
 """The watcher files LEADS, not tickets.
 
 The behaviour under test is mostly about what does NOT happen: no ticket, no
-mod-ops post, no reply in the channel. Those are easy to reintroduce by accident
+mod-channel post, no reply in the channel. Those are easy to reintroduce by accident
 and invisible in a passing suite unless asserted directly.
 """
 
@@ -101,7 +101,7 @@ def test_the_watcher_routes_to_leads_by_default():
 
 def test_the_lead_handler_never_posts_or_replies():
     """🔴 The noise fix. _handle_lead may add a reaction and nothing else: no
-    message.reply (the in-channel interruption), no _post_ticket (a mod-ops
+    message.reply (the in-channel interruption), no _post_ticket (a mod-channel
     entry for an unreviewed keyword hit)."""
     src = Path(__file__).resolve().parents[1] / "cielago" / "cogs" / "assistant.py"
     body = src.read_text()

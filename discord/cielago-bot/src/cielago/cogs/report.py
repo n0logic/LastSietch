@@ -4,7 +4,7 @@ WHY THIS EXISTS ALONGSIDE THE WATCHER. The Assistant cog watches channels and
 files a ticket from whatever a player happened to type in chat. That catches
 things nobody would have reported, but the ticket it produces carries only a
 message: no in-game name, no idea whether the player means the portal or the
-game, no server. Every one of those becomes a round trip in mod-ops before
+game, no server. Every one of those becomes a round trip in the mod channel before
 anyone can act. This path asks for them up front.
 
 The two paths are deliberately NOT merged. Passive detection is a safety net and
@@ -27,7 +27,7 @@ The third button, "Appeal or private staff matter", is not a ticket. It opens a
 private thread in the panel channel holding just the player and staff, for the
 things nobody should have to post in public. Nothing is pinged: admins are added
 to the thread directly (adding a member is silent), anyone with Manage Threads
-can see it anyway, and mod-ops gets a mention-free note with a jump link.
+can see it anyway, and the mod channel gets a mention-free note with a jump link.
 """
 
 from __future__ import annotations
@@ -242,7 +242,7 @@ class Reports(commands.Cog):
         store.record_audit(str(interaction.user), "report-open", str(t.id),
                            kind=modal.kind, via=REPORTED_VIA)
 
-        # Post to mod-ops through the Assistant's own poster so the embed, the
+        # Post to the mod channel through the Assistant's own poster so the embed, the
         # claim/resolve buttons and the mod ping all stay in ONE place. If that
         # is unavailable the ticket is still saved; say so honestly rather than
         # implying a mod has seen it.

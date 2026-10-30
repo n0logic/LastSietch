@@ -11,7 +11,7 @@ All-in-one Discord administration bot for the Last Sietch server. Named after th
    - `/role-create`, `/role-bootstrap`, `/role-list`, `/role-assign` slash commands
    - `/channel-template` (builds the full layout from `data/server_layout.json`) + `/channel-create`
    - `/ping` health check
-   - Audit log: every admin action posts to `#cielago-audit` + appends JSONL on disk
+   - Audit log: every admin action posts to the private audit channel + appends JSONL on disk
 2. **Phase 2 — Member onboarding**
    - Welcome card with an opt-in PvE/PvP sietch role (`Habbanya` / `Amtal`) for notices; no role ladder, nothing gated
 3. **Phase 3 — Game integration**
@@ -50,7 +50,7 @@ discord/bot/
     │   ├── bot.py          — entry point, loads cogs
     │   ├── config.py       — pydantic-settings env loader
     │   ├── permissions.py  — admin-check decorator
-    │   ├── audit.py        — JSONL + #cielago-audit logging helper
+    │   ├── audit.py        — JSONL + audit-channel logging helper
     │   ├── data/
     │   │   └── server_layout.json  — category/channel layout (edit this)
     │   └── cogs/
@@ -165,6 +165,6 @@ uv run python -m cielago.bot
 ## Operating Principles
 
 - **Idempotent commands.** `/role create` on an existing role should report "already exists" not fail.
-- **Audit everything.** Every admin action logs to a private `#cielago-audit` channel + JSONL on disk.
+- **Audit everything.** Every admin action logs to a private audit channel + JSONL on disk.
 - **Soft-fail on permission errors.** User-friendly ephemeral error messages, never expose stack traces.
 - **No DM commands.** All commands run in-server, scoped to a channel.

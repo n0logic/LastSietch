@@ -6,10 +6,10 @@ Nothing here gates anything. The card is help, not a door: a member who never
 presses a button has exactly the access of one who presses all four, and the
 portal character link stays self-serve.
 
-The sietch pick grants ONE of Habbanya / Amtal so staff can reach a sietch's
-players without @everyone. "Just looking" clears them. Kulon closed on
-2026-10-28 (its bases moved to Amtal): its role is never granted, but any pick
-strips a leftover one.
+The sietch pick grants ONE open sietch role (the map instance config,
+cielago/map_instances.py) so staff can reach a sietch's players without
+@everyone. "Just looking" clears them. A closed sietch's role is never granted,
+but any pick strips a leftover one.
 
 Both views use fixed custom_ids and are registered in cog_load, so cards posted
 before a restart keep working.
@@ -22,6 +22,7 @@ import discord
 import structlog
 from discord.ext import commands
 
+from cielago import map_instances
 from cielago.audit import audit
 from cielago.cogs.connect import dune_embed
 from cielago.config import settings
@@ -30,14 +31,36 @@ log = structlog.get_logger()
 
 PORTAL = "https://portal.lastsietch.com"
 
-# choice value -> (role name, one-line mode). Role names must match DEFAULT_ROLES.
-SIETCHES = {
-    "habbanya": ("Habbanya", "PvE"),
-    "amtal": ("Amtal", "full PvP"),
-}
+
+# choice value -> (role name, one-line mode), one per open sietch in the map
+# instance config. Role names must match DEFAULT_ROLES (cogs/admin.py builds them
+# from the same config).
+SIETCHES = {r["key"]: (r["name"], map_instances.mode_phrase(r["mode"]))
+            for r in map_instances.sietches()}
 # Closed sietches: removed from a member on any pick, never granted.
-RETIRED_ROLES = ("Kulon",)
+RETIRED_ROLES = tuple(r["name"] for r in map_instances.sietches(include_closed=True) if r["closed"])
 LOOKING = "looking"
+
+
+def _pick_options() -> list[discord.SelectOption]:
+    """'PvE: Habbanya' / 'PvP: Amtal (full PvP)', one per open sietch, then Just looking."""
+    options = []
+    for r in map_instances.sietches():
+        side = "PvP" if r["pvp"] else "PvE"
+        phrase = map_instances.mode_phrase(r["mode"])
+        extra = "" if r["mode"] in ("PvE", "PvP") else f" ({phrase})"
+        options.append(discord.SelectOption(
+            label=f"{side}: {r['name']}{extra}", value=r["key"],
+            description=f"Notices for the {phrase} sietch"))
+    options.append(discord.SelectOption(label="Just looking", value=LOOKING,
+                                        description="No sietch notices for now"))
+    return options
+
+
+def _pick_line() -> str:
+    """'PvE (Habbanya) or PvP (Amtal)' for the welcome card."""
+    return " or ".join(f"{'PvP' if r['pvp'] else 'PvE'} ({r['name']})"
+                       for r in map_instances.sietches())
 
 # Headline summary of the portal /rules page and the pinned #rules post. Keep it
 # short and unnumbered: the full code (and its numbering) lives on the portal.
@@ -90,7 +113,7 @@ def welcome_embed(guild: discord.Guild) -> discord.Embed:
             "Glad you found us. Four quick ways to get into the desert:\n\n"
             "**How to connect**: finding the server and what your Welcome Package holds.\n"
             "**Rules**: the code we live by.\n"
-            "**Pick your sietch**: PvE (Habbanya) or PvP (Amtal). It only changes which "
+            f"**Pick your sietch**: {_pick_line()}. It only changes which "
             "notices reach you; every channel stays open to everyone.\n"
             "**Link your character**: sign in to the Player Portal and tie your "
             "character to Discord.\n\n"
@@ -119,14 +142,7 @@ class SietchPickView(discord.ui.View):
     @discord.ui.select(
         custom_id="cielago:welcome:sietch-pick",
         placeholder="PvE or PvP?",
-        options=[
-            discord.SelectOption(label="PvE: Habbanya", value="habbanya",
-                                 description="Notices for the PvE sietch"),
-            discord.SelectOption(label="PvP: Amtal (full PvP)", value="amtal",
-                                 description="Notices for the full PvP sietch"),
-            discord.SelectOption(label="Just looking", value=LOOKING,
-                                 description="No sietch notices for now"),
-        ],
+        options=_pick_options(),
     )
     async def pick(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
         cog = interaction.client.get_cog("Onboarding")

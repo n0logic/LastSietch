@@ -1,7 +1,7 @@
 """Dune Awakening Steam build watcher for the Last Sietch Discord.
 
 Polls the public Steam buildid of the two Dune appids the community cares about
-and posts to the staff #server-logs channel when a buildid actually changes:
+and posts to the staff log channel when a buildid actually changes:
 
   4754530  Dune: Awakening Self-Hosted Server (GA)  -- the appid Last Sietch runs;
                                                         a change means a server patch
@@ -17,7 +17,7 @@ State (last-seen buildid per appid) is a small JSON file; a first sighting of an
 appid seeds silently (no alert), matching the old shell watcher.
 
 Config (cielago.config.settings):
-  CIELAGO_SERVER_LOGS_CHANNEL_ID  where alerts post (default ⚙️｜server-logs)
+  CIELAGO_SERVER_LOGS_CHANNEL_ID  where alerts post (default: the live staff log channel)
   CIELAGO_BUILDWATCH_ENABLED      master toggle (default true)
   CIELAGO_BUILDWATCH_INTERVAL     poll cadence in seconds (default 900 = 15 min)
   CIELAGO_BUILDWATCH_STATE_PATH   state file (default data/dune-buildwatch.json)
@@ -78,7 +78,7 @@ def _build_message(appid: str, label: str, kind: str, old: str, new: str) -> str
 
 
 class DuneBuildWatch(commands.Cog):
-    """Polls Steam buildids for the Dune appids and posts changes to #server-logs."""
+    """Polls Steam buildids for the Dune appids and posts changes to the staff log channel."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot

@@ -3,7 +3,7 @@
 `admin-backend/` is the web application that sits on top of the control plane
 in `docs/15`: a player-facing portal and the admin panel behind it, as one
 FastAPI server with a SvelteKit front end. It is the code we run, published as
-a snapshot (v0.7) and re-synced on a cadence rather than mirrored live: after
+a snapshot (v0.7, refreshed in v0.8) and re-synced on a cadence rather than mirrored live: after
 each Funcom update that changes what the action scripts touch, and otherwise
 about monthly. Expect it to trail our production copy by a few weeks.
 
@@ -23,14 +23,43 @@ admin:
 - storage moves between a base container, the bank and vehicles
 - the Karum, a player-to-player trading venue with escrow, and Solari sends
 - coordinate-accurate Deep Desert and Hagga Basin maps from your own database,
-  with live positions, spice fields, storms and the Coriolis cycle
+  with live positions and the Coriolis cycle, under the Sand Table overview
+- self-rescue: a player stuck on a PvE map returns to their nearest base
 - guild directory, recruiting, Landsraad board and house standings
+- a PvP page for a PvP sietch: kills board, titles and streaks
 - base backup vault, a 3D base blueprint viewer and a blueprint market
-- chat, mailbox, events with reminders, reports, and a help section
+- chat, mailbox, events with reminders and the weekend event card, reports, and a
+  help section
 
 About 25 routes on the front end and roughly 120 portal API endpoints. Every
 player action is idempotent, rate limited and audited, and every feature has a
 switch.
+
+## New in v0.8
+
+- **New Home**, dark, behind `LASTSIETCH_PORTAL_SHELL_NEXT_ENABLED` (off by default; the previous Home stays the
+  default). It opens with one line for where the player stands, then wallet, storm, orders and Landsraad.
+- **Sand Table.** One page for every map: a carved overview with a stone per location that lights when the map is
+  online, and a click down into each map. Phones and reduced motion get a flat chart instead. The relief and the
+  location miniatures are game-derived and **not shipped**, like the other baked maps above. The storm layer ships
+  **off**: the storm data source is not part of this repository, and the layer says "no storm data"
+  rather than guessing.
+- **PvP page, board and titles** for a PvP sietch: this week's and this season's kills, deaths, K/D and best
+  streak, who is on a streak now, and four titles. How the titles are computed and mirrored to Discord is in
+  [22-amtal-pvp-sietch.md](22-amtal-pvp-sietch.md#pvp-board-titles-and-streak-bounties).
+- **Self-rescue.** A player stuck on a PvE Hagga map, or in the PvE Deep Desert, sends themselves to their nearest
+  base (or, in the Deep Desert, to an ornithopter pilot). The page shows where they will land before they send it.
+  One rescue per account per hour, recorded in SQLite so it survives a deploy. **Never on a PvP map**: the server
+  refuses it there, not just the button.
+- **Weekend events card.** Home and Events show this weekend's and next weekend's event, what it does, and when it
+  starts and ends in server time and the player's own. Events are created in the admin panel's Events Manager; the
+  in-portal event composer is retired. The runner that applies an event's effect is
+  [23-events-runner.md](23-events-runner.md).
+- **Help rotation and rules.** The help section carries the weekend rotation and an expanded rules page. Player
+  copy never promises more than the server enforces; keep yours the same way.
+- **Map instances from config.** Map instance names and partitions come from configuration and a status endpoint,
+  so the front end holds no instance names. A closed map's old links fall back to an open map.
+- **Fixes** from running the 1.5.x schema: the currency enum, exchange expiry, Claims, and the 1.5.3 schema readers.
 
 ## How it is built
 
@@ -216,6 +245,22 @@ Several features have a second switch on the game host, a flag file such as
 (`docs/12`). Both must be on for a write to land, which is deliberate: the web
 tier can offer a door, but only the host can open it.
 
+Variables added in v0.8, all empty or off by default:
+
+| Variable | What it does |
+|---|---|
+| `LASTSIETCH_PORTAL_SHELL_NEXT_ENABLED` | Serve the new Home |
+| `LASTSIETCH_PORTAL_RUNTIME_DIR` | Where runtime state such as `feature_flags.json` is written |
+| `LASTSIETCH_PORTAL_ALERT_POLL_KEY` | Shared key for the internal endpoint the Discord bot polls for market alerts |
+| `PORTAL_ANNOUNCE_FILE` | Path to the JSON file behind the announcement banner |
+| `PORTAL_SHOW_GEAR_DEMO` | Development only: the 3D gear viewer demo |
+| `LASTSIETCH_EVENT_DISCORD_ENABLED` | Let the bot mirror portal events as Discord scheduled events |
+| `LASTSIETCH_LANDSRAAD_CLAIM_ENABLED`, `LASTSIETCH_LANDSRAAD_CLAIM_ACCOUNTS` | The Landsraad reward claim panel, and who may use it (account ids, or `*`). The game host has its own gate file; both must agree |
+| `LASTSIETCH_TRANSFER_RELINK_ENABLED`, `_APPLY`, `_INTERVAL`, `_MAX` | Re-point portal links from an account that left through a Funcom character transfer to the player's new account. `APPLY=0` logs only; `MAX` caps changes per tick |
+| `LASTSIETCH_TELEMETRY_DB_PATH` | Read the telemetry SQLite directly on a single box |
+| `LASTSIETCH_SIETCH_*` | The Seven Nights community event (nights flag file, award and role keys, contest ids, disabled shop items). Dark unless you run it |
+| `LASTSIETCH_GAMES_OFFLINE_FILE`, `LASTSIETCH_RELAY_URL_GAMES` | Only for a relay that also serves other games. Leave empty |
+
 Set the Coriolis anchor (`LASTSIETCH_CORIOLIS_ANCHOR`) to any past reset on
 your server, or the spice-field cycle countdown will be wrong.
 
@@ -267,6 +312,8 @@ Read `docs/13` first. The portal applies its rules:
   are uncalibrated (see above).
 - Two stat glyphs (level, unspent skill points) have no wiki source and show as
   text.
+- The Sand Table relief and miniatures are not shipped, and its storm layer is
+  off (see "New in v0.8").
 
 ## Before you go live: branding points
 

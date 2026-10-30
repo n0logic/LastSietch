@@ -1,7 +1,54 @@
 # Changelog
 
-Newest first. Only v0.7 and v0.8 are tagged. Earlier entries are reconstructed from this repository's commit
+Newest first. Only v0.7, v0.8 and v0.8.1 are tagged. Earlier entries are reconstructed from this repository's commit
 history; where the history does not mark a version boundary, the range is grouped rather than given invented dates.
+
+## v0.8.1: map instances as config
+
+Tested against server build `2168446` (Update 1.5.15.3) on k3s 1.35.9, as v0.8. Cut from private commit `7bedb4b8`
+(freeze sha).
+
+v0.8.1 makes map instance names configuration, not code, and adds player requests to staff and a map-close tool.
+
+**For players**
+
+- **Requests to staff.** File a request from the portal (a base relocation, a Deep Desert base, a vehicle recovery,
+  an inactive base report and similar) and follow its status there, instead of chasing it in Discord. Off until
+  the operator turns it on.
+- **New navigation** on the new Home: five sections on a rail and each section's pages as tabs, with links and the
+  back button landing on the right tab.
+- **Gear stage.** The Character page shows the equipped set on a 3D stage in the character's own colours (the
+  operator supplies the models).
+- **Weekend banner art.** Each weekend effect can have its own banner art on Home (the operator supplies the art).
+- Sign-in and account-link landings go to the new app.
+
+**For operators**
+
+- **Map instances as config.** One file, `LASTSIETCH_MAP_INSTANCES_FILE` (default
+  `/etc/lastsietch/map-instances.json`), names your instances, partitions, dimensions and pods, and marks each PvP,
+  closed or kept off public surfaces. The API server, the Discord bot and the game-host jobs read it, and the portal
+  gets the open instances from `/portal/features`. A missing or invalid file falls back to built-in defaults.
+  `python3 admin-backend/map_instances.py --check FILE` validates one. Example:
+  `docs/examples/map-instances.example.json`; docs: `docs/20`, `docs/22`.
+- **Map-close tool.** `ops/map-close/` renders and runs the overlap scan, the post-stop record, the move and its
+  revert for closing one instance into another, from the same config (`docs/08`, "Closing a map instance").
+- **Broadcast credential via file or environment only.** The service broadcast tools here already read the command
+  credential from `--token-file` or `DUNE_COMMAND_AUTH_TOKEN`. The private tool they are derived from now does the
+  same, so no baked credential exists upstream of a release.
+- **Requests queue** in the admin panel: list, drawer, notes and status, with the portal side behind
+  `LASTSIETCH_PORTAL_REQUESTS_ENABLED`.
+- **Base Vault v6 fixes:** capture refuses a shared array-bounds key, and a malformed claim origin records no origin
+  instead of blocking capture.
+- **Discord bot:** sietch roles, pickers, ticket labels and report intake follow the map instance config; internal
+  channel names are gone from code, docs and templates, and the mod channel's display name is configuration.
+- The three.js helper modules the classic viewers import now ship, with the three.js MIT licence beside them.
+- `admin-backend/.env.example` gains `LASTSIETCH_MAP_INSTANCES_FILE` and `LASTSIETCH_PORTAL_REQUESTS_ENABLED`.
+
+**Release process**
+
+- The release is staged from the private tree in one reproducible command, with the scripts layer merged onto the
+  public copies, and gated with the full private inventory before it reaches this repository.
+- The Mode B lab run receipt is removed from `ops/base-vault/modeb/`; the outcome stays.
 
 ## v0.8: post-1.5 snapshot
 

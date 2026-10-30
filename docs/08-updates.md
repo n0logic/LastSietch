@@ -176,10 +176,18 @@ as parameters:
 6. **Remove the partition** from the BattleGroup CR (the world partition entry, and the ServerSet's partitions and
    replicas). Leave its PvP opt-in line, which is now inert, for the next planned update.
 
+Since v0.8.1, [`ops/map-close/`](../ops/map-close/) implements the overlap scan, the post-stop record and the move
+for any two instances of one map, from the map instance config ([20](20-player-portal.md#map-instances)):
+`inventory.sh` writes the post-stop record, `map-close.sh overlap` runs the overlap scans, and `map-close.sh` runs the
+move or its revert as `print`, `dry-run` (rolled back) or `apply`. It refuses a missing config file, refuses
+anything beyond `print` and `overlap` while the BattleGroup runs, and `apply` and `revert` need an explicit approval
+flag. The `ssh <game-host>` lines are a placeholder for your game host.
+
 **After**
 
-Update every surface that lists the map: the rules register, pinned posts, the website, the portal (map pickers,
-chat rooms, old links), the Discord bot's status and role pickers. Packed Base Reconstruction Tool backups belong to
+Update every surface that lists the map: the rules register, pinned posts, the website. The portal (map pickers,
+chat rooms, old links) and the Discord bot's status and role pickers follow the map instance config: mark the
+instance `"closed": true` and restart the API server and the bot. Packed Base Reconstruction Tool backups belong to
 the player, not the map, and are not moved.
 
 ## Rollback

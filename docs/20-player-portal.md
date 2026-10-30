@@ -35,6 +35,23 @@ About 25 routes on the front end and roughly 120 portal API endpoints. Every
 player action is idempotent, rate limited and audited, and every feature has a
 switch.
 
+## New in v0.8.1
+
+- **Map instances from config.** Map instance names and partitions come from configuration and a status endpoint,
+  so the front end holds no instance names. A closed map's old links fall back to an open map. See
+  [Map instances](#map-instances) below.
+- **Requests to staff.** Players file a request (a base relocation, a Deep Desert base, a vehicle recovery, an
+  inactive base report, and similar) and follow its status in the portal; staff triage, note and close it in the admin panel's Requests queue. A player only ever sees their
+  own requests, never the staff note. The portal side is off until `LASTSIETCH_PORTAL_REQUESTS_ENABLED` is set.
+- **New navigation** for the new Home (`LASTSIETCH_PORTAL_SHELL_NEXT_ENABLED`): five sections on a rail, each
+  section's pages as tabs, with the active tab in the URL so links and the back button land on the right page.
+- **Gear stage.** The Character page shows the character's equipped set on a 3D stage, dyed in their colours. The
+  garment models, the layer colours and the index maps are game-derived and **not shipped**, and there is no public
+  builder for them; the API server serves them from `data/` to signed-in players only, and answers 404 without them.
+- **Weekend banner art.** The weekend hero shows a per-effect art plate (served under `/img/v3/weekend/`, the
+  effect-to-file map is in `src/lib/shellHome.js`); an open weekend keeps the map plate. Like the other portal
+  images, the plates are not shipped: supply your own.
+
 ## New in v0.8
 
 - **New Home**, dark, behind `LASTSIETCH_PORTAL_SHELL_NEXT_ENABLED` (off by default; the previous Home stays the
@@ -259,8 +276,34 @@ Variables added in v0.8, all empty or off by default:
 | `LASTSIETCH_SIETCH_*` | The Seven Nights community event (nights flag file, award and role keys, contest ids, disabled shop items). Dark unless you run it |
 | `LASTSIETCH_GAMES_OFFLINE_FILE`, `LASTSIETCH_RELAY_URL_GAMES` | Only for a relay that also serves other games. Leave empty |
 
+Variables added in v0.8.1:
+
+| Variable | What it does |
+|---|---|
+| `LASTSIETCH_MAP_INSTANCES_FILE` | The map instance config (below). Default `/etc/lastsietch/map-instances.json`; a missing file means the built-in defaults |
+| `LASTSIETCH_PORTAL_REQUESTS_ENABLED` | The portal side of player requests to staff. Off by default |
+
 Set the Coriolis anchor (`LASTSIETCH_CORIOLIS_ANCHOR`) to any past reset on
 your server, or the spice-field cycle countdown will be wrong.
+
+### Map instances
+
+Which worlds your server runs, their player-facing names, partitions, dimensions, pod suffixes, and whether each is
+PvP, closed or kept off public surfaces, live in one JSON file. The API server, the Discord bot and the game-host
+jobs under `ops/` read it; the portal gets the open instances from `/portal/features`, so no instance name is
+compiled into the front end.
+
+1. Start from [`docs/examples/map-instances.example.json`](examples/map-instances.example.json). The field reference
+   is at the top of `admin-backend/map_instances.py`.
+2. Check it: `python3 admin-backend/map_instances.py --check map-instances.json` prints one line per instance or
+   names the first problem.
+3. Install it at `/etc/lastsietch/map-instances.json` (or set `LASTSIETCH_MAP_INSTANCES_FILE`) on the web host and
+   the game host, then restart the API server and the bot. They read the file once at start.
+
+A missing file means the built-in defaults, which are our instances. A file that fails the check also falls back to
+the defaults and logs why, so a typo cannot take a map off the portal. The game-host jobs pick their entry with
+`LASTSIETCH_MAP_INSTANCE_KEY`. Closing an instance is `"closed": true` plus the move in
+[08-updates.md](08-updates.md#closing-a-map-instance).
 
 ## Safety model
 
@@ -312,6 +355,8 @@ Read `docs/13` first. The portal applies its rules:
   text.
 - The Sand Table relief and miniatures are not shipped, and its storm layer is
   off (see "New in v0.8").
+- The gear stage's models, layer colours and index maps, and the weekend banner art, are not shipped (see "New in
+  v0.8.1").
 
 ## Before you go live: branding points
 

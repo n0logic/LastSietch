@@ -1,0 +1,63 @@
+{
+  "_note": "Map instances for the API server, the Discord bot and the game-host jobs. Copy to /etc/lastsietch/map-instances.json (or point LASTSIETCH_MAP_INSTANCES_FILE at it), check it with: python3 admin-backend/map_instances.py --check FILE, then restart the API server and the bot. Field reference: the top of admin-backend/map_instances.py. These values are ours; partitions, dims and pod suffixes must match your BattleGroup.",
+  "instances": [
+    {
+      "key": "habbanya",
+      "name": "Habbanya",
+      "map": "hagga",
+      "partition": 1,
+      "dim": 0,
+      "pod": "-sg-survival-1-pod-1",
+      "mode": "PvE",
+      "label": "Habbanya (PvE)",
+      "aliases": ["habbanya", "pve", "hagga pve"]
+    },
+    {
+      "key": "kulon",
+      "name": "Kulon",
+      "map": "hagga",
+      "partition": 32,
+      "dim": 1,
+      "pod": "-sg-survival-1-pod-32",
+      "pvp": true,
+      "closed": true,
+      "label": "Kulon (closed, now Amtal)",
+      "aliases": ["kulon"]
+    },
+    {
+      "key": "amtal",
+      "name": "Amtal",
+      "map": "hagga",
+      "partition": 33,
+      "dim": 2,
+      "pod": "-sg-survival-1-pod-33",
+      "pvp": true,
+      "tracked": false,
+      "mode": "Full PvP",
+      "label": "Amtal-Full-PvP",
+      "aliases": ["amtal", "pvp"]
+    },
+    {
+      "key": "dd-pve",
+      "name": "Deep Desert",
+      "map": "deep-desert",
+      "inst": "pve",
+      "partition": null,
+      "dim": 0,
+      "pod": null,
+      "label": "Deep Desert",
+      "aliases": ["deep desert", "dd"]
+    },
+    {
+      "key": "dd-pvp",
+      "name": "Deep Desert",
+      "map": "deep-desert",
+      "inst": "pvp",
+      "partition": null,
+      "dim": 1,
+      "pod": null,
+      "pvp": true,
+      "label": "Deep Desert"
+    }
+  ]
+}

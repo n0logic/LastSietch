@@ -5,7 +5,8 @@ The operational stack behind a real, self-hosted **Dune: Awakening** community s
 > v0.8 brings the stack up to the post-1.5 game (1.5.15.x). It documents the in-game Custom Settings
 > screen and per-map rates, adds a second sietch run as a full PvP map with safe settlements, a weekend
 > events runner, a base backup and restore tool, and a large portal update (new Home, Sand Table maps,
-> titles, self-rescue). Start with [`docs/README.md`](docs/README.md).
+> titles, self-rescue). v0.8.1 makes map instance names configuration, not code, and adds player requests
+> to staff and a map-close tool. Start with [`docs/README.md`](docs/README.md).
 
 ## Start here
 

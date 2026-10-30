@@ -99,7 +99,7 @@ What we learned on the first live run, a 3,356-piece base:
 - **A base from another map needs relocating, all of it.** A Deep Desert base restored for placement on Hagga keeps
   its Deep Desert coordinates, about 1,000 km away. Moving only the totem's origin is not enough: the tool then draws
   no outline and reports "Not enough Support". `relocate.sql` moves the origin, every actor and every building piece
-  by one offset, refuses if any linked actor is not parked, and indexes each array from its own lower bound.
+  by one translation, refuses if any linked actor is not parked, and indexes each array from its own lower bound.
 - **The tool listed the restored backup only after the next server restart.** We have not isolated why. Plan the
   restore before a scheduled restart.
 - **The tool recreates only the owner.** Member ranks must be re-added in game.

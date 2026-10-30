@@ -29,7 +29,7 @@ log() {
 }
 
 post_discord() {
-  # best-effort alert to #bot-logs; silently skip if no creds present
+  # best-effort alert to the staff log channel; silently skip if no creds present
   [ -f "$ENV_FILE" ] || return 0
   # shellcheck disable=SC1090
   source "$ENV_FILE"

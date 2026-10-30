@@ -154,6 +154,47 @@ FROM (SELECT template_id, quality_level, count(*) AS n
 """
 
 
+# The character's body type, so the gear viewer can pick the matching garment
+# mesh. It is the "BodyType" entry of the pawn's character-creator descriptor
+# (FCharacterLayoutComponent.m_MutableDescriptorServer, a JSON string with a
+# Parameters[] list of {Name, Type, Value}); Value is "1" or "2" on live
+# (read-only survey 2026-10-30: 188 x "1", 150 x "2"). Same character pick as
+# GEAR_SQL so the mesh and the loadout describe the same character.
+BODY_TYPE_SQL = """
+SET search_path TO dune, public;
+SELECT COALESCE((
+  SELECT p->>'Value'
+    FROM (
+      SELECT eps.player_pawn_id
+        FROM dune.encrypted_player_state eps
+       WHERE eps.account_id = __ACCOUNT_ID__::bigint
+         AND eps.character_state IS DISTINCT FROM 'Deleted'
+       ORDER BY eps.last_avatar_activity DESC NULLS LAST, eps.player_controller_id DESC
+       LIMIT 1
+    ) me
+    JOIN dune.actor_fgl_entities afe
+      ON afe.actor_id = me.player_pawn_id AND afe.slot_name = 'DuneCharacter'
+    JOIN dune.fgl_entities fe
+      ON fe.entity_id = afe.entity_id AND fe.components ? 'FCharacterLayoutComponent'
+    CROSS JOIN LATERAL jsonb_array_elements(
+      (fe.components->'FCharacterLayoutComponent'->1->>'m_MutableDescriptorServer')::jsonb
+        ->'Parameters') p
+   WHERE p->>'Name' = 'BodyType'
+   LIMIT 1
+), '');
+"""
+
+
+def _body_type(account_id: str):
+    """1 or 2, or None when unreadable. Best-effort: the gear card must never
+    fail because the descriptor is missing or malformed."""
+    try:
+        raw = _run(BODY_TYPE_SQL.replace("__ACCOUNT_ID__", str(int(account_id))))
+    except (SystemExit, ValueError):
+        return None
+    return int(raw) if raw in ("1", "2") else None
+
+
 def _run(sql: str) -> str:
     try:
         out = subprocess.run(
@@ -223,6 +264,7 @@ def main():
         "hotbar_count": len(hotbar),
         "augmented_count": sum(1 for i in items if i.get("augments")),
         "owned_augments": owned,
+        "body_type": _body_type(account_id),
     }))
 
 

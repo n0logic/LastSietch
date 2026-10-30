@@ -87,7 +87,7 @@ ACCOUNT = 4242
 # Written as an escape so this file can hold the pin without tripping it.
 EM_DASH = "\u2014"
 
-FEATURE_KEYS = ["amtal", "amtal_pvp", "augment", "chat", "game_login", "market_sell_backpack", "profile_login", "refinery", "reports", "sietch", "storage_move"]
+FEATURE_KEYS = ["amtal", "amtal_pvp", "augment", "chat", "game_login", "market_sell_backpack", "profile_login", "refinery", "reports", "shell_next", "sietch", "storage_move", "weekend_remind"]
 FEATURE_PAIRS = [
     ("chat", "LASTSIETCH_CHAT_ENABLED"),
     ("refinery", "LASTSIETCH_REFINERY_ENABLED"),
@@ -97,6 +97,8 @@ FEATURE_PAIRS = [
     ("reports", "LASTSIETCH_REPORTS_ENABLED"),
     ("amtal_pvp", "LASTSIETCH_AMTAL_PVP_ENABLED"),
     ("sietch", "LASTSIETCH_SIETCH_NIGHTS_ENABLED"),
+    ("shell_next", "LASTSIETCH_PORTAL_SHELL_NEXT_ENABLED"),
+    ("weekend_remind", "LASTSIETCH_WEEKEND_REMIND_ENABLED"),
 ]
 
 
@@ -367,6 +369,16 @@ def _deliveries_route(loaded=None, raises=False, gate=None, early=None):
     return ns, router
 
 
+def _map_instances():
+    """The real loader (stdlib only); with no config file it serves the defaults."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "map_instances_for_features", os.path.join(REPO, "admin-backend", "map_instances.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _features_route(values=None, calls=None):
     router = _Router()
     seen = calls if calls is not None else []
@@ -375,9 +387,10 @@ def _features_route(values=None, calls=None):
         seen.append((name, default))
         return bool((values or {}).get(name, False))
 
-    ns = _lift(FEATURES, ("FEATURE_GATES", "portal_features"), {
+    ns = _lift(FEATURES, ("FEATURE_GATES", "PUBLIC_INSTANCE_FIELDS", "public_instances", "portal_features"), {
         "router": router,
         "feature_flags": types.SimpleNamespace(enabled=_enabled),
+        "map_instances": _map_instances(),
     })
     return ns, router, seen
 
@@ -1045,7 +1058,7 @@ def test_the_features_read_answers_one_boolean_per_gate():
         values={"LASTSIETCH_CHAT_ENABLED": True, "LASTSIETCH_REFINERY_ENABLED": True}, calls=calls)
     out = asyncio.run(ns["portal_features"]())
     assert out.status_code == 200
-    assert set(out.payload) == {"ok", "features"}, sorted(out.payload)
+    assert set(out.payload) == {"ok", "features", "instances"}, sorted(out.payload)
     assert out.payload["ok"] is True
     features = out.payload["features"]
     assert sorted(features) == FEATURE_KEYS, sorted(features)
@@ -1072,9 +1085,13 @@ def test_nothing_but_the_five_booleans_is_exposed():
     ns, _router, _seen = _features_route(values={"LASTSIETCH_CHAT_ENABLED": True})
     out = asyncio.run(ns["portal_features"]())
     keys = set()
-    _walk_keys(out.payload, keys)
+    _walk_keys(out.payload["features"], keys)
     for leak in ("env", "override", "default", "effective", "name", "env_set"):
         assert leak not in keys, "the features read exposes the switchboard: %s" % leak
+    # The map instance list beside it carries its public fields and nothing else
+    # (no pod, ticket label or aliases).
+    for row in out.payload["instances"]:
+        assert set(row) == {"key", "name", "map", "inst", "partition", "dim", "mode", "pvp", "tracked"}, row
 
 
 def test_the_features_response_is_publicly_cacheable():

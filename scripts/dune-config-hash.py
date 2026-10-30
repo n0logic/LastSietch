@@ -18,7 +18,7 @@ a real drift. Two design faults, both fixed here:
 Plus: the generated ServerCustomSettings.ini must not carry a preset
 DifficultyLevel (a preset overrides every key in the user file).
 
-Alerts post to the bot-logs channel only when the state changes (new drift, a
+Alerts post to the staff log channel only when the state changes (new drift, a
 different drift, resolved, new build). Secret keys (admin password) are checked
 for presence only; their values are never read into output.
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Public copy: some cases need the private Karum deploy lane (ops/deploy-karum*.sh, ops/karum-audit/), which this repository does not ship; they fail without it.
 """Regression tests for the Karum operator page and the audit transport.
 
 Prod-safe: source-scan plus a real Jinja render, no network, no DB. `routers/v2_karum.py`
